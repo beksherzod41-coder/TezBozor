@@ -48,6 +48,10 @@ class Database:
             ("referral_code", "TEXT"),
             ("referred_by", "INTEGER"),
             ("referral_count", "INTEGER DEFAULT 0"),
+            ("shop_landmark", "TEXT"),
+            ("working_days", "TEXT"),
+            ("working_hours", "TEXT"),
+            ("telegram_username", "TEXT"),
         ]:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -350,7 +354,7 @@ class Database:
             FROM products p
             LEFT JOIN categories c ON p.category_id=c.id
             LEFT JOIN users u ON p.seller_id=u.id
-            WHERE p.in_stock=1 AND u.is_approved=1
+            WHERE p.in_stock=1 AND u.is_verified=1 AND u.is_blocked=0
         """
         params = []
         if query:

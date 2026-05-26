@@ -1,5 +1,7 @@
 import logging
 import os
+import math
+import html
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -445,6 +447,8 @@ async def buyer_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # BUG FIX #3: buyer_search ni callback ham, message handler ham chaqirishi mumkin.
     # context.user_data['searching'] = True qo'yib, text_handler'ga ishlov beramiz.
     context.user_data['searching'] = True
+    context.user_data['awaiting_search_location'] = False
+    context.user_data.pop('search_query', None)
 
     if update.callback_query:
         await update.callback_query.answer()
@@ -1530,6 +1534,96 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# SEARCH (mahsulot nomi -> lokatsiya -> natijalar)
+# ============================================================
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    """Ikki nuqta orasidagi masofa (km)."""
+    R = 6371.0
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = (math.sin(dphi / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlambda / 2) ** 2)
+    return 2 * R * math.asin(math.sqrt(a))
+
+
+async def perform_search(update, context, query, buyer_lat=None, buyer_lon=None):
+    query = (query or "").strip()
+    if not query:
+        context.user_data['searching'] = True
+        await update.message.reply_text("🔍 Qidirish uchun mahsulot nomini kiriting:")
+        return
+
+    products = db.search_products(query=query)
+
+    # Lokatsiya berilgan bo'lsa — masofani hisoblab, yaqinligi bo'yicha saralaymiz
+    if buyer_lat is not None and buyer_lon is not None:
+        for p in products:
+            if p.get('shop_lat') is not None and p.get('shop_lon') is not None:
+                p['_distance'] = _haversine_km(buyer_lat, buyer_lon, p['shop_lat'], p['shop_lon'])
+            else:
+                p['_distance'] = None
+        products.sort(key=lambda p: (p.get('_distance') is None, p.get('_distance') or 0.0))
+
+    if not products:
+        await update.message.reply_text(
+            "❌ Mahsulot topilmadi.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="buyer_panel")]])
+        )
+        return
+
+    for product in products[:5]:
+        rating = product.get('avg_rating') or 0
+        map_link = ""
+        if product.get('shop_lat') and product.get('shop_lon'):
+            map_link = f"\n🗺️ [Xaritada ko'rish](https://www.google.com/maps/search/?api=1&query={product['shop_lat']},{product['shop_lon']})"
+
+        distance_line = ""
+        dist = product.get('_distance')
+        if dist is not None:
+            distance_line = f"\n📏 Sizdan ~{dist:.1f} km"
+
+        contact_keyboard = []
+        if product.get('telegram_username'):
+            contact_keyboard.append([InlineKeyboardButton(
+                "📱 Telegram",
+                url=f"https://t.me/{product['telegram_username'].replace('@', '')}"
+            )])
+        if product.get('phone_number'):
+            contact_keyboard.append([InlineKeyboardButton(
+                "📞 Telefon",
+                url=f"tel:{product['phone_number']}"
+            )])
+        contact_keyboard.append([InlineKeyboardButton("📦 Batafsil", callback_data=f"prod_{product['id']}")])
+
+        await update.message.reply_text(
+            f"{product.get('category_emoji', '📦')} *{product['name']}*\n\n"
+            f"💰 *{product['price']:,.0f} so'm*\n"
+            f"🏪 {product.get('shop_name', 'Nomaʼlum')}\n"
+            f"📍 {product.get('shop_address', 'Nomaʼlum')}{map_link}{distance_line}\n"
+            f"⭐ Reyting: {rating:.1f}/5.0",
+            reply_markup=InlineKeyboardMarkup(contact_keyboard),
+            parse_mode='Markdown'
+        )
+
+    await update.message.reply_text(
+        f"🔍 '{query}' bo'yicha {min(len(products), 5)} ta natija topildi.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="buyer_panel")]])
+    )
+
+
+async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Qidiruv lokatsiya bosqichida bo'lsagina ishlov beramiz
+    if not context.user_data.get('awaiting_search_location'):
+        return
+    context.user_data['awaiting_search_location'] = False
+    loc = update.message.location
+    search_query = context.user_data.pop('search_query', '')
+    await perform_search(update, context, search_query, loc.latitude, loc.longitude)
+
+
+# ============================================================
 # TEXT HANDLER
 # ============================================================
 
@@ -1578,12 +1672,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = db.get_all_users()
         sent, failed = 0, 0
 
+        broadcast_text = f"📢 <b>ADMIN XABARI</b>\n\n{html.escape(text)}"
         for u in users:
             try:
-                await update.message.bot.send_message(
+                await context.bot.send_message(
                     chat_id=u['telegram_id'],
-                    text=f"📢 *ADMIN XABARI*\n\n{text}",
-                    parse_mode='Markdown'
+                    text=broadcast_text,
+                    parse_mode='HTML'
                 )
                 sent += 1
             except Exception as e:
@@ -1596,50 +1691,27 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response)
         return
 
-    # Qidiruv
+    # Qidiruv — lokatsiya bosqichi: "Lokatsiyasiz qidirish" yoki istalgan matn kelsa
+    if context.user_data.get('awaiting_search_location'):
+        context.user_data['awaiting_search_location'] = False
+        search_query = context.user_data.pop('search_query', '')
+        await update.message.reply_text("🔍 Qidirilmoqda...", reply_markup=ReplyKeyboardRemove())
+        await perform_search(update, context, search_query, None, None)
+        return
+
+    # Qidiruv — mahsulot nomi kiritildi, endi lokatsiya so'raymiz
     if context.user_data.get('searching'):
         context.user_data['searching'] = False
-        products = db.search_products(query=text)
-
-        if not products:
-            await update.message.reply_text(
-                "❌ Mahsulot topilmadi.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="buyer_panel")]])
-            )
-            return
-
-        for product in products[:5]:
-            rating = product.get('avg_rating') or 0
-            map_link = ""
-            if product.get('shop_lat') and product.get('shop_lon'):
-                map_link = f"\n🗺️ [Xaritada ko'rish](https://www.google.com/maps/search/?api=1&query={product['shop_lat']},{product['shop_lon']})"
-
-            contact_keyboard = []
-            if product.get('telegram_username'):
-                contact_keyboard.append([InlineKeyboardButton(
-                    "📱 Telegram",
-                    url=f"https://t.me/{product['telegram_username'].replace('@', '')}"
-                )])
-            if product.get('phone_number'):
-                contact_keyboard.append([InlineKeyboardButton(
-                    "📞 Telefon",
-                    url=f"tel:{product['phone_number']}"
-                )])
-            contact_keyboard.append([InlineKeyboardButton("📦 Batafsil", callback_data=f"prod_{product['id']}")])
-
-            await update.message.reply_text(
-                f"{product.get('category_emoji', '📦')} *{product['name']}*\n\n"
-                f"💰 *{product['price']:,.0f} so'm*\n"
-                f"🏪 {product.get('shop_name', 'Nomaʼlum')}\n"
-                f"📍 {product.get('shop_address', 'Nomaʼlum')}{map_link}\n"
-                f"⭐ Reyting: {rating:.1f}/5.0",
-                reply_markup=InlineKeyboardMarkup(contact_keyboard),
-                parse_mode='Markdown'
-            )
-
+        context.user_data['search_query'] = text
+        context.user_data['awaiting_search_location'] = True
+        kb = [
+            [KeyboardButton("📍 Lokatsiyani yuborish", request_location=True)],
+            [KeyboardButton("⏭️ Lokatsiyasiz qidirish")],
+        ]
         await update.message.reply_text(
-            f"🔍 '{text}' bo'yicha {min(len(products), 5)} ta natija topildi.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Orqaga", callback_data="buyer_panel")]])
+            "📍 Eng yaqin do'konlarni ko'rsatishimiz uchun lokatsiyangizni yuboring,\n"
+            "yoki \"⏭️ Lokatsiyasiz qidirish\" tugmasini bosing:",
+            reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True, one_time_keyboard=True)
         )
         return
 
@@ -1775,6 +1847,7 @@ def main():
 
     # Umumiy handler'lar ENG OXIRIDA
     app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.LOCATION, location_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     print("🚀 TezBozor Bot ishlamoqda...")
