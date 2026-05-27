@@ -1,0 +1,38 @@
+# Maxfiy ma'lumotlar — GitHub'ga chiqmasin
+.env
+*.env
+
+# Ma'lumotlar bazasi — serverda alohida saqlanadi
+marketplace.db
+marketplace_backup_*.db
+
+# Bot holat fayllari
+*.pickle
+tezbozor_state.pickle
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual muhit
+venv/
+env/
+.venv/
+
+# Log fayllar
+*.log
+bot.log
+
+# OS fayllar
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
