@@ -1,38 +1,28 @@
-# Maxfiy ma'lumotlar — GitHub'ga chiqmasin
+# Maxfiy ma'lumotlar — HECH QACHON commit qilinmasin
 .env
-*.env
 
-# Ma'lumotlar bazasi — serverda alohida saqlanadi
-marketplace.db
-marketplace_backup_*.db
-
-# Bot holat fayllari
-*.pickle
+# Ma'lumotlar bazasi va sessiya fayllari
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*_backup_*.db
 tezbozor_state.pickle
+*.pickle
 
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-.Python
-
-# Virtual muhit
+*.egg-info/
+.venv/
 venv/
 env/
-.venv/
 
-# Log fayllar
-*.log
-bot.log
-
-# OS fayllar
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# IDE
+# IDE / OS
 .vscode/
 .idea/
-*.swp
-*.swo
+.DS_Store
+
+# Tasodifiy ichki klon (PowerShell'da '~' literal papka sifatida yaratilgan)
+~/

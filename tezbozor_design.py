@@ -91,6 +91,50 @@ def safe(val, default="Kiritilmagan"):
     return str(val)
 
 
+# ============================================================
+# MANZIL (ADDRESS) YORDAMCHILARI
+# ============================================================
+# Muammo: lokatsiya yuborilganda manzil "41.31, 69.24" ko'rinishida saqlanardi.
+# Hech kim bu raqamlardan joyni tushunmaydi. Quyidagi yordamchilar shunday
+# "xom koordinata" matnini aniqlaydi va uni foydalanuvchiga ko'rsatmaydi —
+# o'rniga mo'ljal (orientir) yoki xaritadan ko'rish havolasi ishlatiladi.
+
+# "41.311081, 69.240562"  yoki  "41.31,69.24"  ko'rinishini tutadi
+_COORD_RE = re.compile(r'^\s*[-+]?\d{1,3}(?:\.\d+)?\s*,\s*[-+]?\d{1,3}(?:\.\d+)?\s*$')
+
+
+def looks_like_coords(value) -> bool:
+    """Matn faqat 'lat, lon' xom koordinatasimi?"""
+    return bool(_COORD_RE.match(str(value or "")))
+
+
+def human_address(shop_address):
+    """O'qiladigan manzil matnini qaytaradi.
+    Agar qiymat bo'sh bo'lsa yoki faqat xom koordinata bo'lsa — None."""
+    s = str(shop_address or "").strip()
+    if not s or looks_like_coords(s):
+        return None
+    return s
+
+
+def best_location_text(shop_address, shop_landmark=None):
+    """Eng yaxshi o'qiladigan joy matni: haqiqiy manzil > mo'ljal > None.
+    Hech qachon xom koordinatani qaytarmaydi."""
+    addr = human_address(shop_address)
+    if addr:
+        return addr
+    lm = str(shop_landmark or "").strip()
+    return lm or None
+
+
+def maps_link(lat, lon, label="Xaritada ko'rish"):
+    """Google Maps qidiruv havolasi (HTML <a>). Koordinata bo'lmasa — bo'sh."""
+    if lat is None or lon is None:
+        return ""
+    return (f"\n🗺️ <a href=\"https://www.google.com/maps/search/?api=1&"
+            f"query={lat},{lon}\">{label}</a>")
+
+
 def parse_working_hours(text):
     """'09:00-21:00' yoki '9-21' ko'rinishidagi vaqt oralig'ini (start_min, end_min) tupliga aylantiradi.
     Yaroqsiz bo'lsa None qaytaradi."""
