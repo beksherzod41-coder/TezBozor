@@ -1,0 +1,3 @@
+# Ishlab chiqish / test bog'liqliklari (productionда shart emas)
+-r requirements.txt
+pytest>=8.0
