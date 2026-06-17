@@ -1,0 +1,11 @@
+[Unit]
+Description=TezBozor Mini App
+After=network.target postgresql.service
+
+[Service]
+WorkingDirectory=/root
+ExecStart=/usr/bin/python3 -m uvicorn webapp_server:app --host 127.0.0.1 --port 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
