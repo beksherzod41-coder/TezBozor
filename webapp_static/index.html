@@ -183,17 +183,76 @@
   .cosuccess .ico{font-size:72px;} .cosuccess h3{margin:6px 0 0; font-size:20px;}
   .cosuccess p{color:var(--hint); font-size:14.5px; line-height:1.55; margin:4px 0 0;}
   .cosuccess .oid{font-weight:700; color:var(--accent);}
+
+  /* ---------- BOTTOM NAV + VIEWS ---------- */
+  body{padding-bottom:72px;}
+  .bottomnav{position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex;
+             background:rgba(255,255,255,.94); backdrop-filter:saturate(180%) blur(14px);
+             -webkit-backdrop-filter:saturate(180%) blur(14px); box-shadow:0 -1px 0 var(--line);
+             padding-bottom:env(safe-area-inset-bottom);}
+  .navitem{flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
+           padding:9px 0 8px; cursor:pointer; color:var(--hint); font-weight:600; user-select:none;}
+  .navitem span{font-size:21px; line-height:1; filter:grayscale(1); opacity:.6;}
+  .navitem small{font-size:10.5px;}
+  .navitem.active{color:var(--accent);} .navitem.active span{filter:none; opacity:1;}
+  .navitem:active{transform:scale(.94);}
+  .vhead{font-size:21px; font-weight:800; padding:16px 16px 6px; letter-spacing:-.3px;}
+  /* buyurtma kartochkalari */
+  .olist{padding:6px 12px 12px; display:flex; flex-direction:column; gap:10px;}
+  .ocard{background:var(--card); border-radius:16px; padding:13px 14px; box-shadow:var(--shadow);}
+  .orow1{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .ostatus{font-size:12.5px; font-weight:700; padding:4px 10px; border-radius:9px;}
+  .st-pending{background:#fff4e0; color:#d98300;}
+  .st-ok{background:#e8f8f0; color:var(--ok);}
+  .st-done{background:#e7f0ff; color:#2563eb;}
+  .st-cancel{background:#fdebef; color:var(--sale);}
+  .odate{font-size:11.5px; color:var(--hint);}
+  .oname{font-size:15px; font-weight:600; line-height:1.3;}
+  .ometa{font-size:13.5px; color:#4a4a50; margin-top:4px;}
+  .ometa b{color:var(--price); font-weight:800;}
+  .oshop{font-size:12.5px; color:var(--hint); margin-top:5px;}
+  .odebt{display:inline-block; margin-top:8px; font-size:12.5px; font-weight:700;
+         color:var(--sale); background:#fdebef; padding:3px 9px; border-radius:8px;}
+  .ocontact{display:flex; align-items:center; justify-content:center; gap:6px; margin-top:11px;
+            padding:10px; border:none; border-radius:11px; font-size:13.5px; font-weight:700;
+            background:var(--accent-soft); color:var(--accent); cursor:pointer; width:100%;
+            text-decoration:none; box-sizing:border-box;}
+  .ocontact:active{transform:scale(.98);}
+  /* profil */
+  .pcard{background:var(--card); border-radius:18px; padding:22px 16px; margin:8px 12px 0;
+         box-shadow:var(--shadow); text-align:center;}
+  .pava{width:78px; height:78px; border-radius:50%; margin:0 auto 12px; display:flex;
+        align-items:center; justify-content:center; font-size:34px; font-weight:800; color:#fff;
+        background:linear-gradient(135deg,var(--accent),var(--accent-2));}
+  .pname{font-size:19px; font-weight:800;}
+  .prole{display:inline-block; margin-top:6px; font-size:12.5px; font-weight:700; color:var(--accent);
+         background:var(--accent-soft); padding:4px 12px; border-radius:10px;}
+  .pinfo{background:var(--card); border-radius:16px; margin:12px 12px 0; padding:4px 14px; box-shadow:var(--shadow);}
+  .prow{display:flex; align-items:center; justify-content:space-between; padding:13px 0;
+        font-size:14px; border-bottom:1px solid var(--line);}
+  .prow:last-child{border-bottom:none;}
+  .prow span{color:var(--hint);} .prow b{font-weight:600; text-align:right;}
 </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="searchwrap">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      <input class="search" id="search" placeholder="Mahsulot qidirish...">
+  <div id="viewCatalog">
+    <div class="topbar">
+      <div class="searchwrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input class="search" id="search" placeholder="Mahsulot qidirish...">
+      </div>
     </div>
+    <div class="chips" id="chips"></div>
+    <div id="content"></div>
   </div>
-  <div class="chips" id="chips"></div>
-  <div id="content"></div>
+  <div id="viewOrders" style="display:none"></div>
+  <div id="viewProfile" style="display:none"></div>
+
+  <nav class="bottomnav" id="bottomnav">
+    <div class="navitem active" data-tab="catalog"><span>🛍️</span><small>Katalog</small></div>
+    <div class="navitem" data-tab="orders"><span>📦</span><small>Buyurtmalar</small></div>
+    <div class="navitem" data-tab="profile"><span>👤</span><small>Profil</small></div>
+  </nav>
 
   <div class="detail" id="detail">
     <div class="dtop">
@@ -472,6 +531,90 @@ tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
   if(co.classList.contains('open')) closeCheckout(); else closeDetail();
 });
 document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(loadProducts,350); };
+
+// ---------- TAB NAVIGATSIYA ----------
+function switchTab(tab){
+  document.querySelectorAll('.navitem').forEach(n=>n.classList.toggle('active', n.dataset.tab===tab));
+  document.getElementById('viewCatalog').style.display = tab==='catalog'?'':'none';
+  document.getElementById('viewOrders').style.display = tab==='orders'?'':'none';
+  document.getElementById('viewProfile').style.display = tab==='profile'?'':'none';
+  window.scrollTo(0,0);
+  if(tab==='orders') loadMyOrders();
+  if(tab==='profile') loadProfile();
+}
+document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
+  try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  switchTab(n.dataset.tab);
+});
+
+const ORDER_STATUS = {
+  pending:  ["⏳ Yangi","st-pending"],
+  confirmed:["✅ Tasdiqlangan","st-ok"],
+  delivered:["🚚 Yetkazildi","st-done"],
+  cancelled:["❌ Bekor qilindi","st-cancel"],
+};
+function fmtDate(s){
+  if(!s) return '';
+  const d = new Date(String(s).replace(' ','T')+'Z');
+  if(isNaN(d.getTime())) return String(s).slice(0,16);
+  return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function orderCardHtml(o){
+  const st = ORDER_STATUS[o.status] || [esc(o.status||'?'),"st-pending"];
+  let contact = '';
+  if(o.seller_username)
+    contact = `<button class="ocontact" data-un="${esc(String(o.seller_username).replace('@',''))}">💬 Sotuvchi bilan bog'lanish</button>`;
+  else if(o.seller_phone)
+    contact = `<a class="ocontact" href="tel:${esc(o.seller_phone)}">📞 ${esc(o.seller_phone)}</a>`;
+  return `<div class="ocard">
+    <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
+    <div class="oname">${esc(o.product_name||'')}</div>
+    <div class="ometa">${o.quantity} dona · <b>${money(o.total_price)}</b></div>
+    <div class="oshop">🏪 ${esc(o.shop_name||'')}</div>
+    ${(o.amount_due && o.amount_due>0)?`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`:''}
+    ${contact}
+  </div>`;
+}
+
+async function loadMyOrders(){
+  const v = document.getElementById('viewOrders');
+  v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const orders = await api('/api/my/orders');
+    if(!orders.length){
+      v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="empty"><span class="big">📦</span>Hali buyurtmangiz yo'q<br><small>Katalogdan mahsulot tanlang</small></div>`;
+      return;
+    }
+    v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="olist">${orders.map(orderCardHtml).join('')}</div>`;
+    v.querySelectorAll('button.ocontact[data-un]').forEach(b=>b.onclick=()=>tg.openTelegramLink(`https://t.me/${b.dataset.un}`));
+  }catch(e){
+    v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
+  }
+}
+
+async function loadProfile(){
+  const v = document.getElementById('viewProfile');
+  v.innerHTML = `<div class="vhead">Profil</div><div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const me = await api('/api/me');
+    const initial = (me.name||'?').trim().charAt(0).toUpperCase() || '👤';
+    const roleLabel = me.role==='seller'?'Sotuvchi':(me.role==='admin'?'Administrator':'Xaridor');
+    v.innerHTML = `<div class="vhead">Profil</div>
+      <div class="pcard">
+        <div class="pava">${esc(initial)}</div>
+        <div class="pname">${esc(me.name||'—')}</div>
+        <div class="prole">${roleLabel}</div>
+      </div>
+      <div class="pinfo">
+        <div class="prow"><span>📞 Telefon</span><b>${esc(me.phone||'—')}</b></div>
+        ${me.username?`<div class="prow"><span>🔗 Username</span><b>@${esc(String(me.username).replace('@',''))}</b></div>`:''}
+        <div class="prow"><span>🗓 Ro'yxatdan</span><b>${fmtDate(me.created_at)}</b></div>
+      </div>`;
+  }catch(e){
+    v.innerHTML = `<div class="vhead">Profil</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
+  }
+}
 
 loadCategories();
 loadProducts();

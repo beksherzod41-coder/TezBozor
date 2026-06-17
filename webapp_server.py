@@ -162,6 +162,34 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
     return {"ok": True, "order_id": order_id, "total": total}
 
 
+def _buyer_from_auth(authorization):
+    """initData'dan xaridorni (DB user) qaytaradi yoki 401/403 ko'taradi."""
+    auth = require_auth(authorization)
+    tg_id = (auth.get("user") or {}).get("id")
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="no_user")
+    buyer = db.get_user_by_telegram_id(tg_id)
+    if not buyer:
+        raise HTTPException(status_code=403, detail="not_registered")
+    return buyer
+
+
+@app.get("/api/me")
+def api_me(authorization: str = Header(None)):
+    b = dict(_buyer_from_auth(authorization))
+    return {
+        "id": b.get("id"), "name": b.get("name"), "phone": b.get("phone_number"),
+        "username": b.get("telegram_username"), "role": b.get("role"),
+        "language": b.get("language"), "created_at": b.get("created_at"),
+    }
+
+
+@app.get("/api/my/orders")
+def api_my_orders(authorization: str = Header(None)):
+    buyer = _buyer_from_auth(authorization)
+    return _rows(db.get_buyer_orders_list(buyer["id"]))
+
+
 @app.get("/api/image/{file_id}")
 async def api_image(file_id: str):
     """Telegram file_id'ni haqiqiy rasmga aylantiradi (getFile → yuklab → cache → stream)."""
