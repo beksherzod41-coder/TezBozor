@@ -243,6 +243,10 @@ _TEXTS = {
         'uz': "🔍 Qidiruv",
         'ru': "🔍 Поиск",
     },
+    'btn_miniapp_catalog': {
+        'uz': "🛍 Katalog (ilova)",
+        'ru': "🛍 Каталог (приложение)",
+    },
     'search_menu_title': {
         'uz': "🔍 <b>Qidiruv</b>\n\nNima qidiramiz? Bo'limni tanlang:",
         'ru': "🔍 <b>Поиск</b>\n\nЧто ищем? Выберите раздел:",

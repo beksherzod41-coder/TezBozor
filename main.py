@@ -36,7 +36,15 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 # @username bo'lsa — t.me havolasiga aylantiramiz.
 CHANNEL_URL = f"https://t.me/{str(CHANNEL_ID).lstrip('@')}" if CHANNEL_ID and str(CHANNEL_ID).startswith('@') else None
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat
+# Mini App (Telegram WebApp) katalogi — HTTPS URL. .env'da belgilang:
+#   MINIAPP_URL=https://tezbozor.duckdns.org
+# O'rnatilmasa — Mini App tugmasi ko'rsatilmaydi (bot avvalgidek ishlayveradi).
+MINIAPP_URL = os.getenv("MINIAPP_URL", "").strip() or None
+if MINIAPP_URL and not MINIAPP_URL.startswith("https://"):
+    logging.warning("⚠️ MINIAPP_URL https:// bilan boshlanishi shart (Telegram WebApp talabi) — o'chirildi.")
+    MINIAPP_URL = None
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
 from database import Database
@@ -592,19 +600,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /start REF12345 ko'rinishida kelishi mumkin (context.args ichida)
     if not user and context.args:
         ref_code = context.args[0].strip()
-        # Deeplink emas — referral (product_/staff_ deeplinklarini chiqarib tashlaymiz)
-        if not ref_code.startswith("product_") and not ref_code.startswith("staff_"):
+        # Deeplink emas — referral (product_/order_/staff_ deeplinklarini chiqarib tashlaymiz)
+        if not ref_code.startswith(("product_", "order_", "staff_")):
             referrer = db.get_user_by_referral_code(ref_code)
             if referrer:
                 context.user_data['referred_by'] = referrer['id']
                 logging.info(f"New user referred by {referrer['name']} (code={ref_code})")
 
-    # Deeplink: /start product_123 — mahsulot sahifasiga o'tish
+    # Deeplink: /start product_123 — mahsulot sahifasiga o'tish.
+    # /start order_123 — Mini App'dagi "Sotib olish" tugmasidan keladi (productId).
+    # Ikkalasi ham mahsulot sahifasini ochadi (u yerda buyurtma tugmasi bor).
     if user and context.args:
         arg = context.args[0].strip()
-        if arg.startswith("product_"):
+        if arg.startswith("product_") or arg.startswith("order_"):
             try:
-                product_id = int(arg.replace("product_", ""))
+                product_id = int(arg.split("_", 1)[1])
                 product = db.get_product_by_id(product_id)
                 if product and product.get('in_stock'):
                     # Mahsulot sahifasini ko'rsatamiz
@@ -1388,6 +1398,11 @@ async def buyer_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(t(lang, 'btn_ai_assistant'), callback_data="ai_assistant")],
         [InlineKeyboardButton(t(lang, 'btn_contact_admin'), callback_data="contact_admin")],
     ]
+    # Mini App katalogi (WebApp) — rasm gridli "pro" katalog. Faqat MINIAPP_URL o'rnatilgan bo'lsa.
+    if MINIAPP_URL:
+        keyboard.insert(1, [InlineKeyboardButton(
+            t(lang, 'btn_miniapp_catalog'), web_app=WebAppInfo(url=MINIAPP_URL))])
+
     # MULTI-SOTUVCHI: do'konga taklif kodi bilan qo'shilish (faqat hali do'konda bo'lmaganlarga)
     if user and not db.get_staff_by_user(user['id']):
         keyboard.insert(6, [InlineKeyboardButton(t(lang, 'btn_join_with_code'), callback_data="join_with_code")])
