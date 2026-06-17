@@ -423,6 +423,7 @@ class Database:
             ("orders",   "amount_due",        "REAL"),            # qolgan qarz summasi (0 = qarz yo'q)
             ("orders",   "settled_at",        "TIMESTAMP"),       # qarz to'liq yopilgan vaqt (NULL = ochiq)
             ("orders",   "buyer_received",    "INTEGER"),         # 1 = xaridor «oldim» bosgan, lekin sotuvchi to'lovni hali belgilamagan (status hali 'confirmed')
+            ("orders",   "notify_pending",    "INTEGER DEFAULT 0"),  # 1 = Mini App yaratdi, bot sotuvchiga xabar yuborishi kerak (fon job)
             ("products", "stock_count",    "INTEGER"),            # NULL = cheksiz
             ("products", "region_id",      "INTEGER"),            # do'kon hududi
             ("products", "status",         "TEXT DEFAULT 'active'"),  # active|reserve|deleted
@@ -1487,6 +1488,31 @@ class Database:
         oid = cursor.lastrowid
         conn.commit()
         return oid
+
+    def mark_order_notify_pending(self, order_id):
+        """Mini App yaratgan buyurtmani 'sotuvchiga xabar yuborilishi kerak' deb belgilaydi.
+        Bot fon job'i (webapp_order_dispatch_job) buni ko'rib xabar/taymerni ishga tushiradi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET notify_pending=1 WHERE id=?", (order_id,))
+        conn.commit()
+
+    def get_orders_awaiting_notify(self, limit=20):
+        """Bot fon job'i uchun: Mini App yaratgan, hali sotuvchiga xabar ketmagan
+        pending buyurtmalar id'lari (eskidan yangiga)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM orders WHERE notify_pending=1 AND status='pending' "
+            "ORDER BY id ASC LIMIT ?", (limit,))
+        return [r[0] for r in cursor.fetchall()]
+
+    def clear_order_notify_pending(self, order_id):
+        """Xabar yuborilgach (yoki yuborib bo'lmasa ham, qayta urinmaslik uchun) belgini tozalaydi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET notify_pending=0 WHERE id=?", (order_id,))
+        conn.commit()
 
     def set_orders_group(self, order_ids, group_id):
         """Bir nechta buyurtmani bitta savat guruhiga bog'laydi."""

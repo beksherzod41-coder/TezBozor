@@ -15,6 +15,8 @@ Kerakli paketlar:  fastapi  uvicorn[standard]  httpx
 import os
 import hashlib
 import logging
+from typing import Optional
+from datetime import datetime, timezone, timedelta
 
 try:
     from dotenv import load_dotenv
@@ -25,6 +27,7 @@ except Exception:
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 import httpx
 
 from database import Database
@@ -93,6 +96,70 @@ def api_product_detail(product_id: int, authorization: str = Header(None)):
     product = dict(product)
     product["images"] = db.get_product_images(product_id)  # file_id ro'yxati
     return product
+
+
+# ============================================================
+# BUYURTMA YARATISH (to'liq app ichida — sotuvchiga xabarni bot fon job'i yuboradi)
+# ============================================================
+ORDER_TTL_SECONDS = 600
+_VALID_DELIVERY = {"delivery", "pickup"}
+_VALID_PAYMENT = {"cash", "terminal", "p2p"}
+
+
+class OrderIn(BaseModel):
+    product_id: int
+    quantity: int = 1
+    delivery_type: str = "pickup"
+    payment_method: str = "cash"
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+@app.post("/api/order")
+def api_create_order(order: OrderIn, authorization: str = Header(None)):
+    auth = require_auth(authorization)
+    tg_id = (auth.get("user") or {}).get("id")
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="no user")
+    buyer = db.get_user_by_telegram_id(tg_id)
+    if not buyer:
+        raise HTTPException(status_code=403, detail="not_registered")
+
+    if order.quantity < 1 or order.quantity > 999:
+        raise HTTPException(status_code=400, detail="bad_quantity")
+    if order.delivery_type not in _VALID_DELIVERY:
+        raise HTTPException(status_code=400, detail="bad_delivery_type")
+    if order.payment_method not in _VALID_PAYMENT:
+        raise HTTPException(status_code=400, detail="bad_payment_method")
+
+    product = db.get_product_by_id(order.product_id)
+    if not product or not product.get("in_stock"):
+        raise HTTPException(status_code=404, detail="product_unavailable")
+    if buyer["id"] == product["seller_id"]:
+        raise HTTPException(status_code=400, detail="own_product")
+    stock = product.get("stock_count")
+    if stock is not None and order.quantity > stock:
+        raise HTTPException(status_code=409, detail=f"only_{stock}_available")
+
+    total = order.quantity * float(product["price"])
+    if order.delivery_type == "delivery":
+        address = (order.address or "").strip() or None
+        lat, lon = order.lat, order.lon
+    else:
+        address, lat, lon = None, None, None
+
+    order_id = db.create_order(
+        buyer_id=buyer["id"], seller_id=product["seller_id"],
+        product_id=product["id"], quantity=order.quantity, total_price=total,
+        delivery_address=address, buyer_lat=lat, buyer_lon=lon,
+        payment_method=order.payment_method, delivery_type=order.delivery_type,
+    )
+    # Avto-bekor muddati (bot order_confirm'i bilan bir xil) + bot fon job'i xabar yuboradi
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
+    db.set_order_deadline(order_id, deadline)
+    db.mark_order_notify_pending(order_id)
+    return {"ok": True, "order_id": order_id, "total": total}
 
 
 @app.get("/api/image/{file_id}")

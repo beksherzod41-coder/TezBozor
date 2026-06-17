@@ -3984,6 +3984,89 @@ async def order_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ORDER_CONFIRM
 
 
+async def _dispatch_order_notification(context, order_id):
+    """Sotuvchiga buyurtma bildirishnomasini yuboradi (mahsulot rasmi + bog'lanish +
+    jonli teskari sanoq), notify-ref'ni saqlaydi, sanoq jobini qo'yadi va mahsulotni
+    joylagan xodimga fan-out qiladi.
+
+    HAMMA ma'lumotni DB'dan (get_order_by_id) oladi — shuning uchun bir xil funksiya
+    HAM bot order_confirm'idan, HAM Mini App yaratgan buyurtmalar uchun fon job'idan
+    (webapp_order_dispatch_job) chaqirilishi mumkin. deadline DB'dagi auto_cancel_at'dan
+    olinadi (chaqirishdan oldin set_order_deadline qilingan bo'lishi kerak)."""
+    try:
+        order = db.get_order_by_id(order_id)
+        if not order:
+            return
+        seller_tg = order.get('seller_tg')
+        if not seller_tg:
+            return
+        seller = db.get_user_by_id(order['seller_id']) if order.get('seller_id') else None
+        slang = get_user_lang(seller) if seller else DEFAULT_LANG
+        qty = order['quantity']
+        total = order['total_price']
+        dlv = order.get('delivery_type')
+        buyer_lat = order.get('buyer_lat')
+        buyer_lon = order.get('buyer_lon')
+        buyer_address = order.get('delivery_address') or ''
+
+        text = t(slang, 'seller_new_order_notify',
+                 oid=fmt_order_id(order_id),
+                 pname=html.escape(order.get('product_name') or ''),
+                 qty=qty, total=fmt_price(total),
+                 buyer=html.escape(order.get('buyer_name') or ''),
+                 phone=order.get('buyer_phone') or '—',
+                 dlv=dlv_label(dlv, slang))
+
+        # Masofa hisoblash (sotuvchi do'koni → xaridor)
+        if dlv == 'delivery' and buyer_lat and buyer_lon:
+            shop_lat = order.get('shop_lat')
+            shop_lon = order.get('shop_lon')
+            if shop_lat and shop_lon:
+                dist = haversine_km(shop_lat, shop_lon, buyer_lat, buyer_lon)
+                if dist is not None:
+                    text += t(slang, 'frag_dist_from_shop', km=f"{dist:.1f}")
+            _ba = human_address(buyer_address)
+            if _ba:
+                text += t(slang, 'frag_seller_address', addr=html.escape(_ba))
+            text += t(slang, 'seller_client_location_below')
+        elif dlv == 'delivery':
+            _ba = human_address(buyer_address)
+            if _ba:
+                text += t(slang, 'frag_seller_address', addr=html.escape(_ba))
+
+        text += "💳 " + pay_label(order.get('payment_method'), slang)
+
+        if order.get('buyer_username'):
+            text += t(slang, 'frag_buyer_username', uname=html.escape(order['buyer_username']))
+
+        photo = order.get('product_image')
+        deadline = _order_deadline(order)
+        kb = _order_notify_kb(slang, order_id=order_id,
+                              buyer_tg=order.get('buyer_tg'),
+                              buyer_username=order.get('buyer_username'))
+        msg_id, is_cap = await _send_order_notification(
+            context, seller_tg, slang, photo=photo, static_caption=text,
+            kb=kb, deadline=deadline)
+        if msg_id:
+            db.set_order_notify_ref(order_id, seller_tg, msg_id, is_cap, text)
+
+        # Jonli teskari sanoq jobini ishga tushiramiz (har 60s)
+        _schedule_order_countdown(context.application.job_queue, order_id=order_id, first=60)
+
+        # Xaridor lokatsiya yuborgan bo'lsa — alohida Telegram location (yo'l ko'rsatish)
+        if dlv == 'delivery' and buyer_lat and buyer_lon:
+            await context.bot.send_location(
+                chat_id=seller_tg, latitude=buyer_lat, longitude=buyer_lon)
+
+        # MULTI-SOTUVCHI: mahsulotni joylagan xodimga ham (rasm + bog'lanish, sanoqsiz)
+        product = db.get_product_by_id(order['product_id'])
+        if product:
+            await _fanout_order_to_staff(context, product, text, kb,
+                                         dlv, buyer_lat, buyer_lon, owner_tg=seller_tg, photo=photo)
+    except Exception as e:
+        logging.error(f"Sotuvchiga bildirishnoma ketmadi (order {order_id}): {e}")
+
+
 async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -4027,71 +4110,9 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deadline = _dt.now(_tz.utc) + _td(seconds=ORDER_TTL_SECONDS)
     db.set_order_deadline(order_id, deadline)
 
-    # Sotuvchiga bildirishnoma (mahsulot rasmi + bog'lanish + jonli sanoq, sotuvchi tilida)
-    try:
-        seller_tg = product.get('seller_tg')
-        if seller_tg:
-            seller = db.get_user_by_id(product['seller_id'])
-            slang = get_user_lang(seller) if seller else DEFAULT_LANG
-            buyer_lat = context.user_data.get('order_lat')
-            buyer_lon = context.user_data.get('order_lon')
-            buyer_address = context.user_data.get('order_address') or ''
-
-            text = t(slang, 'seller_new_order_notify',
-                     oid=fmt_order_id(order_id),
-                     pname=html.escape(product['name'] or ''),
-                     qty=qty, total=fmt_price(total),
-                     buyer=html.escape(buyer['name'] or ''),
-                     phone=buyer.get('phone_number') or '—',
-                     dlv=dlv_label(dlv, slang))
-
-            # Masofa hisoblash (sotuvchi do'koni → xaridor)
-            if dlv == 'delivery' and buyer_lat and buyer_lon:
-                shop_lat = product.get('shop_lat')
-                shop_lon = product.get('shop_lon')
-                if shop_lat and shop_lon:
-                    dist = haversine_km(shop_lat, shop_lon, buyer_lat, buyer_lon)
-                    if dist is not None:
-                        text += t(slang, 'frag_dist_from_shop', km=f"{dist:.1f}")
-                _ba = human_address(buyer_address)
-                if _ba:
-                    text += t(slang, 'frag_seller_address', addr=html.escape(_ba))
-                text += t(slang, 'seller_client_location_below')
-            elif dlv == 'delivery':
-                _ba = human_address(buyer_address)
-                if _ba:
-                    text += t(slang, 'frag_seller_address', addr=html.escape(_ba))
-
-            text += "💳 " + pay_label(context.user_data.get('order_payment'), slang)
-
-            # Xaridorning @username'i bo'lsa — matnda ham ko'rsatamiz (oson bog'lanish uchun)
-            if buyer.get('telegram_username'):
-                text += t(slang, 'frag_buyer_username', uname=html.escape(buyer['telegram_username']))
-
-            photo = product.get('image_url')
-            kb = _order_notify_kb(slang, order_id=order_id,
-                                  buyer_tg=buyer.get('telegram_id'),
-                                  buyer_username=buyer.get('telegram_username'))
-            msg_id, is_cap = await _send_order_notification(
-                context, seller_tg, slang, photo=photo, static_caption=text,
-                kb=kb, deadline=deadline)
-            if msg_id:
-                db.set_order_notify_ref(order_id, seller_tg, msg_id, is_cap, text)
-
-            # Jonli teskari sanoq jobini ishga tushiramiz (har 60s)
-            _schedule_order_countdown(context.application.job_queue, order_id=order_id, first=60)
-
-            # Xaridor lokatsiya yuborgan bo'lsa — alohida Telegram location (yo'l ko'rsatish)
-            if dlv == 'delivery' and buyer_lat and buyer_lon:
-                await context.bot.send_location(
-                    chat_id=seller_tg, latitude=buyer_lat, longitude=buyer_lon)
-
-            # MULTI-SOTUVCHI: mahsulotni joylagan xodimga ham (rasm + bog'lanish, sanoqsiz)
-            await _fanout_order_to_staff(context, product, text, kb,
-                                         dlv, buyer_lat, buyer_lon, owner_tg=seller_tg, photo=photo)
-
-    except Exception as e:
-        logging.error(f"Sotuvchiga bildirishnoma ketmadi: {e}")
+    # Sotuvchiga bildirishnoma + jonli sanoq + xodim fan-out — endi DB'dan qayta quriladi
+    # (umumiy funksiya, Mini App buyurtmalari bilan bir xil yo'l).
+    await _dispatch_order_notification(context, order_id)
 
     # User_data'ni tozalaymiz
     for k in ('order_product', 'order_qty', 'order_delivery_type', 'order_address',
@@ -14349,6 +14370,29 @@ def _validate_env():
                         ".env faylida ADMIN_ID=... ni belgilang (.env.example'ga qarang).")
 
 
+async def webapp_order_dispatch_job(context: ContextTypes.DEFAULT_TYPE):
+    """Mini App (webapp) yaratgan buyurtmalarni topib, sotuvchiga bildirishnoma +
+    jonli taymerni ishga tushiradi. Webapp alohida jarayon — uning yaratgan
+    buyurtmasiga bot job-queue'si avtomatik ulanmaydi; shu job har ~12s skanlaydi.
+    Bildirishnoma muvaffaqiyatli ketsa ham, ketmasa ham belgi tozalanadi (qayta
+    spam qilmaslik uchun — ketмаса log'da ko'rinadi)."""
+    try:
+        ids = db.get_orders_awaiting_notify()
+    except Exception as e:
+        logging.error(f"webapp_order_dispatch_job: ro'yxat olinmadi: {e}")
+        return
+    for oid in ids:
+        try:
+            await _dispatch_order_notification(context, oid)
+        except Exception as e:
+            logging.error(f"webapp_order_dispatch_job: order {oid} xabar xato: {e}")
+        finally:
+            try:
+                db.clear_order_notify_pending(oid)
+            except Exception:
+                pass
+
+
 def main():
     _validate_env()
     # Persistence — bot qayta ishga tushganda foydalanuvchi sessiyalari saqlanadi
@@ -14748,6 +14792,10 @@ def main():
     if app.job_queue:
         app.job_queue.run_repeating(cleanup_stale_orders_job, interval=86400, first=60)
         logging.info("Stale orders cleanup job rejalashtirildi (har 24 soatda)")
+
+        # Mini App (webapp) yaratgan buyurtmalarga sotuvchi bildirishnomasi (har 12s)
+        app.job_queue.run_repeating(webapp_order_dispatch_job, interval=12, first=15)
+        logging.info("Mini App buyurtma dispatch job rejalashtirildi (har 12s)")
 
         # Avtomatik backup — har kuni ertalab 06:00 (UTC) = 11:00 Toshkent
         from datetime import time as dt_time

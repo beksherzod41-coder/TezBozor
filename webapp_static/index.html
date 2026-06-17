@@ -129,6 +129,60 @@
               justify-content:center; gap:8px; transition:.15s;}
   .buybar button:active{transform:scale(.98);}
   .buybar button:disabled{background:#c9c9d0; box-shadow:none; cursor:not-allowed;}
+
+  /* ---------- CHECKOUT ---------- */
+  .checkout{position:fixed; inset:0; background:var(--bg); z-index:60; overflow-y:auto;
+            transform:translateY(100%); transition:transform .25s cubic-bezier(.3,.7,.3,1);
+            display:flex; flex-direction:column;}
+  .checkout.open{transform:translateY(0);}
+  .cohead{position:sticky; top:0; z-index:5; background:rgba(255,255,255,.9);
+          backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+          display:flex; align-items:center; justify-content:space-between; padding:13px 16px;
+          box-shadow:0 1px 0 var(--line); font-size:16px; font-weight:700;}
+  .cohead .x{font-size:22px; color:var(--hint); cursor:pointer; line-height:1; padding:0 4px;}
+  .cobody{padding:14px 16px; display:flex; flex-direction:column; gap:14px;}
+  .coprod{display:flex; gap:12px; align-items:center; background:var(--card);
+          border-radius:14px; padding:10px; box-shadow:var(--shadow);}
+  .coprod img,.coprod .ph{width:60px; height:60px; border-radius:10px; object-fit:cover;
+          background:#ececed; flex:0 0 auto; font-size:28px;}
+  .coprod .nm{font-size:13.5px; line-height:1.3; max-height:2.6em; overflow:hidden;}
+  .coprod .pr{font-size:15px; font-weight:800; margin-top:3px;}
+  .cosec{background:var(--card); border-radius:14px; padding:13px 14px; box-shadow:var(--shadow);}
+  .cosec .lbl{font-size:12px; color:var(--hint); font-weight:600; text-transform:uppercase;
+              letter-spacing:.4px; margin-bottom:10px;}
+  .stepper{display:flex; align-items:center; gap:0; justify-content:space-between;}
+  .stepper .qv{font-size:20px; font-weight:800; min-width:50px; text-align:center;}
+  .stepbtn{width:42px; height:42px; border-radius:12px; border:none; background:var(--accent-soft);
+           color:var(--accent); font-size:24px; font-weight:700; cursor:pointer; line-height:1;
+           display:flex; align-items:center; justify-content:center;}
+  .stepbtn:active{transform:scale(.93);} .stepbtn:disabled{opacity:.4; cursor:not-allowed;}
+  .stockhint{font-size:12px; color:var(--hint); margin-top:8px;}
+  .seg{display:flex; gap:8px;}
+  .seg .opt{flex:1; padding:12px 8px; border-radius:12px; border:1.5px solid var(--line);
+            background:var(--card); text-align:center; font-size:13.5px; font-weight:600;
+            cursor:pointer; color:var(--text); transition:.15s;}
+  .seg .opt.on{border-color:var(--accent); background:var(--accent-soft); color:var(--accent);}
+  .seg.col{flex-direction:column;}
+  .coaddr{width:100%; border:1.5px solid var(--line); border-radius:12px; padding:11px 12px;
+          font-size:14.5px; font-family:inherit; resize:vertical; min-height:64px; outline:none;
+          background:var(--card); color:var(--text); margin-top:10px;}
+  .coaddr:focus{border-color:var(--accent);}
+  .cobar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+         background:rgba(255,255,255,.92); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+         box-shadow:0 -1px 0 var(--line);}
+  .cototal{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:9px;}
+  .cototal .t1{font-size:13px; color:var(--hint);}
+  .cototal .t2{font-size:21px; font-weight:800;}
+  .cobar button{width:100%; padding:15px; border:none; border-radius:14px; font-size:16px;
+            font-weight:700; color:#fff; cursor:pointer;
+            background:linear-gradient(135deg,var(--accent),var(--accent-2));
+            box-shadow:0 6px 18px rgba(112,0,255,.32); transition:.15s;}
+  .cobar button:active{transform:scale(.98);} .cobar button:disabled{background:#c9c9d0; box-shadow:none;}
+  .cosuccess{flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+             text-align:center; padding:40px 30px; gap:6px;}
+  .cosuccess .ico{font-size:72px;} .cosuccess h3{margin:6px 0 0; font-size:20px;}
+  .cosuccess p{color:var(--hint); font-size:14.5px; line-height:1.55; margin:4px 0 0;}
+  .cosuccess .oid{font-weight:700; color:var(--accent);}
 </style>
 </head>
 <body>
@@ -146,6 +200,11 @@
       <div class="bk" id="backBtn">‹ Orqaga</div>
     </div>
     <div id="detailBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="checkout">
+    <div class="cohead"><span>Buyurtma berish</span><span class="x" id="coClose">✕</span></div>
+    <div id="checkoutBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
 <script>
@@ -238,7 +297,7 @@ async function loadProducts(){
     }
     content.innerHTML = `<div class="grid">${items.map(cardHtml).join('')}</div>`;
     content.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
-    content.querySelectorAll('[data-buy]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); orderInBot(b.dataset.buy); });
+    content.querySelectorAll('[data-buy]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openCheckout(b.dataset.buy); });
   }catch(e){
     content.innerHTML = `<div class="empty"><span class="big">⚠️</span>Xatolik: ${esc(e.message)}<br><small>Mini App'ni Telegram orqali oching.</small></div>`;
   }
@@ -283,7 +342,7 @@ async function openDetail(id){
       <div class="buybar">
         <button id="buyBtn" ${stockOk?'':'disabled'}>${stockOk?'🛒 Buyurtma berish':'Hozircha mavjud emas'}</button>
       </div>`;
-    if(stockOk) document.getElementById('buyBtn').onclick = ()=>orderInBot(p.id);
+    if(stockOk) document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
     // dots sinxronlash
     if(imgs.length>1){
       const g = document.getElementById('gallery');
@@ -297,22 +356,121 @@ async function openDetail(id){
   }
 }
 
-async function orderInBot(productId){
-  try{ tg.HapticFeedback.impactOccurred('medium'); }catch(e){}
-  if(!botUsername){
-    try{ botUsername = (await api('/api/config')).bot_username; }catch(e){}
+// ---------- CHECKOUT (to'liq app ichida) ----------
+let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='';
+const PAYMENTS = [['cash',"💵 Naqd pul"],['terminal',"💳 Terminal (karta)"],['p2p',"📲 Karta raqamiga (P2P)"]];
+
+async function openCheckout(id){
+  const co = document.getElementById('checkout');
+  const body = document.getElementById('checkoutBody');
+  body.innerHTML = `<div class="empty"><span class="big">⏳</span>Yuklanmoqda...</div>`;
+  co.classList.add('open'); co.scrollTop = 0;
+  try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+  try{
+    coProduct = await api('/api/products/'+id);
+    coQty=1; coDelivery='pickup'; coPayment='cash'; coAddrText='';
+    renderCheckout();
+  }catch(e){
+    body.innerHTML = `<div class="empty"><span class="big">⚠️</span>Xatolik: ${esc(e.message)}</div>`;
   }
-  if(botUsername){
-    tg.openTelegramLink(`https://t.me/${botUsername}?start=order_${productId}`);
-    tg.close();
-  }else{
-    tg.showAlert("Buyurtma uchun botga qayting va mahsulotni tanlang.");
+}
+function coMaxStock(){ return (coProduct && coProduct.stock_count!=null) ? coProduct.stock_count : 999; }
+
+function renderCheckout(){
+  const p = coProduct, body = document.getElementById('checkoutBody');
+  const img = p.image_url
+    ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`
+    : `<div class="ph">🖼️</div>`;
+  const max = coMaxStock(), total = coQty * Number(p.price||0);
+  body.innerHTML = `
+    <div class="cobody">
+      <div class="coprod">${img}<div><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)}</div></div></div>
+      <div class="cosec">
+        <div class="lbl">Miqdor</div>
+        <div class="stepper">
+          <button class="stepbtn" id="qMinus" ${coQty<=1?'disabled':''}>−</button>
+          <div class="qv">${coQty}</div>
+          <button class="stepbtn" id="qPlus" ${coQty>=max?'disabled':''}>+</button>
+        </div>
+        ${p.stock_count!=null?`<div class="stockhint">Mavjud: ${p.stock_count} dona</div>`:''}
+      </div>
+      <div class="cosec">
+        <div class="lbl">Yetkazib berish</div>
+        <div class="seg">
+          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">🚶 Olib ketaman</div>
+          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">🚚 Yetkazib berish</div>
+        </div>
+        <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
+          <textarea class="coaddr" id="coAddr" placeholder="Manzil: ko'cha, uy raqami, mo'ljal...">${esc(coAddrText)}</textarea>
+        </div>
+      </div>
+      <div class="cosec">
+        <div class="lbl">To'lov usuli</div>
+        <div class="seg col">
+          ${PAYMENTS.map(([k,l])=>`<div class="opt ${coPayment===k?'on':''}" data-pay="${k}">${l}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="cobar">
+      <div class="cototal"><span class="t1">Jami (${coQty} dona)</span><span class="t2">${money(total)}</span></div>
+      <button id="coSubmit">✅ Buyurtmani tasdiqlash</button>
+    </div>`;
+  body.querySelector('#qMinus').onclick=()=>{ if(coQty>1){coQty--; renderCheckout();} };
+  body.querySelector('#qPlus').onclick=()=>{ if(coQty<coMaxStock()){coQty++; renderCheckout();} };
+  body.querySelectorAll('[data-dlv]').forEach(o=>o.onclick=()=>{ coDelivery=o.dataset.dlv; renderCheckout(); });
+  body.querySelectorAll('[data-pay]').forEach(o=>o.onclick=()=>{ coPayment=o.dataset.pay; renderCheckout(); });
+  const addr = body.querySelector('#coAddr');
+  if(addr) addr.oninput=()=>{ coAddrText = addr.value; };
+  body.querySelector('#coSubmit').onclick = submitOrder;
+}
+
+async function submitOrder(){
+  const btn = document.getElementById('coSubmit');
+  if(coDelivery==='delivery' && !(coAddrText||'').trim()){
+    tg.showAlert("Yetkazib berish uchun manzilni kiriting."); return;
+  }
+  btn.disabled = true; btn.textContent = 'Yuborilmoqda...';
+  try{
+    const r = await fetch('/api/order', {
+      method:'POST', headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body: JSON.stringify({
+        product_id: coProduct.id, quantity: coQty,
+        delivery_type: coDelivery, payment_method: coPayment,
+        address: coDelivery==='delivery' ? coAddrText.trim() : null
+      })
+    });
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    const res = await r.json();
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    showOrderSuccess(res.order_id);
+  }catch(e){
+    btn.disabled=false; btn.textContent='✅ Buyurtmani tasdiqlash';
+    tg.showAlert("Buyurtma berilmadi: "+e.message);
   }
 }
 
+function showOrderSuccess(oid){
+  coAddrText='';
+  document.getElementById('checkoutBody').innerHTML = `
+    <div class="cosuccess">
+      <div class="ico">🎉</div>
+      <h3>Buyurtma qabul qilindi!</h3>
+      <p>Raqamingiz: <span class="oid">#${oid}</span><br>Sotuvchi tez orada siz bilan bog'lanadi.</p>
+      <div style="width:100%;margin-top:26px">
+        <button class="stepbtn" style="width:100%;height:auto;padding:15px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:16px;font-weight:700;box-shadow:0 6px 18px rgba(112,0,255,.32)" onclick="closeCheckout(); closeDetail();">Katalogga qaytish</button>
+      </div>
+    </div>`;
+}
+
+function closeCheckout(){ document.getElementById('checkout').classList.remove('open'); }
+document.getElementById('coClose').onclick = closeCheckout;
+
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
-tg.BackButton && tg.onEvent('backButtonClicked', closeDetail);
+tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
+  const co = document.getElementById('checkout');
+  if(co.classList.contains('open')) closeCheckout(); else closeDetail();
+});
 document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(loadProducts,350); };
 
 loadCategories();
