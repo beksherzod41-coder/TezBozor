@@ -159,7 +159,12 @@ def api_health():
 # ============================================================
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    # no-cache: Mini App HTML yangilansa, Telegram darhol yangi versiyani olsin
+    # (aks holda eski dizayn keshda qolib ketadi).
+    return FileResponse(
+        os.path.join(STATIC_DIR, "index.html"),
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if os.path.isdir(STATIC_DIR):
