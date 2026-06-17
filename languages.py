@@ -49,6 +49,10 @@ _TEXTS = {
         'uz': "⚠️ Kutilmagan xato yuz berdi. Iltimos, qaytadan urinib ko'ring yoki /start bosing.",
         'ru': "⚠️ Произошла непредвиденная ошибка. Попробуйте снова или нажмите /start.",
     },
+    'callback_stale': {
+        'uz': "⚠️ Bu xabar eskirgan. Iltimos, menyuni qaytadan oching (/start).",
+        'ru': "⚠️ Это сообщение устарело. Откройте меню заново (/start).",
+    },
     'back': {
         'uz': "⬅️ Orqaga",
         'ru': "⬅️ Назад",
@@ -151,6 +155,18 @@ _TEXTS = {
         'uz': "Do'kon manzilingizni yuboring (lokatsiya yoki matn):",
         'ru': "Отправьте адрес магазина (геолокация или текст):",
     },
+    'shop_location_ask': {
+        'uz': "📍 1/2: Avval do'kon LOKATSIYASINI yuboring (xaritada ko'rinishi uchun).\n"
+              "Lokatsiya bo'lmasa, o'tkazib yuborish uchun \"-\" yozing:",
+        'ru': "📍 1/2: Сначала отправьте ГЕОЛОКАЦИЮ магазина (чтобы показать на карте).\n"
+              "Если геолокации нет, напишите \"-\", чтобы пропустить:",
+    },
+    'shop_address_text_ask': {
+        'uz': "✏️ 2/2: Endi manzilni MATN bilan yozing (ko'cha, uy raqami).\n"
+              "O'tkazib yuborish uchun \"-\" yozing:",
+        'ru': "✏️ 2/2: Теперь напишите адрес ТЕКСТОМ (улица, дом).\n"
+              "Чтобы пропустить, напишите \"-\":",
+    },
     'send_location_button': {
         'uz': "📍 Manzilni yuborish",
         'ru': "📍 Отправить геолокацию",
@@ -240,8 +256,8 @@ _TEXTS = {
         'ru': "💬 Сообщения",
     },
     'btn_reviews': {
-        'uz': "⭐ Reytinglarim",
-        'ru': "⭐ Мои отзывы",
+        'uz': "⭐ Reyting va sharhlarim",
+        'ru': "⭐ Мои рейтинги и отзывы",
     },
     'btn_profile': {
         'uz': "👤 Profil",
@@ -342,30 +358,113 @@ _TEXTS = {
                "Для переподключения сделайте бота админом и перешлите пост из канала."),
     },
     'btn_my_channels': {
-        'uz': "📢 Kanallarim",
-        'ru': "📢 Мои каналы",
+        'uz': "📢 Kanal va guruhlar",
+        'ru': "📢 Каналы и группы",
     },
     'btn_add_channel': {
         'uz': "➕ Kanal qo'shish",
         'ru': "➕ Добавить канал",
+    },
+    'btn_recheck_channels': {
+        'uz': "♻️ Qayta tekshirish",
+        'ru': "♻️ Перепроверить",
+    },
+    'channels_recheck_running': {
+        'uz': "🔄 Tekshirilmoqda...",
+        'ru': "🔄 Проверяю...",
+    },
+    'channels_recheck_done': {
+        'uz': ("♻️ <b>Tekshiruv yakunlandi</b>\n"
+               "✅ Qayta faollashtirildi: {ok} ta\n"
+               "⚠️ Hali yubora olmayapti: {bad} ta\n\n"
+               "Muammoli guruh/kanalda meni <b>admin</b> qilganingizdan so'ng "
+               "shu tugmani yana bosing."),
+        'ru': ("♻️ <b>Проверка завершена</b>\n"
+               "✅ Снова активны: {ok}\n"
+               "⚠️ Пока не получается: {bad}\n\n"
+               "Сделайте меня <b>администратором</b> в проблемной группе/канале "
+               "и нажмите эту кнопку ещё раз."),
     },
     'btn_official_channel': {
         'uz': "🛍 Ko'proq mahsulot — kanalimiz",
         'ru': "🛍 Больше товаров — наш канал",
     },
     'channels_menu_connected': {
-        'uz': ("📢 <b>Ulangan kanallaringiz</b>\n\n"
-               "Yangi (va qayta sotuvga qo'yilgan) mahsulotlaringiz quyidagi kanallarga avtomatik chiqadi:"),
-        'ru': ("📢 <b>Ваши подключённые каналы</b>\n\n"
-               "Новые (и повторно выставленные) товары автоматически публикуются в этих каналах:"),
+        'uz': ("📢 <b>Ulangan kanal va guruhlaringiz</b>\n\n"
+               "Yangi (va qayta sotuvga qo'yilgan) mahsulotlaringiz quyidagilarga avtomatik chiqadi:"),
+        'ru': ("📢 <b>Ваши подключённые каналы и группы</b>\n\n"
+               "Новые (и повторно выставленные) товары автоматически публикуются здесь:"),
     },
     'channels_menu_empty': {
-        'uz': ("📢 <b>Kanallarim</b>\n\n"
-               "Hali birorta kanal ulanmagan.\n\n"
-               "Mahsulotlaringiz o'z kanalingizga ham avtomatik chiqishi uchun kanal ulang."),
-        'ru': ("📢 <b>Мои каналы</b>\n\n"
-               "Пока не подключён ни один канал.\n\n"
-               "Подключите канал, чтобы товары публиковались и в вашем канале."),
+        'uz': ("📢 <b>Kanal va guruhlar</b>\n\n"
+               "Hali birorta kanal yoki guruh ulanmagan.\n\n"
+               "Mahsulotlaringiz o'z kanalingiz yoki guruhingizga ham avtomatik chiqishi uchun ulang."),
+        'ru': ("📢 <b>Каналы и группы</b>\n\n"
+               "Пока не подключён ни один канал или группа.\n\n"
+               "Подключите канал или группу, чтобы товары публиковались и там."),
+    },
+
+    # --- GURUHNI ULASH (botni guruhga qo'shganda avtomatik bog'lanadi) ---
+    'btn_add_group': {
+        'uz': "➕ Guruh qo'shish",
+        'ru': "➕ Добавить группу",
+    },
+    'link_group_prompt': {
+        'uz': ("👥 <b>Guruhingizni ulash</b>\n\n"
+               "Mahsulotlaringiz avtomatik o'z guruhingizga ham chiqishi uchun:\n\n"
+               "1️⃣ Guruhingizni oching → <b>Qo'shish</b> (Add member) → @{bot} ni qidirib qo'shing.\n"
+               "2️⃣ Iloji bo'lsa, meni guruhda <b>admin</b> qiling — shunda xabar yuborishim "
+               "kafolatlanadi.\n\n"
+               "Men guruhga qo'shilganimni avtomatik sezaman va uni sizga bog'lab qo'yaman. "
+               "Forward qilish shart emas.\n\n"
+               "ℹ️ Eslatma: guruhni <b>o'zingiz</b> qo'shishingiz kerak — shunda guruh sizniki "
+               "ekanini bilaman."),
+        'ru': ("👥 <b>Подключение вашей группы</b>\n\n"
+               "Чтобы ваши товары автоматически публиковались и в вашей группе:\n\n"
+               "1️⃣ Откройте группу → <b>Добавить участника</b> → найдите и добавьте @{bot}.\n"
+               "2️⃣ По возможности сделайте меня <b>администратором</b> группы — тогда отправка "
+               "сообщений гарантирована.\n\n"
+               "Я автоматически замечу, что меня добавили, и привяжу группу к вам. "
+               "Пересылать ничего не нужно.\n\n"
+               "ℹ️ Важно: добавить группу должны <b>именно вы</b> — так я пойму, что группа ваша."),
+    },
+    'group_linked_in_group': {
+        'uz': ("✅ <b>TezBozor ulandi!</b>\n\n"
+               "Endi yangi mahsulotlar shu guruhga avtomatik joylanadi."),
+        'ru': ("✅ <b>TezBozor подключён!</b>\n\n"
+               "Теперь новые товары будут автоматически публиковаться в этой группе."),
+    },
+    'group_linked_notify': {
+        'uz': ("✅ Guruh ulandi: <b>{title}</b>\n\n"
+               "Endi qo'shgan (yoki qayta sotuvga qo'ygan) mahsulotlaringiz "
+               "avtomatik shu guruhga ham chiqadi."),
+        'ru': ("✅ Группа подключена: <b>{title}</b>\n\n"
+               "Теперь добавленные (или повторно выставленные) товары "
+               "будут автоматически публиковаться и в этой группе."),
+    },
+    'group_relinked_notify': {
+        'uz': ("✅ Guruh qayta ulandi: <b>{title}</b>\n\n"
+               "Mahsulotlaringiz yana shu guruhga avtomatik chiqadi."),
+        'ru': ("✅ Группа переподключена: <b>{title}</b>\n\n"
+               "Товары снова будут публиковаться в этой группе."),
+    },
+    'group_linked_need_admin': {
+        'uz': ("⚠️ Guruh aniqlandi: <b>{title}</b>, lekin men u yerga <b>xabar yubora olmadim</b>.\n\n"
+               "Iltimos, meni guruhda <b>admin</b> qiling (yoki a'zolarga xabar yuborishga ruxsat bering). "
+               "Shundan so'ng mahsulotlaringiz avtomatik chiqaveradi."),
+        'ru': ("⚠️ Группа определена: <b>{title}</b>, но я <b>не смог отправить</b> в неё сообщение.\n\n"
+               "Пожалуйста, сделайте меня <b>администратором</b> группы (или разрешите участникам "
+               "отправлять сообщения). После этого товары будут публиковаться автоматически."),
+    },
+    'group_added_not_seller': {
+        'uz': ("👋 Salom! Men <b>TezBozor</b> botiman.\n\n"
+               "Mahsulotlarni shu guruhga avtomatik joylash uchun avval botda "
+               "<b>sotuvchi</b> bo'ling: @{bot} ni oching va /start bosing.\n\n"
+               "So'ng meni guruhga sotuvchi profilingiz egasi sifatida qayta qo'shing."),
+        'ru': ("👋 Привет! Я бот <b>TezBozor</b>.\n\n"
+               "Чтобы товары автоматически публиковались в этой группе, сначала станьте "
+               "<b>продавцом</b> в боте: откройте @{bot} и нажмите /start.\n\n"
+               "Затем добавьте меня в группу под своим аккаунтом продавца."),
     },
     'adu_channels_header': {
         'uz': "📢 <b>Ulangan kanallar:</b>",
@@ -461,6 +560,45 @@ _TEXTS = {
         'uz': "🛒 Xaridor rejimi",
         'ru': "🛒 Режим покупателя",
     },
+
+    # --- SOTUVCHI PANELI BO'LIMLARI (guruh tugmalari + ekran sarlavhalari) ---
+    'grp_products': {'uz': "📦 Sotuv va e'lonlar ▸", 'ru': "📦 Продажа и объявления ▸"},
+    'grp_sales': {'uz': "🧾 Savdo va hisob ▸", 'ru': "🧾 Продажи и учёт ▸"},
+    'grp_customers': {'uz': "💬 Mijozlar ▸", 'ru': "💬 Клиенты ▸"},
+    'grp_settings': {'uz': "⚙️ Sozlamalar ▸", 'ru': "⚙️ Настройки ▸"},
+    'grp_products_title': {
+        'uz': "📦 <b>Sotuv va e'lonlar</b>\n\nMahsulotlar, kanallar va reklama boshqaruvi:",
+        'ru': "📦 <b>Продажа и объявления</b>\n\nТовары, каналы и управление рекламой:",
+    },
+    'grp_sales_title': {
+        'uz': "🧾 <b>Savdo va hisob</b>\n\nBuyurtmalar, qarzlar va statistika:",
+        'ru': "🧾 <b>Продажи и учёт</b>\n\nЗаказы, долги и статистика:",
+    },
+    'grp_customers_title': {
+        'uz': "💬 <b>Mijozlar</b>\n\nXabarlar va sharhlar:",
+        'ru': "💬 <b>Клиенты</b>\n\nСообщения и отзывы:",
+    },
+    'grp_settings_title': {
+        'uz': "⚙️ <b>Sozlamalar</b>\n\nProfil va do'kon boshqaruvi:",
+        'ru': "⚙️ <b>Настройки</b>\n\nПрофиль и управление магазином:",
+    },
+
+    # --- ADMIN PANELI BO'LIMLARI ---
+    'agrp_people': {'uz': "👥 Odamlar ▸", 'ru': "👥 Люди ▸"},
+    'agrp_catalog': {'uz': "📦 Katalog ▸", 'ru': "📦 Каталог ▸"},
+    'agrp_manage': {'uz': "🛠 Boshqaruv ▸", 'ru': "🛠 Управление ▸"},
+    'agrp_people_title': {
+        'uz': "👥 <b>Odamlar</b>\n\nFoydalanuvchilar, do'konlar va kanallar:",
+        'ru': "👥 <b>Люди</b>\n\nПользователи, магазины и каналы:",
+    },
+    'agrp_catalog_title': {
+        'uz': "📦 <b>Katalog</b>\n\nMahsulotlar va buyurtmalar:",
+        'ru': "📦 <b>Каталог</b>\n\nТовары и заказы:",
+    },
+    'agrp_manage_title': {
+        'uz': "🛠 <b>Boshqaruv</b>\n\nStatistika, ommaviy xabar va sozlamalar:",
+        'ru': "🛠 <b>Управление</b>\n\nСтатистика, рассылка и настройки:",
+    },
     'seller_not_approved': {
         'uz': ("⏳ <b>Sizning sotuvchi akkauntingiz hali tasdiqlanmagan.</b>\n\n"
                "Admin tez orada so'rovingizni ko'rib chiqadi.\n"
@@ -484,8 +622,8 @@ _TEXTS = {
         'ru': "🔄 Отправить заявку повторно",
     },
     'btn_seller_reviews': {
-        'uz': "⭐ Reytinglar",
-        'ru': "⭐ Отзывы",
+        'uz': "⭐ Reyting va sharhlar",
+        'ru': "⭐ Рейтинг и отзывы",
     },
     'not_specified': {
         'uz': "Ko'rsatilmagan",
@@ -768,6 +906,7 @@ _TEXTS = {
 
     # --- MAHSULOT KARTOCHKASI ---
     'btn_order': {'uz': "🛒 Buyurtma berish", 'ru': "🛒 Оформить заказ"},
+    'btn_buy_now': {'uz': "🛍 Sotib olish", 'ru': "🛍 Купить"},
     'btn_send_message': {'uz': "💬 Xabar yuborish", 'ru': "💬 Отправить сообщение"},
     'btn_product_reviews': {'uz': "💬 Mahsulot izohlari ({n})", 'ru': "💬 Отзывы о товаре ({n})"},
     'btn_recommend': {'uz': "✨ Sizga mos boshqa tovarlar", 'ru': "✨ Другие товары для вас"},
@@ -884,6 +1023,8 @@ _TEXTS = {
     'btn_telegram': {'uz': "📱 Telegram", 'ru': "📱 Telegram"},
     'btn_phone': {'uz': "📞 Telefon", 'ru': "📞 Телефон"},
     'btn_details': {'uz': "📦 Batafsil", 'ru': "📦 Подробнее"},
+    'similar_title': {'uz': "🛍 O'xshash mahsulotlar:", 'ru': "🛍 Похожие товары:"},
+    'btn_similar_item': {'uz': "{emoji} {name} — {price}", 'ru': "{emoji} {name} — {price}"},
     'btn_reviews_n': {'uz': "💬 Izohlar ({n})", 'ru': "💬 Отзывы ({n})"},
     'map_see_line': {'uz': "📍 Xaritadan ko'ring", 'ru': "📍 Смотрите на карте"},
     'srch_rating_cnt': {'uz': " ({n} ta)", 'ru': " ({n})"},
@@ -982,6 +1123,102 @@ _TEXTS = {
         'ru': ("🏪 <b>{shop}</b> — {total} товаров. Страница {page}/{pages}:\n"
                "<i>Можно добавить несколько товаров в корзину и оформить один заказ.</i>"),
     },
+    # --- DO'KON MAHSULOTLARI: rasmli kartochka katalogi (Uzum uslubida) ---
+    'catalog_header': {
+        'uz': ("🏪 <b>{shop}</b> — {total} ta mahsulot • Sahifa {page}/{pages}"),
+        'ru': ("🏪 <b>{shop}</b> — {total} товаров • Страница {page}/{pages}"),
+    },
+    'catalog_list_item': {
+        'uz': "{n}. {emoji} {name} — {price}",
+        'ru': "{n}. {emoji} {name} — {price}",
+    },
+    'catalog_list_hint': {
+        'uz': ("👆 Yuqorida — mahsulot rasmlari. Quyidagi ro'yxatdan tanlang:\n"
+               "<i>nomni bossangiz — batafsil, ➕ — savatga qo'shadi.</i>"),
+        'ru': ("👆 Выше — фото товаров. Выберите из списка ниже:\n"
+               "<i>нажмите на название — подробнее, ➕ — добавить в корзину.</i>"),
+    },
+    'btn_cart_qty_short': {
+        'uz': "🛒 {n}",
+        'ru': "🛒 {n}",
+    },
+    'catalog_carousel_card': {
+        'uz': ("🏪 {shop}  ·  {pos}/{total}\n\n"
+               "🛍 <b>{name}</b>\n"
+               "💰 <b>{price}</b>\n"
+               "⭐ {rating}{stock}"),
+        'ru': ("🏪 {shop}  ·  {pos}/{total}\n\n"
+               "🛍 <b>{name}</b>\n"
+               "💰 <b>{price}</b>\n"
+               "⭐ {rating}{stock}"),
+    },
+    'catalog_stock_frag': {
+        'uz': " • {n} dona mavjud",
+        'ru': " • в наличии {n} шт",
+    },
+    'catalog_list_header': {
+        'uz': "🏪 <b>{shop}</b> — {total} ta mahsulot · {page}/{pages}-sahifa",
+        'ru': "🏪 <b>{shop}</b> — {total} товаров · стр. {page}/{pages}",
+    },
+    'catalog_list_line': {
+        'uz': "<b>{n}.</b> {emoji} {name} — <b>{price}</b>{rating}{cart}",
+        'ru': "<b>{n}.</b> {emoji} {name} — <b>{price}</b>{rating}{cart}",
+    },
+    'catalog_list_incart': {
+        'uz': "  🛒{n}",
+        'ru': "  🛒{n}",
+    },
+    'catalog_list_hint2': {
+        'uz': "👇 Raqamni bosing — batafsil ko'rish va savatga qo'shish.",
+        'ru': "👇 Нажмите номер — подробнее и добавить в корзину.",
+    },
+    # --- DO'KON MAHSULOTLARI: Uzum uslubidagi rasmli LENTA (vertical feed) ---
+    'catalog_feed_header': {
+        'uz': ("🏪 <b>{shop}</b>\n"
+               "📦 {total} ta mahsulot · {page}/{pages}-sahifa\n\n"
+               "<i>Pastga aylantiring — yoqqan mahsulot tagidagi «➕ Savatga» tugmasini bosing.</i>"),
+        'ru': ("🏪 <b>{shop}</b>\n"
+               "📦 {total} товаров · стр. {page}/{pages}\n\n"
+               "<i>Листайте вниз — под понравившимся товаром нажмите «➕ В корзину».</i>"),
+    },
+    'catalog_feed_footer': {
+        'uz': "📄 {page}/{pages}-sahifa · jami {total} ta mahsulot",
+        'ru': "📄 Страница {page}/{pages} · всего {total} товаров",
+    },
+    'catalog_card_feed': {
+        'uz': ("{badge}🛍 <b>{name}</b>\n"
+               "💰 <b>{price}</b>\n"
+               "{rating}{stock}"),
+        'ru': ("{badge}🛍 <b>{name}</b>\n"
+               "💰 <b>{price}</b>\n"
+               "{rating}{stock}"),
+    },
+    'catalog_badge_new': {
+        'uz': "🆕 <b>YANGI</b>\n",
+        'ru': "🆕 <b>НОВИНКА</b>\n",
+    },
+    'catalog_badge_cat': {
+        'uz': "{emoji} {name}\n",
+        'ru': "{emoji} {name}\n",
+    },
+    'catalog_card_new_rating': {
+        'uz': "✨ Yangi mahsulot",
+        'ru': "✨ Новый товар",
+    },
+    'btn_page_prev': {'uz': "◀️ Oldingi", 'ru': "◀️ Назад"},
+    'btn_page_next': {'uz': "Keyingi ▶️", 'ru': "Вперёд ▶️"},
+    'btn_shop_ai_search': {
+        'uz': "🤖 AI bilan qidirish",
+        'ru': "🤖 Поиск с ИИ",
+    },
+    'shop_ai_prompt': {
+        'uz': ("🤖 <b>{shop}</b> — AI qidiruv.\n"
+               "Nima qidiryapsiz? Oddiy so'z bilan yozing (masalan: «42 razmer qora krossovka» yoki "
+               "«100 mingdan arzon futbolka»). Men shu do'kondan eng mosini topib beraman."),
+        'ru': ("🤖 <b>{shop}</b> — поиск с ИИ.\n"
+               "Что вы ищете? Напишите простыми словами (например: «чёрные кроссовки 42 размер» или "
+               "«футболка дешевле 100 тысяч»). Я найду самое подходящее в этом магазине."),
+    },
 
     # --- QIDIRUVDA HUDUD ---
     'search_region_ask': {'uz': "📍 Qaysi hudud bo'yicha qidirasiz?", 'ru': "📍 По какому региону ищем?"},
@@ -1050,12 +1287,12 @@ _TEXTS = {
     # --- BUYURTMA TAFSILOTI ---
     'order_not_found': {'uz': "Buyurtma topilmadi.", 'ru': "Заказ не найден."},
     'pending_autocancel_left': {
-        'uz': "\n⏰ Avtomatik bekor: {m}:{s} qoldi",
-        'ru': "\n⏰ Автоотмена через: {m}:{s}",
+        'uz': "\n🔴 <b>Avtomatik bekor:</b> <b>{m}:{s}</b> qoldi",
+        'ru': "\n🔴 <b>Автоотмена через:</b> <b>{m}:{s}</b>",
     },
     'pending_autocancel_soon': {
-        'uz': "\n⏰ Tez orada avtomatik bekor bo'ladi",
-        'ru': "\n⏰ Скоро будет автоматически отменён",
+        'uz': "\n🔴 <b>Tez orada avtomatik bekor bo'ladi</b>",
+        'ru': "\n🔴 <b>Скоро будет автоматически отменён</b>",
     },
     'status_guide_pending': {
         'uz': "⏳ Sotuvchi hali tasdiqlamadi.{note}\nKuting yoki bekor qiling.",
@@ -1080,7 +1317,7 @@ _TEXTS = {
     'step_picked': {'uz': "✅ Olindi", 'ru': "✅ Получен"},
     'step_rated': {'uz': "⭐ Baholandi", 'ru': "⭐ Оценён"},
     'timeline_now': {'uz': "  ← hozir", 'ru': "  ← сейчас"},
-    'btn_cancel_order': {'uz': "❌ Bekor qilish", 'ru': "❌ Отменить"},
+    'btn_cancel_order': {'uz': "🔴 Bekor qilish", 'ru': "🔴 Отменить"},
     'btn_got_item': {'uz': "✅ Tovarni oldim", 'ru': "✅ Я получил товар"},
     'btn_reorder': {'uz': "🔁 Qaytadan buyurtma", 'ru': "🔁 Повторить заказ"},
     'btn_correspondence': {'uz': "📜 Yozishmalar", 'ru': "📜 Переписка"},
@@ -1109,12 +1346,313 @@ _TEXTS = {
         'ru': ("✅ Отлично! Заказ {oid} завершён.\n\n"
                "Приятных покупок! ⭐ Не забудьте оставить отзыв."),
     },
+    # --- Xaridor «oldim» bosgani, lekin buyurtma sotuvchi to'lovni belgilaguncha ochiq ---
+    'pickup_received_buyer': {
+        'uz': ("✅ Tovarni olganingiz qayd etildi! ({oid})\n\n"
+               "🧾 Buyurtma sotuvchi to'lovni yakunlagach yopiladi.\n"
+               "⭐ Yakunlangach reyting qoldirishingiz mumkin bo'ladi."),
+        'ru': ("✅ Получение товара зафиксировано! ({oid})\n\n"
+               "🧾 Заказ закроется после того, как продавец завершит оплату.\n"
+               "⭐ После завершения вы сможете оставить отзыв."),
+    },
+    'pickup_seller_finalize': {
+        'uz': ("✅ <b>Xaridor tovarni oldi!</b>\n\n"
+               "🧾 Buyurtma: <b>{oid}</b>\n📦 {pname}\n👤 {buyer}\n\n"
+               "💳 Endi to'lov holatini belgilab buyurtmani yakunlang:\n"
+               "<i>To'liq to'landi / Qarzga / Bo'lib to'lash</i>"),
+        'ru': ("✅ <b>Покупатель забрал товар!</b>\n\n"
+               "🧾 Заказ: <b>{oid}</b>\n📦 {pname}\n👤 {buyer}\n\n"
+               "💳 Теперь отметьте статус оплаты и завершите заказ:\n"
+               "<i>Оплачено полностью / В долг / Рассрочка</i>"),
+    },
+    'pickup_seller_finalize_group': {
+        'uz': ("✅ <b>Xaridor tovarlarni oldi!</b>\n\n"
+               "🛒 Savat buyurtma: <b>{oid}</b> ({n} ta mahsulot)\n👤 {buyer}\n\n"
+               "💳 Endi to'lov holatini belgilab buyurtmani yakunlang:\n"
+               "<i>To'liq to'landi / Qarzga / Bo'lib to'lash</i>"),
+        'ru': ("✅ <b>Покупатель забрал товары!</b>\n\n"
+               "🛒 Заказ-корзина: <b>{oid}</b> ({n} товаров)\n👤 {buyer}\n\n"
+               "💳 Теперь отметьте статус оплаты и завершите заказ:\n"
+               "<i>Оплачено полностью / В долг / Рассрочка</i>"),
+    },
+    'btn_finalize_payment': {
+        'uz': "💳 To'lovni belgilab yakunlash",
+        'ru': "💳 Отметить оплату и завершить",
+    },
+    'buyer_awaiting_finalize': {
+        'uz': "\n🧾 <i>Tovarni olganingiz qayd etildi. Sotuvchi to'lovni yakunlashi kutilmoqda.</i>",
+        'ru': "\n🧾 <i>Получение зафиксировано. Ожидается завершение оплаты продавцом.</i>",
+    },
+    # --- Jarayondagi (yakunlanmagan) buyurtma belgilari (sotuvchi) ---
+    'badge_in_progress': {
+        'uz': "⏳ <b>Jarayonda</b> — buyurtma hali yakunlanmagan",
+        'ru': "⏳ <b>В процессе</b> — заказ ещё не завершён",
+    },
+    'badge_awaiting_settlement': {
+        'uz': "🔔 <b>Xaridor tovarni oldi</b> — to'lovni belgilab yakunlang!",
+        'ru': "🔔 <b>Покупатель забрал товар</b> — отметьте оплату и завершите!",
+    },
+    'row_progress_tag': {'uz': " ⏳", 'ru': " ⏳"},
+    'orders_title_inprogress': {
+        'uz': "\n⏳ <b>{n} ta</b> buyurtma jarayonda (yakunlanmagan)",
+        'ru': "\n⏳ <b>{n}</b> заказ(ов) в процессе (не завершены)",
+    },
     'btn_orders_back': {'uz': "⬅️ Buyurtmalar", 'ru': "⬅️ Заказы"},
     'cant_cancel_status': {
         'uz': ("❌ Bu buyurtmani bekor qila olmaysiz (holat: {status}).\n"
                "Sotuvchi bilan bog'laning."),
         'ru': ("❌ Этот заказ нельзя отменить (статус: {status}).\n"
                "Свяжитесь с продавцом."),
+    },
+
+    # ===== SHARTNOMANI BEKOR QILISH (kelishuv + nizo) =====
+    # Tugmalar
+    'btn_request_cancel': {'uz': "🔴 Bekor qilishni so'rash", 'ru': "🔴 Запросить отмену"},
+    'btn_cancel_agree':   {'uz': "✅ Bekor qilishga roziman", 'ru': "✅ Согласен на отмену"},
+    'btn_cancel_deny':    {'uz': "❌ Rozi emasman", 'ru': "❌ Не согласен"},
+    'btn_dispute_pending': {'uz': "⚖️ Admin ko'rib chiqmoqda", 'ru': "⚖️ Рассматривает админ"},
+    'btn_open_dispute':   {'uz': "⚖️ Nizoni ochish", 'ru': "⚖️ Открыть спор"},
+    'btn_disputes_n':     {'uz': "⚖️ Nizolar ({n})", 'ru': "⚖️ Споры ({n})"},
+    'btn_dispute_cancel': {'uz': "🔴 Buyurtmani bekor qilish", 'ru': "🔴 Отменить заказ"},
+    'btn_dispute_keep':   {'uz': "🔁 Shartnomani kuchda qoldirish", 'ru': "🔁 Оставить договор в силе"},
+
+    # Tomon nomlari
+    'party_buyer':  {'uz': "Xaridor", 'ru': "Покупатель"},
+    'party_seller': {'uz': "Sotuvchi", 'ru': "Продавец"},
+
+    # Bekor sabablari — xaridor
+    'crsn_bchg':     {'uz': "🔄 Fikrim o'zgardi, kerak emas", 'ru': "🔄 Передумал, больше не нужно"},
+    'crsn_bprice':   {'uz': "💸 Narx menga to'g'ri kelmadi", 'ru': "💸 Цена меня не устроила"},
+    'crsn_bfound':   {'uz': "🏷 Boshqa joydan yaxshiroq topdim", 'ru': "🏷 Нашёл выгоднее в другом месте"},
+    'crsn_blate':    {'uz': "⏰ Yetkazib berish juda kech", 'ru': "⏰ Слишком долгая доставка"},
+    'crsn_bnoreach': {'uz': "📵 Sotuvchi bilan bog'lana olmadim", 'ru': "📵 Не смог связаться с продавцом"},
+    # Bekor sabablari — sotuvchi
+    'crsn_sstock':   {'uz': "📦 Mahsulot omborda qolmadi", 'ru': "📦 Товара не осталось на складе"},
+    'crsn_sprice':   {'uz': "💰 Narx xato ko'rsatilgan edi", 'ru': "💰 Цена была указана с ошибкой"},
+    'crsn_snoreach': {'uz': "📵 Xaridor bilan bog'lana olmadim", 'ru': "📵 Не смог связаться с покупателем"},
+    'crsn_snoaddr':  {'uz': "🚫 Bu manzilga yetkaza olmayman", 'ru': "🚫 Не могу доставить по этому адресу"},
+    'crsn_snopay':   {'uz': "⏳ Xaridor to'lovni amalga oshirmadi", 'ru': "⏳ Покупатель не оплатил"},
+    'crsn_other':    {'uz': "✍️ Boshqa sabab (o'zim yozaman)", 'ru': "✍️ Другая причина (напишу сам)"},
+    'crsn_unknown':  {'uz': "sabab ko'rsatilmagan", 'ru': "причина не указана"},
+
+    # Oqim xabarlari
+    'cancel_not_available': {
+        'uz': "⚠️ Bu buyurtma uchun bekor qilishni so'rab bo'lmaydi (holati o'zgargan).",
+        'ru': "⚠️ Для этого заказа нельзя запросить отмену (статус изменился).",
+    },
+    'cancel_pick_reason': {
+        'uz': "🚫 <b>{oid}</b> — bekor qilish sababini tanlang:",
+        'ru': "🚫 <b>{oid}</b> — выберите причину отмены:",
+    },
+    'cancel_reason_ask': {
+        'uz': "✍️ Bekor qilish sababini yozing:",
+        'ru': "✍️ Напишите причину отмены:",
+    },
+    'cancel_aborted': {
+        'uz': "Bekor qilish so'rovi to'xtatildi.",
+        'ru': "Запрос на отмену прерван.",
+    },
+    'cancel_requested_sent': {
+        'uz': ("✅ <b>{oid}</b> — bekor qilish so'rovingiz yuborildi.\n"
+               "Ikkinchi tomon roziligini kuting. Rozi bo'lmasa, masala admin'ga uzatiladi."),
+        'ru': ("✅ <b>{oid}</b> — ваш запрос на отмену отправлен.\n"
+               "Дождитесь согласия второй стороны. При отказе вопрос передаётся админу."),
+    },
+    'cancel_request_notify': {
+        'uz': ("🚫 <b>{oid}</b> bo'yicha bekor qilish so'rovi.\n"
+               "Mahsulot: <b>{pname}</b>\n"
+               "Sabab: {reason}\n\n"
+               "Bekor qilishga rozimisiz?"),
+        'ru': ("🚫 Запрос на отмену по <b>{oid}</b>.\n"
+               "Товар: <b>{pname}</b>\n"
+               "Причина: {reason}\n\n"
+               "Согласны на отмену?"),
+    },
+    'cancel_agreed_done': {
+        'uz': "✅ <b>{oid}</b> bekor qilindi. Ikkala tomon rozi bo'ldi.",
+        'ru': "✅ <b>{oid}</b> отменён. Обе стороны согласились.",
+    },
+    'cancel_agreed_notify': {
+        'uz': "✅ <b>{oid}</b> — <b>{pname}</b> bo'yicha bekor qilish so'rovingiz qabul qilindi. Buyurtma bekor qilindi.",
+        'ru': "✅ <b>{oid}</b> — ваш запрос на отмену по <b>{pname}</b> принят. Заказ отменён.",
+    },
+    'cancel_denied_done': {
+        'uz': "⚖️ <b>{oid}</b> — siz rozi bo'lmadingiz. Masala admin hakamligiga uzatildi.",
+        'ru': "⚖️ <b>{oid}</b> — вы не согласились. Вопрос передан на рассмотрение админу.",
+    },
+    'cancel_denied_notify': {
+        'uz': ("⚖️ <b>{oid}</b> — <b>{pname}</b> bo'yicha bekor qilish so'rovingizga ikkinchi tomon rozi bo'lmadi.\n"
+               "Masala admin'ga uzatildi, tez orada qaror chiqariladi."),
+        'ru': ("⚖️ <b>{oid}</b> — вторая сторона не согласилась с отменой по <b>{pname}</b>.\n"
+               "Вопрос передан админу, решение будет принято в ближайшее время."),
+    },
+    'cancel_already_handled': {
+        'uz': "ℹ️ Bu so'rov allaqachon ko'rib chiqilgan.",
+        'ru': "ℹ️ Этот запрос уже обработан.",
+    },
+    'cancel_wait_other': {
+        'uz': "Bu so'rovni siz boshlagansiz — ikkinchi tomon javobini kuting.",
+        'ru': "Этот запрос инициировали вы — дождитесь ответа второй стороны.",
+    },
+    'cancel_note_waiting': {
+        'uz': "\n\n⏳ Bekor so'rovingiz yuborilgan — ikkinchi tomon javobini kutmoqda.",
+        'ru': "\n\n⏳ Ваш запрос на отмену отправлен — ожидается ответ второй стороны.",
+    },
+    'cancel_note_incoming': {
+        'uz': "\n\n🚫 Ikkinchi tomon bekor qilishni so'radi — javob bering.",
+        'ru': "\n\n🚫 Вторая сторона запросила отмену — дайте ответ.",
+    },
+    'cancel_note_disputed': {
+        'uz': "\n\n⚖️ Bekor bo'yicha nizo — admin ko'rib chiqmoqda.",
+        'ru': "\n\n⚖️ Спор по отмене — рассматривает админ.",
+    },
+
+    # Admin — nizolar
+    'admin_dispute_notify': {
+        'uz': ("⚖️ <b>Yangi nizo</b> — {oid}\n"
+               "Mahsulot: <b>{pname}</b>\n"
+               "So'ragan: {by}\n"
+               "Sabab: {reason}\n\n"
+               "Qaror chiqarish uchun nizoni oching."),
+        'ru': ("⚖️ <b>Новый спор</b> — {oid}\n"
+               "Товар: <b>{pname}</b>\n"
+               "Запросил: {by}\n"
+               "Причина: {reason}\n\n"
+               "Откройте спор, чтобы вынести решение."),
+    },
+    'no_disputes': {
+        'uz': "✅ Hozircha hal qilinmagan nizolar yo'q.",
+        'ru': "✅ Нерешённых споров пока нет.",
+    },
+    'disputes_header': {
+        'uz': "⚖️ <b>Nizolar</b> ({n} ta):",
+        'ru': "⚖️ <b>Споры</b> ({n}):",
+    },
+    'dispute_not_found': {
+        'uz': "ℹ️ Bu nizo topilmadi yoki allaqachon hal qilingan.",
+        'ru': "ℹ️ Спор не найден или уже решён.",
+    },
+    'dispute_detail_body': {
+        'uz': ("⚖️ <b>Nizo</b> — {oid}\n\n"
+               "Mahsulot: <b>{pname}</b>\n"
+               "Miqdor: {qty} · Summa: {total}\n\n"
+               "👤 Xaridor: {buyer}\n"
+               "📞 {bphone}\n"
+               "🏪 Sotuvchi: {seller}\n"
+               "📞 {sphone}\n\n"
+               "Bekorni so'ragan: <b>{by}</b>\n"
+               "📝 Sabab: {reason}\n\n"
+               "Tomonlar bilan bog'laning, yozishmalarni ko'ring va qaror chiqaring:"),
+        'ru': ("⚖️ <b>Спор</b> — {oid}\n\n"
+               "Товар: <b>{pname}</b>\n"
+               "Кол-во: {qty} · Сумма: {total}\n\n"
+               "👤 Покупатель: {buyer}\n"
+               "📞 {bphone}\n"
+               "🏪 Продавец: {seller}\n"
+               "📞 {sphone}\n\n"
+               "Отмену запросил: <b>{by}</b>\n"
+               "📝 Причина: {reason}\n\n"
+               "Свяжитесь со сторонами, изучите переписку и вынесите решение:"),
+    },
+    'btn_contact_buyer':  {'uz': "👤 Xaridorga yozish", 'ru': "👤 Написать покупателю"},
+    'btn_contact_seller': {'uz': "🏪 Sotuvchiga yozish", 'ru': "🏪 Написать продавцу"},
+    'btn_reply_admin':    {'uz': "✍️ Adminga javob berish", 'ru': "✍️ Ответить админу"},
+    'admin_dm_ask': {
+        'uz': "✍️ <b>{who}</b>ga ({oid}) yubormoqchi bo'lgan xabaringizni yozing:",
+        'ru': "✍️ Напишите сообщение для <b>{who}</b> ({oid}):",
+    },
+    'admin_dm_notify': {
+        'uz': ("⚖️ <b>Admindan xabar</b> (buyurtma {oid} bo'yicha):\n\n{msg}"),
+        'ru': ("⚖️ <b>Сообщение от админа</b> (по заказу {oid}):\n\n{msg}"),
+    },
+    'admin_dm_sent':   {'uz': "✅ Xabar yuborildi.", 'ru': "✅ Сообщение отправлено."},
+    'admin_dm_failed': {
+        'uz': "⚠️ Xabar yetkazilmadi (foydalanuvchi botni bloklagan bo'lishi mumkin).",
+        'ru': "⚠️ Не удалось доставить (возможно, пользователь заблокировал бота).",
+    },
+    'dmreply_ask': {
+        'uz': "✍️ Admin'ga javobingizni yozing (buyurtma {oid}):",
+        'ru': "✍️ Напишите ваш ответ админу (заказ {oid}):",
+    },
+    'dmreply_notify': {
+        'uz': ("⚖️ <b>{who} javobi</b> — {name} (buyurtma {oid}):\n\n{msg}"),
+        'ru': ("⚖️ <b>Ответ: {who}</b> — {name} (заказ {oid}):\n\n{msg}"),
+    },
+    'dmreply_sent': {'uz': "✅ Javobingiz admin'ga yuborildi.", 'ru': "✅ Ваш ответ отправлен админу."},
+    'btn_dispute_messages': {'uz': "📜 Nizo yozishmalari", 'ru': "📜 Переписка по спору"},
+    'no_dispute_messages': {
+        'uz': "Bu buyurtma bo'yicha nizo yozishmalari yo'q.",
+        'ru': "По этому заказу нет переписки по спору.",
+    },
+    'dispute_messages_header': {
+        'uz': "📜 <b>Nizo yozishmalari</b> — {oid}\n",
+        'ru': "📜 <b>Переписка по спору</b> — {oid}\n",
+    },
+    'dm_admin_to_buyer':  {'uz': "⚖️ Admin → 👤 Xaridor", 'ru': "⚖️ Админ → 👤 Покупатель"},
+    'dm_admin_to_seller': {'uz': "⚖️ Admin → 🏪 Sotuvchi", 'ru': "⚖️ Админ → 🏪 Продавец"},
+    'dm_buyer_to_admin':  {'uz': "👤 Xaridor → ⚖️ Admin", 'ru': "👤 Покупатель → ⚖️ Админ"},
+    'dm_seller_to_admin': {'uz': "🏪 Sotuvchi → ⚖️ Admin", 'ru': "🏪 Продавец → ⚖️ Админ"},
+    'cancel_note_reason': {
+        'uz': "\n📝 Bekor sababi: {reason}",
+        'ru': "\n📝 Причина отмены: {reason}",
+    },
+    'dispute_resolved_cancel': {
+        'uz': "⚖️ <b>{oid}</b> — <b>{pname}</b> bo'yicha admin qarori: buyurtma <b>bekor qilindi</b>.",
+        'ru': "⚖️ <b>{oid}</b> — решение админа по <b>{pname}</b>: заказ <b>отменён</b>.",
+    },
+    'dispute_resolved_keep': {
+        'uz': "⚖️ <b>{oid}</b> — <b>{pname}</b> bo'yicha admin qarori: shartnoma <b>kuchda qoldirildi</b>.",
+        'ru': "⚖️ <b>{oid}</b> — решение админа по <b>{pname}</b>: договор <b>остаётся в силе</b>.",
+    },
+    'dispute_resolved_admin_cancel': {
+        'uz': "✅ {oid} — buyurtma bekor qilindi. Ikkala tomon xabardor qilindi.",
+        'ru': "✅ {oid} — заказ отменён. Обе стороны уведомлены.",
+    },
+    'dispute_resolved_admin_keep': {
+        'uz': "✅ {oid} — shartnoma kuchda qoldirildi. Ikkala tomon xabardor qilindi.",
+        'ru': "✅ {oid} — договор оставлен в силе. Обе стороны уведомлены.",
+    },
+
+    # ===== O'CHIRILGAN MAHSULOTLAR (audit jurnali) =====
+    'btn_deleted_products':  {'uz': "🗑 O'chirilgan mahsulotlar", 'ru': "🗑 Удалённые товары"},
+    'role_admin_word':       {'uz': "Admin", 'ru': "Админ"},
+    'audit_action_deleted':  {'uz': "🗑 Butunlay o'chirilgan", 'ru': "🗑 Удалён полностью"},
+    'audit_action_purged':   {'uz': "📦 Yashirilgan (buyurtma tarixi bor)", 'ru': "📦 Скрыт (есть история заказов)"},
+    'no_deleted_products': {
+        'uz': "✅ Hozircha o'chirilgan mahsulotlar yo'q.",
+        'ru': "✅ Удалённых товаров пока нет.",
+    },
+    'deleted_products_header': {
+        'uz': "🗑 <b>O'chirilgan mahsulotlar</b> ({n} ta):",
+        'ru': "🗑 <b>Удалённые товары</b> ({n}):",
+    },
+    'audit_not_found': {
+        'uz': "ℹ️ Bu yozuv topilmadi.",
+        'ru': "ℹ️ Запись не найдена.",
+    },
+    'audit_detail_body': {
+        'uz': ("🗑 <b>O'chirilgan mahsulot</b>\n\n"
+               "📦 Nom: <b>{name}</b>\n"
+               "💰 Narx: {price}\n"
+               "🗂 Kategoriya: {cat}\n"
+               "🏪 Do'kon: {shop}\n"
+               "🔢 Zahira: {stock}\n"
+               "🧾 Buyurtmalar soni: {orders}\n\n"
+               "Holat: {action}\n"
+               "👤 O'chirgan: {by} ({byname})\n"
+               "📅 Qo'shilgan: {created}\n"
+               "🗑 O'chirilgan: {deleted}"),
+        'ru': ("🗑 <b>Удалённый товар</b>\n\n"
+               "📦 Название: <b>{name}</b>\n"
+               "💰 Цена: {price}\n"
+               "🗂 Категория: {cat}\n"
+               "🏪 Магазин: {shop}\n"
+               "🔢 Остаток: {stock}\n"
+               "🧾 Кол-во заказов: {orders}\n\n"
+               "Статус: {action}\n"
+               "👤 Удалил: {by} ({byname})\n"
+               "📅 Добавлен: {created}\n"
+               "🗑 Удалён: {deleted}"),
     },
     'order_cancelled_done': {
         'uz': "✅ Buyurtma {oid} bekor qilindi.",
@@ -1197,6 +1735,164 @@ _TEXTS = {
     },
     'btn_confirm': {'uz': "✅ Tasdiqlash", 'ru': "✅ Подтвердить"},
     'btn_reject': {'uz': "❌ Rad etish", 'ru': "❌ Отклонить"},
+
+    # ===== BUYURTMA: jonli teskari sanoq + xaridor bilan bog'lanish =====
+    'countdown_sep': {
+        'uz': "\n\n➖➖➖➖➖➖➖➖➖➖\n",
+        'ru': "\n\n➖➖➖➖➖➖➖➖➖➖\n",
+    },
+    'countdown_line': {
+        'uz': "🔴 <b>{mins} daqiqa qoldi!</b>\n⏰ <b>{until}</b> gacha tasdiqlanmasa — buyurtma avtomatik bekor bo'ladi.",
+        'ru': "🔴 <b>Осталось {mins} мин!</b>\n⏰ Если не подтвердить до <b>{until}</b> — заказ будет автоматически отменён.",
+    },
+    'countdown_expired': {
+        'uz': "🔴 <b>Muddat tugadi</b>",
+        'ru': "🔴 <b>Время вышло</b>",
+    },
+    'countdown_cancelled': {
+        'uz': "❌ <b>Avtomatik bekor qilindi</b> (vaqt tugadi)",
+        'ru': "❌ <b>Автоматически отменён</b> (время вышло)",
+    },
+    'btn_contact_tg': {
+        'uz': "💬 Telegram'da yozish",
+        'ru': "💬 Написать в Telegram",
+    },
+    'btn_contact_relay': {
+        'uz': "✉️ Bot orqali yuborish",
+        'ru': "✉️ Отправить через бота",
+    },
+    'frag_buyer_username': {
+        'uz': "\n💬 @{uname}",
+        'ru': "\n💬 @{uname}",
+    },
+
+    # ===== TO'LOV HOLATI (settlement) + QARZ DAFTARI =====
+    'btn_debts': {'uz': "💳 Qarzlar", 'ru': "💳 Долги"},
+    'btn_my_debts': {'uz': "💳 Mening qarzlarim", 'ru': "💳 Мои долги"},
+    'setl_ask': {
+        'uz': ("💳 <b>To'lov holati</b>\n\nMahsulot berildi. Jami: <b>{total}</b>\n"
+               "Xaridor qanday to'ladi?"),
+        'ru': ("💳 <b>Статус оплаты</b>\n\nТовар выдан. Итого: <b>{total}</b>\n"
+               "Как покупатель оплатил?"),
+    },
+    'setl_paid_btn': {'uz': "✅ To'liq to'landi", 'ru': "✅ Оплачено полностью"},
+    'setl_debt_btn': {'uz': "📝 Qarzga berildi", 'ru': "📝 В долг"},
+    'setl_inst_btn': {'uz': "📊 Bo'lib to'lashga", 'ru': "📊 В рассрочку"},
+    'setl_amount_ask': {
+        'uz': "💵 Hozir qancha to'landi? (Jami: {total})",
+        'ru': "💵 Сколько оплачено сейчас? (Итого: {total})",
+    },
+    'setl_amt_zero': {'uz': "Hammasi qarz (0)", 'ru': "Всё в долг (0)"},
+    'setl_amt_half': {'uz': "Yarmi (50%)", 'ru': "Половина (50%)"},
+    'setl_amt_custom': {'uz': "✏️ Boshqa summa", 'ru': "✏️ Другая сумма"},
+    'setl_custom_ask': {
+        'uz': "✏️ Hozir to'langan summani yozing (faqat raqam). Jami: {total}",
+        'ru': "✏️ Введите оплаченную сумму (только число). Итого: {total}",
+    },
+    'setl_amount_invalid': {
+        'uz': "⚠️ Noto'g'ri summa. Faqat raqam kiriting (masalan: 50000).",
+        'ru': "⚠️ Неверная сумма. Введите только число (например: 50000).",
+    },
+    'setl_expired': {
+        'uz': "⚠️ Sessiya tugadi. Buyurtmani qaytadan oching.",
+        'ru': "⚠️ Сессия истекла. Откройте заказ заново.",
+    },
+    'setl_done_paid': {
+        'uz': "✅ Buyurtma berildi va to'liq to'landi deb belgilandi.",
+        'ru': "✅ Заказ выдан и отмечен как полностью оплаченный.",
+    },
+    'setl_done_debt': {
+        'uz': ("✅ Buyurtma berildi.\n💵 To'landi: <b>{paid}</b>\n📝 Qarz: <b>{due}</b>\n\n"
+               "Qarz «💳 Qarzlar» bo'limida saqlanadi."),
+        'ru': ("✅ Заказ выдан.\n💵 Оплачено: <b>{paid}</b>\n📝 Долг: <b>{due}</b>\n\n"
+               "Долг сохранён в разделе «💳 Долги»."),
+    },
+    'badge_paid': {'uz': "💳 <b>To'liq to'langan</b>", 'ru': "💳 <b>Оплачено полностью</b>"},
+    'badge_debt': {'uz': "Qarz", 'ru': "Долг"},
+    'badge_installment': {'uz': "Bo'lib to'lash", 'ru': "Рассрочка"},
+    'badge_due': {
+        'uz': "💳 <b>{label}:</b> {due} qoldi (to'langan: {paid})",
+        'ru': "💳 <b>{label}:</b> осталось {due} (оплачено: {paid})",
+    },
+    'buyer_debt_notify': {
+        'uz': "\n\n📝 <b>Diqqat:</b> Siz {shop} do'koniga <b>{due}</b> qarzdorsiz.",
+        'ru': "\n\n📝 <b>Внимание:</b> Вы должны магазину {shop} <b>{due}</b>.",
+    },
+    # Qarzlar ekrani (sotuvchi)
+    'debts_empty': {
+        'uz': "💳 Hozircha ochiq qarz yo'q. Hamma to'lovlar joyida! ✅",
+        'ru': "💳 Открытых долгов пока нет. Все оплаты в порядке! ✅",
+    },
+    'debts_title': {
+        'uz': ("💳 <b>Qarzlar daftari</b>\n"
+               "💰 Jami kutilayotgan qarz: <b>{total}</b>\n"
+               "<i>Batafsil ko'rish va to'lov qayd etish uchun xaridorni tanlang.</i>\n"),
+        'ru': ("💳 <b>Книга долгов</b>\n"
+               "💰 Всего ожидается: <b>{total}</b>\n"
+               "<i>Выберите покупателя, чтобы увидеть детали и отметить оплату.</i>\n"),
+    },
+    'debts_buyer_line': {
+        'uz': "\n👤 <b>{name}</b> — qarz: <b>{due}</b> ({cnt} ta buyurtma)",
+        'ru': "\n👤 <b>{name}</b> — долг: <b>{due}</b> ({cnt} заказ.)",
+    },
+    'debts_buyer_btn': {
+        'uz': "👤 {name}: {due}",
+        'ru': "👤 {name}: {due}",
+    },
+    'debts_buyer_clear': {
+        'uz': "✅ {name} — qarz qolmadi.",
+        'ru': "✅ {name} — долгов не осталось.",
+    },
+    'debts_buyer_header': {
+        'uz': ("👤 <b>{name}</b>\n📞 {phone}\n"
+               "📝 Jami qarz: <b>{total}</b> · {cnt} ta buyurtma\n"),
+        'ru': ("👤 <b>{name}</b>\n📞 {phone}\n"
+               "📝 Всего долг: <b>{total}</b> · {cnt} заказ.\n"),
+    },
+    'debts_order_row': {
+        'uz': ("\n🧾 <b>{oid}</b> · {pname} <i>({kind})</i>\n"
+               "   💰 Jami: {total} · 💵 To'langan: {paid}\n"
+               "   📝 Qolgan qarz: <b>{due}</b>\n   📅 {date}"),
+        'ru': ("\n🧾 <b>{oid}</b> · {pname} <i>({kind})</i>\n"
+               "   💰 Итого: {total} · 💵 Оплачено: {paid}\n"
+               "   📝 Остаток долга: <b>{due}</b>\n   📅 {date}"),
+    },
+    'debt_pay_full_btn': {'uz': "✅ To'liq to'landi", 'ru': "✅ Оплачен полностью"},
+    'debt_pay_part_btn': {'uz': "💵 Qisman", 'ru': "💵 Частично"},
+    'debt_part_ask': {
+        'uz': "💵 Qancha to'landi? (Qarz: {due}). Faqat raqam yozing.",
+        'ru': "💵 Сколько оплачено? (Долг: {due}). Введите только число.",
+    },
+    'debt_settled_toast': {'uz': "✅ Qarz to'liq yopildi", 'ru': "✅ Долг полностью погашен"},
+    'debt_settled_msg': {
+        'uz': "✅ Qarz to'liq yopildi.",
+        'ru': "✅ Долг полностью погашен.",
+    },
+    'debt_part_done': {
+        'uz': "✅ To'lov qayd etildi: <b>{paid}</b>\n📝 Qolgan qarz: <b>{due}</b>",
+        'ru': "✅ Оплата зафиксирована: <b>{paid}</b>\n📝 Остаток долга: <b>{due}</b>",
+    },
+    'buyer_debt_cleared': {
+        'uz': "✅ {shop} do'koniga qarzingiz to'liq yopildi. Rahmat!",
+        'ru': "✅ Ваш долг магазину {shop} полностью погашен. Спасибо!",
+    },
+    'buyer_debt_partial': {
+        'uz': "💵 {shop}: to'lovingiz qabul qilindi (<b>{paid}</b>).\n📝 Qolgan qarz: <b>{due}</b>",
+        'ru': "💵 {shop}: ваша оплата принята (<b>{paid}</b>).\n📝 Остаток долга: <b>{due}</b>",
+    },
+    # Mening qarzlarim (xaridor)
+    'my_debts_empty': {
+        'uz': "💳 Sizda ochiq qarz yo'q. ✅",
+        'ru': "💳 У вас нет открытых долгов. ✅",
+    },
+    'my_debts_title': {
+        'uz': "💳 <b>Mening qarzlarim</b>\nJami: <b>{total}</b>\n",
+        'ru': "💳 <b>Мои долги</b>\nВсего: <b>{total}</b>\n",
+    },
+    'my_debts_row': {
+        'uz': "🏪 {shop} — <b>{due}</b>",
+        'ru': "🏪 {shop} — <b>{due}</b>",
+    },
     'order_confirm_summary': {
         'uz': ("🛒 <b>Buyurtmani tasdiqlang:</b>\n\n"
                "📦 Mahsulot: {pname}\n"
@@ -1233,18 +1929,14 @@ _TEXTS = {
                "💰 Jami: <b>{total}</b>\n"
                "👤 Xaridor: {buyer}\n"
                "📞 {phone}\n"
-               "🚚 {dlv}\n"
-               "\n⏳ <b>10 daqiqa ichida tasdiqlang!</b>\n"
-               "<i>Aks holda buyurtma avtomatik bekor bo'ladi.</i>\n"),
+               "🚚 {dlv}\n"),
         'ru': ("🔔 <b>Новый заказ!</b> {oid}\n\n"
                "📦 {pname}\n"
                "🔢 Кол-во: {qty}\n"
                "💰 Итого: <b>{total}</b>\n"
                "👤 Покупатель: {buyer}\n"
                "📞 {phone}\n"
-               "🚚 {dlv}\n"
-               "\n⏳ <b>Подтвердите в течение 10 минут!</b>\n"
-               "<i>Иначе заказ будет автоматически отменён.</i>\n"),
+               "🚚 {dlv}\n"),
     },
     'frag_dist_from_shop': {
         'uz': "📏 Do'kondan masofa: ~{km} km\n",
@@ -1533,6 +2225,75 @@ _TEXTS = {
     },
     'review_shop_to': {'uz': "\n🏪 Do'konga: ", 'ru': "\n🏪 Магазину: "},
     'review_product_to': {'uz': "\n📦 Mahsulotga: ", 'ru': "\n📦 Товару: "},
+    'review_product_unknown': {'uz': "Mahsulot o'chirilgan", 'ru': "Товар удалён"},
+    'review_no_comment': {'uz': "izoh qoldirilmagan", 'ru': "без комментария"},
+    'review_shop_reply': {'uz': "🏪 <b>Do'kon javobi:</b>", 'ru': "🏪 <b>Ответ магазина:</b>"},
+    'review_reply_btn': {'uz': "✍️ {n}-izohga javob", 'ru': "✍️ Ответить на отзыв {n}"},
+    'review_reply_prompt': {
+        'uz': ("✍️ <b>{product}</b> mahsulotidagi izohga javob yozing:\n"
+               "💬 <i>{comment}</i>\n\n"
+               "Javobingizni matn ko'rinishida yuboring (xushmuomala va professional bo'ling). "
+               "Bekor qilish uchun pastki menyudan boshqa bo'limni tanlang."),
+        'ru': ("✍️ Напишите ответ на отзыв к товару <b>{product}</b>:\n"
+               "💬 <i>{comment}</i>\n\n"
+               "Отправьте ответ текстом (вежливо и профессионально). "
+               "Для отмены выберите другой раздел в меню."),
+    },
+    'review_reply_too_short': {
+        'uz': "⚠️ Javob juda qisqa. Iltimos, to'liqroq yozing.",
+        'ru': "⚠️ Ответ слишком короткий. Напишите подробнее.",
+    },
+    'review_reply_saved': {
+        'uz': "✅ Javobingiz e'lon qilindi — endi mahsulot izohlari ostida hammaga ko'rinadi.",
+        'ru': "✅ Ваш ответ опубликован — теперь он виден всем под отзывами к товару.",
+    },
+    'review_reply_not_yours': {
+        'uz': "⛔ Bu izoh sizning do'koningizga tegishli emas.",
+        'ru': "⛔ Этот отзыв не относится к вашему магазину.",
+    },
+    'buyer_review_reply_notify': {
+        'uz': ("💬 <b>{shop}</b> sizning sharhingizga javob berdi!\n\n"
+               "📦 {product}\n"
+               "🗣 Sizning izohingiz: <i>{comment}</i>\n\n"
+               "🏪 <b>Do'kon javobi:</b>\n{reply}"),
+        'ru': ("💬 <b>{shop}</b> ответил(а) на ваш отзыв!\n\n"
+               "📦 {product}\n"
+               "🗣 Ваш отзыв: <i>{comment}</i>\n\n"
+               "🏪 <b>Ответ магазина:</b>\n{reply}"),
+    },
+    # AI tuzgan javob — tasdiq kartasi
+    'ai_review_reply_card': {
+        'uz': ("✍️ <b>Izohga javob (tayyor)</b>\n\n"
+               "📦 {product}\n"
+               "💬 Izoh: <i>{comment}</i>\n\n"
+               "🏪 <b>Javob:</b>\n{reply}\n\n"
+               "E'lon qilsangiz — izoh ostida hammaga ko'rinadi."),
+        'ru': ("✍️ <b>Ответ на отзыв (готов)</b>\n\n"
+               "📦 {product}\n"
+               "💬 Отзыв: <i>{comment}</i>\n\n"
+               "🏪 <b>Ответ:</b>\n{reply}\n\n"
+               "При публикации ответ будет виден всем под отзывом."),
+    },
+    'ai_review_publish_btn': {
+        'uz': "✅ Javobni e'lon qilish",
+        'ru': "✅ Опубликовать ответ",
+    },
+    'ai_review_reply_expired': {
+        'uz': "⚠️ Javob qoralamasi topilmadi. Qaytadan urinib ko'ring.",
+        'ru': "⚠️ Черновик ответа не найден. Попробуйте снова.",
+    },
+    'ai_review_gen_btn': {
+        'uz': "🤖 AI yozib bersin",
+        'ru': "🤖 Пусть ИИ напишет",
+    },
+    'ai_review_regen_btn': {
+        'uz': "🔄 Boshqa variant",
+        'ru': "🔄 Другой вариант",
+    },
+    'ai_review_gen_failed': {
+        'uz': "⚠️ AI hozir javob yoza olmadi. Qaytadan urinib ko'ring yoki javobni o'zingiz yozing.",
+        'ru': "⚠️ ИИ сейчас не смог написать ответ. Попробуйте снова или напишите ответ сами.",
+    },
     'reviews_old_cut_seller': {
         'uz': "\n\n…(eski reytinglar kesildi)",
         'ru': "\n\n…(старые отзывы обрезаны)",
@@ -1651,6 +2412,41 @@ _TEXTS = {
     'frag_photos_saved': {'uz': "\n🖼 {n} ta rasm saqlandi.", 'ru': "\n🖼 Сохранено {n} фото."},
     'frag_attrs_saved': {'uz': "\n📋 {n} ta xususiyat saqlandi.", 'ru': "\n📋 Сохранено {n} характеристик."},
 
+    # --- MAHSULOT JOYLASH USULI (rejim tanlash) ---
+    'choose_post_mode': {
+        'uz': ("🧩 <b>Mahsulotni qanday joylaymiz?</b>\n\n"
+               "📋 <b>Klassik</b> — har kategoriya uchun standart savollar (tez, oddiy).\n"
+               "🤖 <b>AI savollar</b> — sun'iy intellekt aynan sizning mahsulotingizga mos "
+               "savollar beradi.\n"
+               "✨ <b>AI aqlli</b> — tavsifdan o'zi tushunadi, faqat yetishmaganini so'raydi.\n\n"
+               "Qulay usulni tanlang 👇"),
+        'ru': ("🧩 <b>Как разместим товар?</b>\n\n"
+               "📋 <b>Классика</b> — стандартные вопросы по категории (быстро, просто).\n"
+               "🤖 <b>ИИ-вопросы</b> — искусственный интеллект задаёт вопросы именно под "
+               "ваш товар.\n"
+               "✨ <b>ИИ-умный</b> — сам поймёт из описания, спросит только недостающее.\n\n"
+               "Выберите удобный способ 👇"),
+    },
+    'btn_mode_classic': {'uz': "📋 Klassik", 'ru': "📋 Классика"},
+    'btn_mode_ai_guided': {'uz': "🤖 AI savollar", 'ru': "🤖 ИИ-вопросы"},
+    'btn_mode_ai_smart': {'uz': "✨ AI aqlli", 'ru': "✨ ИИ-умный"},
+    'ai_questions_thinking': {
+        'uz': "🤖 Mahsulotingizga mos savollar tayyorlanmoqda…",
+        'ru': "🤖 Готовлю вопросы под ваш товар…",
+    },
+    'ai_questions_failed': {
+        'uz': "ℹ️ AI savollar tayyorlanmadi — standart savollarga o'tamiz.",
+        'ru': "ℹ️ ИИ-вопросы не получились — переходим к стандартным.",
+    },
+    'ai_smart_prefilled': {
+        'uz': "✨ Tavsifdan quyidagilar aniqlandi:\n{lines}",
+        'ru': "✨ Из описания определено:\n{lines}",
+    },
+    'ai_smart_no_questions': {
+        'uz': "✨ Hammasi tushunarli — qo'shimcha savol yo'q. Saqlayapmiz…",
+        'ru': "✨ Всё понятно — дополнительных вопросов нет. Сохраняем…",
+    },
+
     # --- MAHSULOTLARIM RO'YXATI ---
     'my_products_overview': {
         'uz': ("📦 <b>Mahsulotlarim</b>\n\n"
@@ -1732,6 +2528,45 @@ _TEXTS = {
     'stock_set_unlimited': {'uz': "✅ Zahira: cheklanmagan qilib belgilandi.", 'ru': "✅ Остаток: установлен без лимита."},
     'stock_set_n': {'uz': "✅ Zahira: {n} dona qilib belgilandi.", 'ru': "✅ Остаток: установлено {n} шт."},
 
+    # --- ZAXIRA: mahsulot qo'shishda miqdor so'rash ---
+    'add_product_stock_ask': {
+        'uz': ("📦 Bu mahsulotdan nechta dona sotuvga qo'yasiz?\n\n"
+               "Tugmani tanlang — aniq miqdor qo'ysangiz, sotilib tugaganda mahsulot "
+               "avtomatik zaxiraga olinadi."),
+        'ru': ("📦 Сколько штук этого товара выставляете на продажу?\n\n"
+               "Выберите вариант — при точном количестве товар автоматически уйдёт в резерв, "
+               "когда всё распродастся."),
+    },
+    'btn_stock_unlimited': {'uz': "♾ Cheksiz", 'ru': "♾ Без лимита"},
+    'btn_stock_limited':   {'uz': "🔢 Aniq miqdor", 'ru': "🔢 Точное количество"},
+    # Mahsulot qo'shish — bosqichlar orasida navigatsiya
+    'btn_back_step':       {'uz': "⬅️ Orqaga", 'ru': "⬅️ Назад"},
+    'btn_skip_step':       {'uz': "⏭ O'tkazib yuborish", 'ru': "⏭ Пропустить"},
+    'add_product_stock_enter': {
+        'uz': "🔢 Nechta dona sotuvga qo'yasiz? Faqat raqam kiriting (masalan: 10):",
+        'ru': "🔢 Сколько штук выставляете? Введите только число (например: 10):",
+    },
+    'stock_enter_invalid': {
+        'uz': "❌ Iltimos, 0 dan katta butun son kiriting (masalan: 10):",
+        'ru': "❌ Введите целое число больше 0 (например: 10):",
+    },
+    'frag_stock_saved':   {'uz': "\n📦 Zaxira: {n} dona", 'ru': "\n📦 Остаток: {n} шт"},
+    'frag_stock_unlim':   {'uz': "\n♾ Zaxira: cheksiz", 'ru': "\n♾ Остаток: без лимита"},
+
+    # --- Sotilib tugaganda sotuvchiga avtomatik xabar ---
+    'stock_sold_out_notify': {
+        'uz': ("📦 <b>{name}</b> mahsulotingiz to'liq sotilib tugadi va avtomatik "
+               "<b>zaxiraga</b> olindi.\n\nQayta sotuvga qo'yish uchun zaxira sonini yangilang 👇"),
+        'ru': ("📦 Ваш товар <b>{name}</b> полностью распродан и автоматически "
+               "переведён в <b>резерв</b>.\n\nЧтобы снова выставить — обновите остаток 👇"),
+    },
+
+    # --- Zaxira sonini belgilash (tugmali) ---
+    'set_stock_choose': {
+        'uz': "📦 Zaxira (sotuvga qo'yiladigan miqdor)ni qanday belgilaymiz?",
+        'ru': "📦 Как указать остаток (количество для продажи)?",
+    },
+
     # --- O'CHIRISH ---
     'delete_confirm_ask': {
         'uz': "⚠️ Haqiqatan ham bu mahsulotni o'chirmoqchimisiz?\nBu amalni qaytarib bo'lmaydi!",
@@ -1796,9 +2631,9 @@ _TEXTS = {
     'attr_updated': {'uz': "✅ Xususiyat yangilandi.", 'ru': "✅ Характеристика обновлена."},
 
     # --- SOTUVCHI BUYURTMALARI RO'YXATI ---
-    'seller_order_group_row': {'uz': "{emoji} 🛒 {buyer} — {count} ta • {sum}", 'ru': "{emoji} 🛒 {buyer} — {count} шт • {sum}"},
-    'seller_order_row': {'uz': "{emoji} {buyer} — {total}", 'ru': "{emoji} {buyer} — {total}"},
-    'orders_title': {'uz': "🛒 Buyurtmalar:", 'ru': "🛒 Заказы:"},
+    'seller_order_group_row': {'uz': "{emoji}{prog} {buyer} • 🛒 {count} ta — {sum}", 'ru': "{emoji}{prog} {buyer} • 🛒 {count} шт — {sum}"},
+    'seller_order_row': {'uz': "{emoji}{prog} {buyer} • {pname} ×{qty} — {total}", 'ru': "{emoji}{prog} {buyer} • {pname} ×{qty} — {total}"},
+    'orders_title': {'uz': "🛒 <b>Buyurtmalar</b>\n<i>Shartnomani to'liq ko'rish uchun ustiga bosing.</i>", 'ru': "🛒 <b>Заказы</b>\n<i>Нажмите на заказ для подробностей.</i>"},
 
     # --- GURUH HOLATI O'ZGARISHI (xaridorga bildirishnoma) ---
     'grp_confirmed_pickup': {
@@ -1998,6 +2833,31 @@ _TEXTS = {
     'btn_block': {'uz': "🔒 Bloklash", 'ru': "🔒 Заблокировать"},
     'btn_unverify_seller': {'uz': "🔴 Sotuvchi tasdiqlashni bekor qilish", 'ru': "🔴 Отозвать подтверждение продавца"},
     'btn_verify_seller': {'uz': "✅ Sotuvchini tasdiqlash", 'ru': "✅ Подтвердить продавца"},
+    # --- ADMIN: PROFIL KAMCHILIKLARINI TO'LDIRISHNI SO'RASH (AI) ---
+    'btn_request_fill': {'uz': "📝 Kamchiliklarni to'ldirishni so'rash (AI)", 'ru': "📝 Попросить заполнить профиль (ИИ)"},
+    'fill_none_missing': {'uz': "✅ Profil to'liq — kamchilik yo'q.", 'ru': "✅ Профиль заполнен — пропусков нет."},
+    'fill_generating': {'uz': "🤖 AI xabar tayyorlayapti…", 'ru': "🤖 ИИ готовит сообщение…"},
+    'fill_ai_error': {'uz': "❌ AI xabar yarata olmadi. Qayta urinib ko'ring.", 'ru': "❌ ИИ не смог создать сообщение. Попробуйте ещё раз."},
+    'fill_ai_off': {'uz': "🤖 AI sozlanmagan (DEEPSEEK_API_KEY yo'q).", 'ru': "🤖 ИИ не настроен (нет DEEPSEEK_API_KEY)."},
+    'fill_preview': {
+        'uz': ("📝 <b>Profilni to'ldirish so'rovi</b>\n\n"
+               "👤 Foydalanuvchi: {name}\n"
+               "❗️ Yetishmayotgan ma'lumotlar:\n{missing}\n\n"
+               "✉️ <b>Foydalanuvchiga yuboriladigan xabar (AI taklifi):</b>\n"
+               "————————————\n{msg}\n————————————\n\n"
+               "Yoqsa «Yuborish», yoqmasa «Qayta yaratish» bosing."),
+        'ru': ("📝 <b>Запрос на заполнение профиля</b>\n\n"
+               "👤 Пользователь: {name}\n"
+               "❗️ Недостающие данные:\n{missing}\n\n"
+               "✉️ <b>Сообщение для пользователя (предложение ИИ):</b>\n"
+               "————————————\n{msg}\n————————————\n\n"
+               "Нравится — «Отправить», нет — «Сгенерировать заново»."),
+    },
+    'btn_fill_send': {'uz': "✅ Foydalanuvchiga yuborish", 'ru': "✅ Отправить пользователю"},
+    'btn_fill_regen': {'uz': "🔄 Qayta yaratish", 'ru': "🔄 Сгенерировать заново"},
+    'fill_expired': {'uz': "⏳ Xabar eskirdi — «Qayta yaratish» bosing.", 'ru': "⏳ Сообщение устарело — нажмите «Сгенерировать заново»."},
+    'fill_sent_ok': {'uz': "✅ Xabar foydalanuvchiga yuborildi.", 'ru': "✅ Сообщение отправлено пользователю."},
+    'fill_send_failed': {'uz': "❌ Yuborib bo'lmadi (foydalanuvchi botni bloklagan bo'lishi mumkin).", 'ru': "❌ Не удалось отправить (возможно, пользователь заблокировал бота)."},
     'adu_yes': {'uz': "✅ Ha", 'ru': "✅ Да"},
     'adu_no': {'uz': "❌ Yo'q", 'ru': "❌ Нет"},
     'adu_status_active': {'uz': "🟢 Faol", 'ru': "🟢 Активен"},
@@ -2329,8 +3189,8 @@ _TEXTS = {
     'admin_msg_failed': {'uz': "❌ Xabar yuborib bo'lmadi. Keyinroq urinib ko'ring.", 'ru': "❌ Не удалось отправить сообщение. Попробуйте позже."},
     'admin_msg_prefix': {'uz': "📢 Admin xabari\n\n{text}", 'ru': "📢 Сообщение от администратора\n\n{text}"},
     'admin_reply_prefix': {'uz': "💬 <b>Admin javobi:</b>\n\n{text}", 'ru': "💬 <b>Ответ администратора:</b>\n\n{text}"},
-    'broadcast_sent': {'uz': "✅ {n} ta foydalanuvchiga yuborildi.", 'ru': "✅ Отправлено {n} пользователям."},
-    'broadcast_failed_n': {'uz': "\n❌ {n} ta foydalanuvchiga yuborilmadi.", 'ru': "\n❌ Не отправлено {n} пользователям."},
+    'broadcast_sent': {'uz': "📢 <b>Xabar yuborildi</b>\n\n✅ <b>{n} ta</b> foydalanuvchiga yetkazildi.", 'ru': "📢 <b>Рассылка завершена</b>\n\n✅ Доставлено <b>{n}</b> пользователям."},
+    'broadcast_failed_n': {'uz': "\n❌ <b>{n} ta</b> foydalanuvchiga yetkazilmadi.", 'ru': "\n❌ Не доставлено <b>{n}</b> пользователям."},
     'broadcast_reason': {'uz': "\n\nSabab (birinchi xato): {err}", 'ru': "\n\nПричина (первая ошибка): {err}"},
     'broadcast_failed_list_title': {
         'uz': "\n\n📋 <b>Yuborilmaganlar:</b>",
@@ -2734,6 +3594,32 @@ _TEXTS = {
         'uz': "🎉 E'lon joylandi! Mahsulot #{id} sotuvga qo'shildi va kanalga e'lon qilindi.",
         'ru': "🎉 Объявление опубликовано! Товар #{id} добавлен в продажу и размещён в канале.",
     },
+    'ai_order_action_card': {
+        'uz': ("📦 <b>Buyurtma {oid}</b>\n\n"
+               "🏷 {product}\n"
+               "🔢 Soni: {qty}\n"
+               "👤 Xaridor: {buyer}\n"
+               "💰 {price}\n\n"
+               "Amalni tasdiqlash uchun quyidagi tugmani bosing."),
+        'ru': ("📦 <b>Заказ {oid}</b>\n\n"
+               "🏷 {product}\n"
+               "🔢 Кол-во: {qty}\n"
+               "👤 Покупатель: {buyer}\n"
+               "💰 {price}\n\n"
+               "Нажмите кнопку ниже, чтобы подтвердить действие."),
+    },
+    'ai_order_btn_confirm': {
+        'uz': "✅ Buyurtmani tasdiqlash",
+        'ru': "✅ Подтвердить заказ",
+    },
+    'ai_order_btn_deliver': {
+        'uz': "📬 Yetkazilgan deb belgilash",
+        'ru': "📬 Отметить доставленным",
+    },
+    'ai_order_btn_cancel': {
+        'uz': "❌ Buyurtmani rad etish",
+        'ru': "❌ Отклонить заказ",
+    },
     'admin_kb_cleared': {
         'uz': "🛠 Admin rejimi",
         'ru': "🛠 Режим админа",
@@ -2756,6 +3642,14 @@ _TEXTS = {
     'ad_regen': {
         'uz': "🔄 Boshqa variant yozish",
         'ru': "🔄 Другой вариант текста",
+    },
+    'ad_len_long': {
+        'uz': "📏 Uzun matn",
+        'ru': "📏 Длинный текст",
+    },
+    'ad_len_short': {
+        'uz': "✂️ Qisqa matn",
+        'ru': "✂️ Короткий текст",
     },
     'ad_edit_text': {
         'uz': "✏️ Matnni o'zim tahrirlayman",
@@ -2791,6 +3685,386 @@ _TEXTS = {
         'uz': "✅ Mahsulot #{id} saqlandi. Endi reklama ko'rinishini tekshiring 👇",
         'ru': "✅ Товар #{id} сохранён. Теперь проверьте предпросмотр рекламы 👇",
     },
+
+    # ===== REJALASHTIRILGAN POST (avtomatik sotuvga qo'yish) =====
+    'ad_schedule_btn': {
+        'uz': "⏰ Keyin chiqarish (rejalashtirish)",
+        'ru': "⏰ Опубликовать позже (по расписанию)",
+    },
+    'sched_pick_date': {
+        'uz': ("⏰ <b>Rejalashtirish</b>\n\nMahsulot qaysi <b>kuni</b> chiqsin?\n"
+               "(Belgilangan vaqtgacha mahsulot botda ko'rinmaydi.)"),
+        'ru': ("⏰ <b>Расписание</b>\n\nВ какой <b>день</b> опубликовать товар?\n"
+               "(До назначенного времени товар не виден в боте.)"),
+    },
+    'sched_pick_hour': {
+        'uz': "🕐 Qaysi <b>soatda</b> chiqsin?",
+        'ru': "🕐 В каком <b>часу</b> опубликовать?",
+    },
+    'sched_pick_minute': {
+        'uz': "🕐 Soat <b>{hour}</b> — necha <b>daqiqada</b>?",
+        'ru': "🕐 Час <b>{hour}</b> — на какой <b>минуте</b>?",
+    },
+    'sched_today': {'uz': "Bugun", 'ru': "Сегодня"},
+    'sched_tomorrow': {'uz': "Ertaga", 'ru': "Завтра"},
+    'sched_abort_btn': {'uz': "❌ Bekor qilish", 'ru': "❌ Отмена"},
+    'sched_in_past': {
+        'uz': "⚠️ Bu vaqt o'tib ketgan. Kelajakdagi vaqtni tanlang.",
+        'ru': "⚠️ Это время уже прошло. Выберите будущее время.",
+    },
+    'sched_confirmed': {
+        'uz': ("✅ <b>Rejalashtirildi!</b>\n\n📦 {name}\n🕐 <b>{when}</b> (Toshkent vaqti)\n\n"
+               "Belgilangan vaqtda mahsulot avtomatik sotuvga qo'yiladi va kanal/guruhlarga "
+               "reklama chiqadi. Hozircha mahsulot botda ko'rinmaydi."),
+        'ru': ("✅ <b>Запланировано!</b>\n\n📦 {name}\n🕐 <b>{when}</b> (по Ташкенту)\n\n"
+               "В назначенное время товар автоматически поступит в продажу и реклама "
+               "опубликуется в каналах/группах. Пока товар не виден в боте."),
+    },
+    'sched_aborted': {
+        'uz': "❌ Rejalashtirish bekor qilindi.",
+        'ru': "❌ Планирование отменено.",
+    },
+    'sched_job_done': {
+        'uz': ("🎉 Rejalashtirilgan mahsulot sotuvga qo'yildi!\n\n📦 {name}\n"
+               "Reklama kanal va guruhlarga joylandi."),
+        'ru': ("🎉 Запланированный товар поступил в продажу!\n\n📦 {name}\n"
+               "Реклама опубликована в каналах и группах."),
+    },
+    'btn_scheduled_posts': {
+        'uz': "⏰ Rejalashtirilgan postlar",
+        'ru': "⏰ Запланированные посты",
+    },
+    'scheduled_list_title': {
+        'uz': "⏰ <b>Rejalashtirilgan postlar</b> (Toshkent vaqti):\n",
+        'ru': "⏰ <b>Запланированные посты</b> (по Ташкенту):\n",
+    },
+    'scheduled_list_empty': {
+        'uz': ("⏰ Hozircha rejalashtirilgan post yo'q.\n\n"
+               "Mahsulot qo'shganda reklama ko'rinishida «⏰ Keyin chiqarish» tugmasi orqali "
+               "uni belgilangan sana va soatda chiqarishni rejalashtirishingiz mumkin."),
+        'ru': ("⏰ Пока нет запланированных постов.\n\n"
+               "При добавлении товара в предпросмотре рекламы нажмите «⏰ Опубликовать позже», "
+               "чтобы запланировать публикацию на нужную дату и время."),
+    },
+    'scheduled_list_item': {
+        'uz': "\n📦 {name}\n🕐 {when}",
+        'ru': "\n📦 {name}\n🕐 {when}",
+    },
+    'scheduled_cancel_btn': {
+        'uz': "❌ Bekor: {name}",
+        'ru': "❌ Отмена: {name}",
+    },
+    'scheduled_cancelled': {
+        'uz': "✅ Reja bekor qilindi. Mahsulot zaxiraga olindi.",
+        'ru': "✅ План отменён. Товар перемещён в резерв.",
+    },
+    'scheduled_cancel_failed': {
+        'uz': "⚠️ Rejani bekor qilib bo'lmadi (allaqachon chiqqan yoki o'chirilgan).",
+        'ru': "⚠️ Не удалось отменить (уже опубликовано или удалено).",
+    },
+
+    # ===== AVTO QAYTA-REKLAMA (kuniga bir marta) =====
+    'autorep_btn': {
+        'uz': "🔁 Avto qayta-reklama",
+        'ru': "🔁 Авто-переразмещение",
+    },
+    'btn_autoreposts': {
+        'uz': "🔁 Avto qayta-reklamalar",
+        'ru': "🔁 Авто-переразмещения",
+    },
+    'btn_autorep_off': {
+        'uz': "🔁 Avto-reklama o'chirish ({hour}:00)",
+        'ru': "🔁 Выкл. авто-переразмещение ({hour}:00)",
+    },
+    'autorep_pick_hour': {
+        'uz': ("🔁 <b>Avto qayta-reklama</b>\n\nMahsulot <b>kuniga bir marta</b> qaysi "
+               "<b>soatda</b> qayta chiqsin?\n(Odamlar aktiv bo'lgan vaqtni tanlang — Toshkent vaqti. "
+               "Eski reklama o'chirilib, yangisi chiqadi.)"),
+        'ru': ("🔁 <b>Авто-переразмещение</b>\n\nВ каком <b>часу</b> публиковать товар "
+               "<b>раз в день</b>?\n(Выберите время активности аудитории — по Ташкенту. "
+               "Старая реклама удаляется, выходит новая.)"),
+    },
+    'autorep_confirmed': {
+        'uz': ("✅ <b>Avto qayta-reklama yoqildi!</b>\n\n📦 {name}\n🕐 Har kuni soat <b>{hour}:00</b> "
+               "(Toshkent vaqti)\n\nMahsulot hozir joylandi va har kuni shu soatda eski reklama "
+               "o'chirilib, yangisi chiqadi — yangi a'zolar doim ko'radi.\nSotilib bo'lsa yoki "
+               "zaxira tugasa avtomatik to'xtaydi. {days} kundan keyin ham o'zi to'xtaydi."),
+        'ru': ("✅ <b>Авто-переразмещение включено!</b>\n\n📦 {name}\n🕐 Каждый день в <b>{hour}:00</b> "
+               "(по Ташкенту)\n\nТовар опубликован сейчас и каждый день в это время старая реклама "
+               "удаляется, выходит новая — новые участники всегда видят.\nПри распродаже или нулевом "
+               "остатке остановится автоматически. Через {days} дней тоже остановится сам."),
+    },
+    'autorep_list_title': {
+        'uz': "🔁 <b>Avto qayta-reklamalar</b> (Toshkent vaqti):\n",
+        'ru': "🔁 <b>Авто-переразмещения</b> (по Ташкенту):\n",
+    },
+    'autorep_list_item': {
+        'uz': "\n📦 {name}\n🕐 Har kuni {hour}:00",
+        'ru': "\n📦 {name}\n🕐 Ежедневно в {hour}:00",
+    },
+    'autorep_list_empty': {
+        'uz': ("🔁 Hozircha avto qayta-reklama yo'q.\n\n"
+               "Mahsulot reklama ko'rinishida «🔁 Avto qayta-reklama» tugmasi orqali uni "
+               "har kuni belgilangan soatda avtomatik qayta chiqarishingiz mumkin."),
+        'ru': ("🔁 Пока нет авто-переразмещений.\n\n"
+               "В предпросмотре рекламы нажмите «🔁 Авто-переразмещение», чтобы товар "
+               "автоматически выходил заново каждый день в назначенный час."),
+    },
+    'autorep_cancel_btn': {
+        'uz': "❌ To'xtatish: {name}",
+        'ru': "❌ Остановить: {name}",
+    },
+    'autorep_cancelled': {
+        'uz': "✅ Avto qayta-reklama to'xtatildi.",
+        'ru': "✅ Авто-переразмещение остановлено.",
+    },
+    'autorep_stopped_notify': {
+        'uz': "🔁 «{name}» uchun avto qayta-reklama avtomatik to'xtadi (mahsulot sotuvda emas yoki muddat tugadi).",
+        'ru': "🔁 Авто-переразмещение «{name}» остановлено автоматически (товар не в продаже или истёк срок).",
+    },
+
+    # ===== MULTI-SOTUVCHI: bitta do'kon — ko'p xodim =====
+    'btn_approve': {'uz': "✅ Tasdiqlash", 'ru': "✅ Подтвердить"},
+    'btn_manage_staff': {'uz': "👥 Sotuvchilar", 'ru': "👥 Продавцы"},
+
+    # --- mahsulot moderatsiyasi (xodim → ega tasdig'i) ---
+    'staff_no_perm_add': {
+        'uz': "⛔ Sizda mahsulot qo'shish ruxsati yo'q. Do'kon egasiga murojaat qiling.",
+        'ru': "⛔ У вас нет прав на добавление товаров. Обратитесь к владельцу магазина.",
+    },
+    'staff_inactive_block': {
+        'uz': "⏳ Hisobingiz hali do'kon egasi tomonidan tasdiqlanmagan. Tasdiqdan keyin mahsulot joylay olasiz.",
+        'ru': "⏳ Ваш аккаунт ещё не подтверждён владельцем магазина. После подтверждения вы сможете размещать товары.",
+    },
+    'product_sent_for_approval': {
+        'uz': "📨 Mahsulot do'kon egasiga tasdiqlash uchun yuborildi. Tasdiqlangач sotuvga chiqadi.",
+        'ru': "📨 Товар отправлен владельцу магазина на подтверждение. После одобрения он появится в продаже.",
+    },
+    'owner_product_review': {
+        'uz': ("🆕 <b>Xodim mahsulot joyladi — tasdiqlang</b>\n\n"
+               "👤 Sotuvchi: {staff}\n📦 {pname}\n💰 {price}"),
+        'ru': ("🆕 <b>Сотрудник добавил товар — подтвердите</b>\n\n"
+               "👤 Продавец: {staff}\n📦 {pname}\n💰 {price}"),
+    },
+    'owner_review_already': {
+        'uz': "ℹ️ Bu mahsulot allaqachon ko'rib chiqilgan.",
+        'ru': "ℹ️ Этот товар уже рассмотрен.",
+    },
+    'owner_approved_done': {
+        'uz': "✅ «{pname}» tasdiqlandi va sotuvga chiqdi.",
+        'ru': "✅ «{pname}» подтверждён и опубликован.",
+    },
+    'owner_rejected_done': {
+        'uz': "❌ «{pname}» rad etildi.",
+        'ru': "❌ «{pname}» отклонён.",
+    },
+    'staff_product_approved': {
+        'uz': "✅ Mahsulotingiz «{pname}» do'kon egasi tomonidan tasdiqlandi.",
+        'ru': "✅ Ваш товар «{pname}» подтверждён владельцем магазина.",
+    },
+    'staff_product_rejected': {
+        'uz': "❌ Mahsulotingiz «{pname}» do'kon egasi tomonidan rad etildi.",
+        'ru': "❌ Ваш товар «{pname}» отклонён владельцем магазина.",
+    },
+
+    # --- ega paneli ---
+    'staff_owner_only': {
+        'uz': "⛔ Bu bo'lim faqat do'kon egasi uchun.",
+        'ru': "⛔ Этот раздел только для владельца магазина.",
+    },
+    'staff_panel_text': {
+        'uz': ("👥 <b>Sotuvchilarni boshqarish</b>\n\n"
+               "Jami xodimlar: {total}\n✅ Faol: {active}\n⏳ Kutilmoqda: {pending}\n\n"
+               "💳 To'lov rejimi: {paymode}\n🔎 Moderatsiya: {mod}"),
+        'ru': ("👥 <b>Управление продавцами</b>\n\n"
+               "Всего сотрудников: {total}\n✅ Активны: {active}\n⏳ Ожидают: {pending}\n\n"
+               "💳 Режим оплаты: {paymode}\n🔎 Модерация: {mod}"),
+    },
+    'paymode_shop': {'uz': "Do'kon kartasi", 'ru': "Карта магазина"},
+    'paymode_staff': {'uz': "Har xodim o'z kartasi", 'ru': "Карта каждого продавца"},
+    'mod_direct': {'uz': "To'g'ridan-to'g'ri", 'ru': "Напрямую"},
+    'mod_owner': {'uz': "Ega tasdig'i", 'ru': "Подтверждение владельца"},
+    'btn_staff_list': {'uz': "📋 Sotuvchilar ro'yxati", 'ru': "📋 Список продавцов"},
+    'btn_staff_add': {'uz': "➕ Sotuvchi qo'shish", 'ru': "➕ Добавить продавца"},
+    'btn_staff_stats': {'uz': "📊 Sotuvchilar statistikasi", 'ru': "📊 Статистика продавцов"},
+    'btn_paymode': {'uz': "💳 To'lov rejimi: {mode}", 'ru': "💳 Режим оплаты: {mode}"},
+    'btn_pending_products': {'uz': "✅ Tasdiqlash: {n} ta", 'ru': "✅ На подтверждение: {n}"},
+    'staff_list_empty': {
+        'uz': "📭 Hali sotuvchi qo'shilmagan. «➕ Sotuvchi qo'shish» orqali taklif yarating.",
+        'ru': "📭 Продавцы ещё не добавлены. Создайте приглашение через «➕ Добавить продавца».",
+    },
+    'staff_list_header': {'uz': "📋 <b>Sotuvchilar</b>\n\nBatafsil uchun tanlang:", 'ru': "📋 <b>Продавцы</b>\n\nВыберите для подробностей:"},
+    'staff_detail_text': {
+        'uz': ("👤 <b>{name}</b>\n🏷 Bo'lim: {dept}\n🎚 Rol: {role}\nHolat: {status}\n\n"
+               "📦 Mahsulotlar: {products}\n✅ Yetkazilgan: {delivered}\n💰 Daromad: {revenue}\n⏳ Kutilayotgan: {pending}\n\n"
+               "<b>Ruxsatlar:</b>\n{perms}"),
+        'ru': ("👤 <b>{name}</b>\n🏷 Отдел: {dept}\n🎚 Роль: {role}\nСтатус: {status}\n\n"
+               "📦 Товаров: {products}\n✅ Доставлено: {delivered}\n💰 Доход: {revenue}\n⏳ В ожидании: {pending}\n\n"
+               "<b>Права:</b>\n{perms}"),
+    },
+    'role_staff': {'uz': "Oddiy sotuvchi", 'ru': "Продавец"},
+    'role_manager': {'uz': "Manager", 'ru': "Менеджер"},
+    'btn_staff_set_dept': {'uz': "🏷 Bo'lim o'zgartirish", 'ru': "🏷 Изменить отдел"},
+    'btn_staff_make_manager': {'uz': "⭐ Manager qilish", 'ru': "⭐ Сделать менеджером"},
+    'btn_staff_make_staff': {'uz': "👤 Oddiy sotuvchi qilish", 'ru': "👤 Сделать продавцом"},
+    'btn_skip_dept': {'uz': "⏭ Bo'limsiz", 'ru': "⏭ Без отдела"},
+    'staff_add_ask_dept': {
+        'uz': ("🏷 Yangi sotuvchi qaysi <b>bo'lim</b> uchun?\n\n"
+               "Bo'lim nomini yozing (masalan: «Telefonlar», «Kiyim»). "
+               "Bo'lim kerak bo'lmasa «⏭ Bo'limsiz» tugmasini bosing."),
+        'ru': ("🏷 Для какого <b>отдела</b> новый продавец?\n\n"
+               "Напишите название отдела (например: «Телефоны», «Одежда»). "
+               "Если отдел не нужен — нажмите «⏭ Без отдела»."),
+    },
+    'staff_set_dept_ask': {
+        'uz': "🏷 Yangi bo'lim nomini yozing:",
+        'ru': "🏷 Напишите новое название отдела:",
+    },
+    'staff_dept_saved': {'uz': "✅ Bo'lim saqlandi.", 'ru': "✅ Отдел сохранён."},
+    'btn_join_with_code': {'uz': "🔑 Kod bilan qo'shilish", 'ru': "🔑 Войти по коду"},
+    'join_code_ask': {
+        'uz': ("🔑 Do'kon egasi bergan <b>taklif kodini</b> kiriting:\n\n"
+               "<i>Masalan: AB12CD34EF</i>"),
+        'ru': ("🔑 Введите <b>код приглашения</b>, который дал владелец магазина:\n\n"
+               "<i>Например: AB12CD34EF</i>"),
+    },
+    'btn_staff_invites': {'uz': "🔗 Faol takliflar ({n})", 'ru': "🔗 Активные приглашения ({n})"},
+    'invites_empty': {
+        'uz': "🔗 Faol (ishlatilmagan) taklif yo'q.",
+        'ru': "🔗 Нет активных (неиспользованных) приглашений.",
+    },
+    'invites_header': {
+        'uz': "🔗 <b>Faol takliflar</b>\n\nAdashib yuborilgan bo'lsa — bekor qiling:",
+        'ru': "🔗 <b>Активные приглашения</b>\n\nЕсли отправлено по ошибке — отмените:",
+    },
+    'btn_invite_cancel': {'uz': "❌ Bu taklifni bekor qilish", 'ru': "❌ Отменить это приглашение"},
+    'btn_staff_reject': {'uz': "❌ Rad etish", 'ru': "❌ Отклонить"},
+    'staff_reject_done': {
+        'uz': "❌ «{name}» rad etildi va do'kondan chiqarildi.",
+        'ru': "❌ «{name}» отклонён и удалён из магазина.",
+    },
+    'staff_join_rejected': {
+        'uz': "❌ «{shop}» do'koniga qo'shilish so'rovingiz rad etildi.",
+        'ru': "❌ Ваш запрос на присоединение к магазину «{shop}» отклонён.",
+    },
+    'staff_active': {'uz': "✅ Faol", 'ru': "✅ Активен"},
+    'staff_pending': {'uz': "⏳ Tasdiq kutilmoqda", 'ru': "⏳ Ожидает подтверждения"},
+    'perm_add': {'uz': "Mahsulot qo'shish", 'ru': "Добавление товара"},
+    'perm_conf': {'uz': "Buyurtma tasdiqlash", 'ru': "Подтверждение заказов"},
+    'perm_price': {'uz': "Narx o'zgartirish", 'ru': "Изменение цены"},
+    'perm_rev': {'uz': "Sharhga javob", 'ru': "Ответ на отзывы"},
+    'btn_staff_freeze': {'uz': "⏸ Muzlatish", 'ru': "⏸ Заморозить"},
+    'btn_staff_activate': {'uz': "✅ Faollashtirish", 'ru': "✅ Активировать"},
+    'btn_staff_perms': {'uz': "🔐 Ruxsatlar", 'ru': "🔐 Права"},
+    'btn_staff_remove': {'uz': "🗑 O'chirish", 'ru': "🗑 Удалить"},
+    'staff_not_found': {'uz': "Sotuvchi topilmadi.", 'ru': "Продавец не найден."},
+    'staff_you_activated': {
+        'uz': "✅ Do'kon egasi hisobingizni faollashtirdi! Endi /start orqali sotuvchi panelidan foydalaning.",
+        'ru': "✅ Владелец магазина активировал ваш аккаунт! Теперь используйте панель продавца через /start.",
+    },
+    'staff_you_frozen': {
+        'uz': "⏸ Do'kon egasi hisobingizni vaqtincha muzlatdi.",
+        'ru': "⏸ Владелец магазина временно заморозил ваш аккаунт.",
+    },
+    'staff_perms_header': {
+        'uz': "🔐 <b>{name}</b> — ruxsatlar\n\nO'zgartirish uchun bosing:",
+        'ru': "🔐 <b>{name}</b> — права\n\nНажмите для изменения:",
+    },
+    'btn_staff_remove_yes': {'uz': "🗑 Ha, o'chirish", 'ru': "🗑 Да, удалить"},
+    'staff_remove_confirm': {
+        'uz': "⚠️ «{name}» do'kondan chiqarilsinmi? Uning mahsulot/buyurtmalari do'konda qoladi.",
+        'ru': "⚠️ Удалить «{name}» из магазина? Его товары/заказы останутся в магазине.",
+    },
+    'staff_removed_done': {'uz': "✅ «{name}» do'kondan chiqarildi.", 'ru': "✅ «{name}» удалён из магазина."},
+    'staff_invite_created': {
+        'uz': ("🔗 <b>Taklif tayyor!</b>\n🏷 Bo'lim: {dept}\n\n"
+               "<b>1-usul (oson):</b> havolani sotuvchiga yuboring — u bosishi bilan do'koningizga qo'shiladi:\n{link}\n\n"
+               "<b>2-usul:</b> agar sotuvchi botda ro'yxatdan o'tgan bo'lsa — Xaridor menyusi → «🔑 Kod bilan qo'shilish» → quyidagi kodni kiritsin:\n"
+               "<code>{code}</code>\n\n"
+               "<i>Qo'shilgach siz «Sotuvchilar» bo'limidan tasdiqlaysiz.</i>"),
+        'ru': ("🔗 <b>Приглашение готово!</b>\n🏷 Отдел: {dept}\n\n"
+               "<b>Способ 1 (просто):</b> отправьте ссылку продавцу — перейдя по ней, он присоединится:\n{link}\n\n"
+               "<b>Способ 2:</b> если продавец уже зарегистрирован в боте — меню Покупателя → «🔑 Войти по коду» → пусть введёт код:\n"
+               "<code>{code}</code>\n\n"
+               "<i>После присоединения подтвердите его в разделе «Продавцы».</i>"),
+    },
+    'staff_stats_header': {'uz': "📊 <b>Sotuvchilar statistikasi</b>\n", 'ru': "📊 <b>Статистика продавцов</b>\n"},
+    'staff_stats_row': {
+        'uz': "{mark} <b>{name}</b> — 📦{products} · ✅{sold} dona · 💰{revenue}",
+        'ru': "{mark} <b>{name}</b> — 📦{products} · ✅{sold} шт · 💰{revenue}",
+    },
+    'pending_products_empty': {
+        'uz': "✅ Tasdiqlash kutayotgan mahsulot yo'q.",
+        'ru': "✅ Нет товаров, ожидающих подтверждения.",
+    },
+    'pending_products_header': {
+        'uz': "🆕 <b>Tasdiqlash kutayotgan mahsulotlar</b>\n\nTasdiqlash yoki rad etish uchun bosing:",
+        'ru': "🆕 <b>Товары на подтверждении</b>\n\nНажмите, чтобы подтвердить или отклонить:",
+    },
+
+    # --- onboarding (xodim deeplink) ---
+    'owner_new_staff_notify': {
+        'uz': ("👥 <b>Do'koningizga yangi sotuvchi qo'shilmoqchi!</b>\n\n"
+               "👤 {name}\n📞 {phone}\n🏷 Bo'lim: {dept}\n\n"
+               "Faollashtirish uchun tugmani bosing 👇"),
+        'ru': ("👥 <b>К вашему магазину хочет присоединиться продавец!</b>\n\n"
+               "👤 {name}\n📞 {phone}\n🏷 Отдел: {dept}\n\n"
+               "Нажмите кнопку, чтобы активировать 👇"),
+    },
+    'staff_invite_invalid': {
+        'uz': "⚠️ Taklif havolasi yaroqsiz yoki allaqachon ishlatilgan.",
+        'ru': "⚠️ Ссылка-приглашение недействительна или уже использована.",
+    },
+    'staff_already_member': {
+        'uz': "ℹ️ Siz allaqachon biror do'konga biriktirilgansiz.",
+        'ru': "ℹ️ Вы уже привязаны к одному из магазинов.",
+    },
+    'staff_owner_cannot_join': {
+        'uz': "⛔ Siz o'z do'koningiz egasisiz — boshqa do'konga xodim bo'lib qo'shila olmaysiz.",
+        'ru': "⛔ Вы владелец своего магазина — нельзя присоединиться к другому магазину как сотрудник.",
+    },
+    'staff_already_in_this_shop': {
+        'uz': "ℹ️ Siz allaqachon shu do'kon xodimisiz.",
+        'ru': "ℹ️ Вы уже сотрудник этого магазина.",
+    },
+    'staff_left_old_shop': {
+        'uz': "ℹ️ Sotuvchi «{name}» do'koningizdan chiqib, boshqa do'konga o'tdi.",
+        'ru': "ℹ️ Продавец «{name}» покинул ваш магазин и перешёл в другой.",
+    },
+    'staff_admin_cannot_join': {
+        'uz': "⛔ Admin do'konga xodim bo'lib qo'shila olmaydi.",
+        'ru': "⛔ Администратор не может присоединиться к магазину как сотрудник.",
+    },
+    'staff_joined_pending': {
+        'uz': ("✅ «{shop}» do'koniga so'rovingiz yuborildi!\n\n"
+               "⏳ Do'kon egasi tasdiqlagach, sotuvchi panelidan foydalanib mahsulot joylay olasiz."),
+        'ru': ("✅ Ваш запрос в магазин «{shop}» отправлен!\n\n"
+               "⏳ После подтверждения владельцем вы сможете размещать товары через панель продавца."),
+    },
+    'staff_pending_panel': {
+        'uz': ("⏳ <b>Tasdiq kutilmoqda</b>\n\n"
+               "Hisobingiz do'kon egasi tomonidan hali tasdiqlanmagan. "
+               "Tasdiqlangach bu yerda mahsulot joylashingiz mumkin bo'ladi."),
+        'ru': ("⏳ <b>Ожидание подтверждения</b>\n\n"
+               "Ваш аккаунт ещё не подтверждён владельцем магазина. "
+               "После подтверждения вы сможете размещать здесь товары."),
+    },
+
+    # --- admin: do'konlar ---
+    'btn_admin_shops': {'uz': "🏪 Do'konlar", 'ru': "🏪 Магазины"},
+    'admin_shops_empty': {'uz': "📭 Hali do'konlar yo'q.", 'ru': "📭 Магазинов пока нет."},
+    'admin_shops_header': {'uz': "🏪 <b>Do'konlar</b> ({n} ta)\n\nBatafsil uchun tanlang:", 'ru': "🏪 <b>Магазины</b> ({n})\n\nВыберите для подробностей:"},
+    'shop_not_found': {'uz': "Do'kon topilmadi.", 'ru': "Магазин не найден."},
+    'admin_shop_title': {
+        'uz': ("🏪 <b>{name}</b>\n👑 Ega: {owner}\n🔎 Moderatsiya: {mod}\n💳 To'lov: {paymode}\n\n<b>Xodimlar:</b>"),
+        'ru': ("🏪 <b>{name}</b>\n👑 Владелец: {owner}\n🔎 Модерация: {mod}\n💳 Оплата: {paymode}\n\n<b>Сотрудники:</b>"),
+    },
+    'admin_shop_staff_row': {
+        'uz': "{mark} {name} · {dept} · 💰{revenue}",
+        'ru': "{mark} {name} · {dept} · 💰{revenue}",
+    },
+    'btn_admin_toggle_mod': {'uz': "🔎 Moderatsiyani almashtirish", 'ru': "🔎 Переключить модерацию"},
+    'btn_admin_activate_staff': {'uz': "✅ Faollashtirish: {name}", 'ru': "✅ Активировать: {name}"},
 }
 
 

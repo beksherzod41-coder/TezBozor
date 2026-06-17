@@ -11,6 +11,10 @@
 tezbozor_state.pickle
 *.pickle
 
+# Loglar
+logs/
+*.log
+
 # Python
 __pycache__/
 *.py[cod]

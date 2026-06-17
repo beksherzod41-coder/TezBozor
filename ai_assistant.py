@@ -23,6 +23,7 @@ main.py shu natijani Telegram'da kartalar/tugmalar bilan ko'rsatadi.
 """
 
 import os
+import re
 import json
 import logging
 
@@ -91,10 +92,17 @@ def build_system_prompt(lang: str, role: str, user_name: str = "") -> str:
                 "• Управление каталогом: list_my_products — посмотреть товары и их id; update_product — "
                 "изменить цену/название/описание; set_stock — задать остаток (0 = убрать из продажи, "
                 "unlimited — снова в продажу); delete_product — удалить (только по явной просьбе, переспроси).\n"
-                "• Заказы: list_orders — показать заказы, особенно ожидающие подтверждения (pending).\n"
+                "• Заказы: list_orders — показать заказы, особенно ожидающие подтверждения (pending). "
+                "manage_order — подтвердить заказ (confirm), отметить доставленным (deliver) или отклонить "
+                "ожидающий заказ (cancel); система покажет кнопку подтверждения, действие НЕ выполняется сразу. "
+                "Сначала найди правильный order_id через list_orders.\n"
+                "• Отзывы: list_reviews — рейтинг магазина и товаров, комментарии покупателей (с id и признаком, "
+                "отвечено ли). Выдели низкие оценки. reply_to_review — составь вежливый публичный ответ от имени "
+                "магазина (review_id и reply); система покажет кнопку подтверждения, ответ НЕ публикуется сразу. "
+                "Сначала найди review_id через list_reviews.\n"
                 "• Аналитика: sales_report — статистика и конкретные советы (что улучшить, какой товар не продаётся).\n"
-                "ВАЖНО: перед update_product/set_stock/delete_product сначала найди правильный product_id "
-                "через list_my_products. Перед удалением — переспроси. После действия кратко подтверди результат."
+                "ВАЖНО: перед update_product/set_stock/delete_product/manage_order сначала найди правильный id "
+                "через list_my_products или list_orders. Перед удалением — переспроси. После действия кратко подтверди результат."
             ),
             'admin': (
                 "С тобой АДМИНИСТРАТОР. Для статистики и состояния платформы вызывай "
@@ -137,10 +145,17 @@ def build_system_prompt(lang: str, role: str, user_name: str = "") -> str:
             "• Katalogni boshqarish: list_my_products — mahsulotlar va ularning id sini ko'rish; update_product — "
             "narx/nom/tavsifni o'zgartirish; set_stock — zahirani belgilash (0 = sotuvdan olib qo'yish, "
             "unlimited — qayta sotuvga); delete_product — o'chirish (faqat aniq so'ralsa, qayta so'ra).\n"
-            "• Buyurtmalar: list_orders — buyurtmalarni, ayniqsa tasdiq kutayotganlarini (pending) ko'rsat.\n"
+            "• Buyurtmalar: list_orders — buyurtmalarni, ayniqsa tasdiq kutayotganlarini (pending) ko'rsat. "
+            "manage_order — buyurtmani tasdiqlash (confirm), 'yetkazilgan' deb belgilash (deliver) yoki tasdiq "
+            "kutayotgan buyurtmani rad etish (cancel); tizim tasdiq tugmasini ko'rsatadi, amal DARROV bajarilmaydi. "
+            "Avval list_orders orqali to'g'ri order_id ni top.\n"
+            "• Sharhlar: list_reviews — do'kon va mahsulot reytingi, mijoz izohlari (har birida id va javob "
+            "berilgan-berilmagani). Past baholarni ajratib ko'rsat. reply_to_review — izohga sotuvchi nomidan "
+            "ochiq, xushmuomala javob tuz (review_id va reply bilan); tizim tasdiq tugmasini ko'rsatadi, javob "
+            "darrov e'lon qilinmaydi. Avval list_reviews orqali review_id ni top.\n"
             "• Tahlil: sales_report — statistika va aniq maslahat (nimani yaxshilash, qaysi mahsulot sotilmayapti).\n"
-            "MUHIM: update_product/set_stock/delete_product dan OLDIN avval list_my_products orqali to'g'ri "
-            "product_id ni top. O'chirishdan oldin qayta so'ra. Amaldan keyin natijani qisqa tasdiqla."
+            "MUHIM: update_product/set_stock/delete_product/manage_order dan OLDIN avval list_my_products yoki "
+            "list_orders orqali to'g'ri id ni top. O'chirishdan oldin qayta so'ra. Amaldan keyin natijani qisqa tasdiqla."
         ),
         'admin': (
             "Sen bilan ADMIN. Statistika va tizim holati uchun platform_overview ni chaqir, "
@@ -302,6 +317,56 @@ def _tools_for(role: str) -> list:
                     },
                 },
             },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "manage_order",
+                "description": "Sotuvchining buyurtmasi ustida amal uchun TASDIQ TUGMASINI ko'rsatadi "
+                               "(amal darrov bajarilmaydi): 'confirm' — tasdiq kutayotgan buyurtmani tasdiqlash, "
+                               "'deliver' — tasdiqlangan buyurtmani 'yetkazilgan' deb belgilash, "
+                               "'cancel' — tasdiq kutayotgan buyurtmani rad etish. "
+                               "Avval list_orders bilan to'g'ri order_id ni aniqla. "
+                               "Buyurtma holatiga mos kelmasa tool xato qaytaradi — buni foydalanuvchiga tushuntir.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "order_id": {"type": "integer", "description": "Buyurtma id si (list_orders dan)."},
+                        "action": {"type": "string", "enum": ["confirm", "deliver", "cancel"],
+                                    "description": "Bajariladigan amal."},
+                    },
+                    "required": ["order_id", "action"],
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "list_reviews",
+                "description": "Shu sotuvchining mijoz baholari va sharhlarini qaytaradi (yangi → eski): "
+                               "id, do'kon reytingi, mahsulot reytingi, izoh matni, xaridor ismi, o'rtacha reyting "
+                               "va javob berilgan-berilmagani (replied). "
+                               "Sotuvchi sharhlar, reyting yoki mijoz fikrlari haqida so'raganda chaqir. "
+                               "Past baholarni alohida ajratib ko'rsat va xaridorga professional, xushmuomala "
+                               "javob matnini taklif qil.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "reply_to_review",
+                "description": "Mijoz sharhiga sotuvchi nomidan OCHIQ javob tayyorlaydi (izoh ostida hammaga "
+                               "ko'rinadi). reply matnini SEN xushmuomala, professional va qisqa yoz: mijozga "
+                               "rahmat, kamchilik aytilgan bo'lsa uzr va yechim. Avval list_reviews bilan to'g'ri "
+                               "review_id ni aniqla. Javob DARROV e'lon qilinmaydi — foydalanuvchiga tasdiq "
+                               "tugmasi ko'rsatiladi.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "review_id": {"type": "integer", "description": "Sharh id si (list_reviews dan)."},
+                        "reply": {"type": "string", "description": "Sotuvchi nomidan xushmuomala javob matni."},
+                    },
+                    "required": ["review_id", "reply"],
+                },
+            },
         }]
 
     if role == 'admin':
@@ -379,6 +444,7 @@ def _exec_tool(db, actor, name, args):
                 min_price=_num(args.get("min_price")),
                 max_price=_num(args.get("max_price")),
                 sort_by=sort,
+                seller_id=actor.get('shop_filter'),  # do'kon ichida qidiruv bo'lsa — shu do'kon bilan cheklash
             )
             items = []
             for p in rows[:MAX_PRODUCTS]:
@@ -554,6 +620,82 @@ def _exec_tool(db, actor, name, args):
             return {"count": len(rows), "showing": len(orders),
                     "pending_count": pending_n, "orders": orders}, None
 
+        if name == "manage_order":
+            seller_id = actor.get('seller_id')
+            oid = args.get("order_id")
+            action = (args.get("action") or "").strip().lower()
+            if action not in ("confirm", "deliver", "cancel"):
+                return {"status": "error", "reason": "action 'confirm', 'deliver' yoki 'cancel' bo'lishi kerak"}, None
+            order = db.get_order_by_id(oid) if oid else None
+            if not order or order.get('seller_id') != seller_id:
+                return {"status": "error", "reason": "Buyurtma topilmadi yoki sizga tegishli emas"}, None
+            st = order.get('status') or ''
+            allowed = {"confirm": st == 'pending',
+                       "deliver": st == 'confirmed',
+                       "cancel": st == 'pending'}
+            status_uz = {'pending': 'tasdiq kutilmoqda', 'confirmed': 'tasdiqlangan',
+                         'delivered': 'yetkazilgan', 'cancelled': 'bekor qilingan'}
+            if not allowed[action]:
+                hint = {
+                    "confirm": "faqat 'tasdiq kutilmoqda' holatidagi buyurtmani tasdiqlash mumkin",
+                    "deliver": "faqat 'tasdiqlangan' buyurtmani 'yetkazilgan' deb belgilash mumkin",
+                    "cancel": "bu yerdan faqat 'tasdiq kutilmoqda' buyurtmani rad etish mumkin; "
+                              "tasdiqlangan buyurtmani bekor qilish «Buyurtmalar» bo'limidagi kelishuv orqali bo'ladi",
+                }[action]
+                return {"status": "error", "current_status": status_uz.get(st, st), "reason": hint}, None
+            ui = {"type": "order_action", "order_id": oid, "action": action,
+                  "product": order.get('product_name') or '',
+                  "qty": order.get('quantity') or 1,
+                  "buyer": order.get('buyer_name') or '',
+                  "price_som": _fmt(order.get('product_price') or order.get('total_price'))}
+            return {"status": "confirm_shown", "order_id": oid, "action": action,
+                    "note": "Foydalanuvchiga tasdiq tugmasi ko'rsatildi. Bir qisqa jumla bilan "
+                            "tugmani bosib tasdiqlashini so'ra."}, ui
+
+        if name == "list_reviews":
+            seller_id = actor.get('seller_id')
+            if not seller_id:
+                return {"status": "error", "reason": "seller_id yo'q"}, None
+            rows = db.get_seller_reviews(seller_id)
+            avg = db.get_seller_avg_rating(seller_id)
+            reviews = []
+            for r in rows[:15]:
+                reviews.append({
+                    "id": r.get('id'),
+                    "shop_rating": r.get('rating'),
+                    "product_rating": r.get('product_rating'),
+                    "product": r.get('product_name') or '',
+                    "comment": (r.get('comment') or '').strip(),
+                    "buyer": r.get('buyer_name') or '',
+                    "replied": bool((r.get('seller_reply') or '').strip()),
+                })
+            low = [rv for rv in reviews if (rv.get('shop_rating') or 5) <= 3]
+            return {
+                "count": len(rows),
+                "avg_shop_rating": round(avg, 2) if avg else None,
+                "low_rating_count": len(low),
+                "reviews": reviews,
+            }, None
+
+        if name == "reply_to_review":
+            seller_id = actor.get('seller_id')
+            rid = args.get("review_id")
+            reply = (args.get("reply") or "").strip()
+            if not rid or len(reply) < 2:
+                return {"status": "error", "reason": "review_id va reply (javob matni) majburiy"}, None
+            review = db.get_review_by_id(rid)
+            if not review or review.get('seller_id') != seller_id:
+                return {"status": "error",
+                        "reason": "Sharh topilmadi yoki sizning do'koningizga tegishli emas"}, None
+            if len(reply) > 500:
+                reply = reply[:500].rstrip()
+            ui = {"type": "review_reply", "review_id": rid, "reply": reply,
+                  "product": review.get('product_name') or '',
+                  "comment": (review.get('comment') or '').strip()}
+            return {"status": "reply_drafted", "review_id": rid,
+                    "note": "Javob foydalanuvchiga tasdiq tugmasi bilan ko'rsatildi. "
+                            "Bir qisqa jumla bilan tugmani bosib e'lon qilishini so'ra."}, ui
+
         if name == "sales_report":
             seller_id = actor.get('seller_id')
             if not seller_id:
@@ -619,48 +761,98 @@ _AD_SYSTEM = {
         "(Telegram posti uchun). Qoidalar:\n"
         "• Faqat berilgan faktlardan foydalan — narx, nom, xususiyatlarni O'YLAB TOPMA.\n"
         "• Jonli, e'tibor tortadigan uslub. Emoji va bezak chiziqlaridan (━ ✦ 🔥 ⭐ 👇) foydalan.\n"
-        "• Tuzilma: diqqat tortuvchi sarlavha → 2-4 ta afzallik (emoji bilan) → narx → joylashuv (bo'lsa) "
-        "→ kuchli harakatga chorlash (CTA) → 3-6 ta mos hashtag.\n"
+        "• Tuzilma: diqqat tortuvchi sarlavha → 2-4 ta afzallik (emoji bilan) → narx → "
+        "hudud (berilgan bo'lsa, '🌍 Hudud: <viloyat → tuman>' ko'rinishida DOIM ko'rsat) → "
+        "joylashuv (bo'lsa) → kuchli harakatga chorlash (CTA).\n"
+        "• HASHTAG (#) ISHLATMA — hech qanday # bilan yorliq qo'shma.\n"
         "• HTML yoki markdown (** , __) ISHLATMA — faqat oddiy matn va emoji.\n"
-        "• Qisqa va lo'nda: 700 belgidan oshmasin. Faqat reklama matnini qaytar, izohsiz."
+        "• Faqat reklama matnini qaytar, izohsiz."
     ),
     'ru': (
         "Ты — опытный РЕКЛАМНЫЙ копирайтер маркетплейса TezBozor. "
         "По данным о товаре напиши ОДИН цепляющий, уникальный рекламный текст (для поста в Telegram). Правила:\n"
         "• Используй только данные факты — не выдумывай цену, название, характеристики.\n"
         "• Живой, привлекающий стиль. Используй эмодзи и разделители (━ ✦ 🔥 ⭐ 👇).\n"
-        "• Структура: цепляющий заголовок → 2-4 преимущества (с эмодзи) → цена → локация (если есть) "
-        "→ сильный призыв к действию → 3-6 подходящих хештегов.\n"
+        "• Структура: цепляющий заголовок → 2-4 преимущества (с эмодзи) → цена → "
+        "регион (если задан, ВСЕГДА показывай в виде '🌍 Регион: <область → район>') → "
+        "локация (если есть) → сильный призыв к действию.\n"
+        "• НЕ используй ХЕШТЕГИ (#) — не добавляй никаких меток с #.\n"
         "• НЕ используй HTML или markdown (**, __) — только обычный текст и эмодзи.\n"
-        "• Коротко: не более 700 символов. Верни только рекламный текст, без пояснений."
+        "• Верни только рекламный текст, без пояснений."
     ),
 }
 
+# Reklama uzunligi bo'yicha qo'shimcha ko'rsatma (sotuvchi tanlaydi: uzun yoki qisqa)
+_AD_LENGTH = {
+    'uz': {
+        'long': ("• UZUN, batafsil variant yoz: jozibali sarlavha, 4-6 ta afzallik (emoji bilan), "
+                 "boy va ishonarli tavsif. 900 belgigacha bo'lsin."),
+        'short': ("• QISQA, lo'nda variant yoz: 1-2 ta eng kuchli afzallik, narx va qisqa CTA. "
+                  "300 belgidan oshmasin."),
+    },
+    'ru': {
+        'long': ("• Напиши ДЛИННЫЙ, подробный вариант: цепляющий заголовок, 4-6 преимуществ (с эмодзи), "
+                 "насыщенное убедительное описание. До 900 символов."),
+        'short': ("• Напиши КОРОТКИЙ, лаконичный вариант: 1-2 самых сильных преимущества, цена и краткий призыв. "
+                  "Не более 300 символов."),
+    },
+}
+
+
+def _strip_hashtags(text: str) -> str:
+    """Reklama matnidan hashtag (#so'z) larni tozalaydi.
+
+    AI prompt'da hashtag taqiqlangan bo'lsa-da, ba'zan baribir qo'shib yuboradi.
+    Bu yerda #belgili so'zlarni va ulardan iborat bo'sh qatorlarni olib tashlaymiz.
+    Mahsulot nomidagi '#' (masalan "iPhone 13 #128GB") tegmasligi uchun faqat
+    bo'sh joy yoki qator boshidagi hashtag'lar o'chiriladi."""
+    # Qator boshidagi yoki bo'sh joydan keyingi #so'z larni olib tashlaymiz
+    text = re.sub(r"(?:(?<=\s)|^)#[^\s#]+", "", text)
+    # Hashtaglar o'chgach qolgan ortiqcha bo'sh qatorlarni siqamiz
+    lines = [ln.rstrip() for ln in text.splitlines()]
+    out, blank = [], False
+    for ln in lines:
+        if ln.strip() == "":
+            if not blank and out:
+                out.append("")
+            blank = True
+        else:
+            out.append(ln)
+            blank = False
+    return "\n".join(out).strip()
+
 
 async def generate_ad_caption(*, name, price_text, category="", description="",
-                              shop="", location="", lang="uz") -> str:
+                              shop="", location="", region="", lang="uz", length="long") -> str:
     """Mahsulotdan kelib chiqib takrorlanmas reklama matni (caption) yaratadi.
+
+    region — viloyat → tuman (masalan "Surxondaryo viloyati → Muzrabot"). Manzildan
+    alohida beriladi va reklama matnida DOIM ko'rsatilishi kerak.
+    length — 'long' (uzun, batafsil) yoki 'short' (qisqa, lo'nda). Sotuvchi tanlaydi.
 
     Xato yoki AI o'chiq bo'lsa — None qaytaradi (chaqiruvchi oddiy matnga qaytadi)."""
     if not is_enabled():
         return None
     lang = lang if lang in ('uz', 'ru') else 'uz'
+    length = length if length in ('long', 'short') else 'long'
+    hudud_key = "hudud" if lang == 'uz' else "регион"
     facts = {
         "nom": name, "narx": price_text, "kategoriya": category,
-        "tavsif": description, "do'kon": shop, "joylashuv": location,
+        "tavsif": description, "do'kon": shop, hudud_key: region, "joylashuv": location,
     }
     facts = {k: v for k, v in facts.items() if v}
     user_msg = ("Mahsulot ma'lumotlari:\n" if lang == 'uz' else "Данные о товаре:\n") + \
                "\n".join(f"- {k}: {v}" for k, v in facts.items())
 
+    system_content = _AD_SYSTEM[lang] + "\n" + _AD_LENGTH[lang][length]
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": _AD_SYSTEM[lang]},
+            {"role": "system", "content": system_content},
             {"role": "user", "content": user_msg},
         ],
-        "max_tokens": 500,
+        "max_tokens": 600 if length == 'long' else 300,
         "temperature": 1.0,   # yuqori — har safar takrorlanmas variant
         "stream": False,
     }
@@ -675,11 +867,331 @@ async def generate_ad_caption(*, name, price_text, category="", description="",
             text = (data["choices"][0]["message"].get("content") or "").strip()
             if not text:
                 return None
-            if len(text) > 1000:
-                text = text[:1000].rstrip()
+            text = _strip_hashtags(text)
+            if not text:
+                return None
+            cap = 1000 if length == 'long' else 400
+            if len(text) > cap:
+                text = text[:cap].rstrip()
             return text
     except Exception as e:
         log.warning(f"Reklama matni yaratishda xato: {e}")
+        return None
+
+
+# ============================================================
+# MAHSULOTGA MOSLASHGAN SAVOLLAR (dinamik atributlar) GENERATSIYASI
+# ============================================================
+# Eski tizimda har bir KATEGORIYA uchun savollar qotib qolgan edi: "Ehtiyot
+# Qismlar"da dvigatel ham, far ham, tormoz kolodka ham bir xil 5 savol olardi.
+# Bu funksiya mahsulotning NOMI + KATEGORIYASI + TAVSIFidan kelib chiqib aynan
+# shu mahsulotga mos 3-6 ta savolni generatsiya qiladi.
+#   smart=False ("AI savollar")  — faqat savollar ro'yxati.
+#   smart=True  ("AI aqlli")      — tavsifdan ajratilgan tayyor atributlar +
+#                                    faqat YETISHMAYOTGAN savollar.
+_PRODUCT_Q_SYSTEM = {
+    'uz': (
+        "Sen — TezBozor marketplace uchun mahsulot e'lonini to'ldirishga yordam beruvchi "
+        "yordamchisiz. Senga mahsulot NOMI, KATEGORIYASI va (bo'lsa) TAVSIFI beriladi. "
+        "Vazifang — AYNAN SHU mahsulotga mos, xaridor uchun muhim 3-6 ta savol tuzish "
+        "(qidiruv va tanlash uchun foydali xususiyatlar). Qoidalar:\n"
+        "• Savollar mahsulotga xos bo'lsin. Masalan tormoz kolodka uchun 'old/orqa', "
+        "'qaysi avtomobil', 'brend'; futbolka uchun 'o'lcham', 'rang', 'mato'. "
+        "Mahsulotga aloqasi yo'q savol BERMA.\n"
+        "• Nomdan yoki tavsifdan allaqachon MA'LUM bo'lgan narsani qayta so'rama.\n"
+        "• Eng muhim 1-2 savolni majburiy (required=true), qolganini ixtiyoriy qil.\n"
+        "• Variantlari aniq cheklangan savol uchun type='select' va options ber "
+        "(masalan ['Yangi','Ishlatilgan']). Aks holda type='text' yoki son uchun 'number'.\n"
+        "• key — lotin harflarida, qisqa, snake_case (masalan 'car_model', 'size').\n"
+        "• label va options — O'ZBEK tilida, qisqa.\n"
+        "• Faqat quyidagi JSON ni qaytar, boshqa hech narsa yozma:\n"
+        '{"known":[{"key":"...","label":"...","value":"..."}],'
+        '"questions":[{"key":"...","label":"...","type":"text|number|select",'
+        '"required":true,"options":["...","..."],"example":"..."}]}'
+    ),
+    'ru': (
+        "Ты — помощник заполнения объявления на маркетплейсе TezBozor. Тебе дают "
+        "НАЗВАНИЕ, КАТЕГОРИЮ и (если есть) ОПИСАНИЕ товара. Задача — составить 3-6 "
+        "вопросов ИМЕННО для этого товара, важных для покупателя (полезные для поиска и "
+        "выбора характеристики). Правила:\n"
+        "• Вопросы должны подходить товару. Напр. для тормозных колодок 'перед/зад', "
+        "'для какого авто', 'бренд'; для футболки 'размер', 'цвет', 'ткань'. "
+        "НЕ задавай вопросы, не относящиеся к товару.\n"
+        "• Не спрашивай то, что уже ясно из названия или описания.\n"
+        "• 1-2 самых важных вопроса сделай обязательными (required=true), остальные — нет.\n"
+        "• Для вопроса с фиксированными вариантами используй type='select' и options "
+        "(напр. ['Новый','Б/у']). Иначе type='text' или 'number' для чисел.\n"
+        "• key — латиницей, коротко, snake_case (напр. 'car_model', 'size').\n"
+        "• label и options — на РУССКОМ, коротко.\n"
+        "• Верни только следующий JSON, ничего больше:\n"
+        '{"known":[{"key":"...","label":"...","value":"..."}],'
+        '"questions":[{"key":"...","label":"...","type":"text|number|select",'
+        '"required":true,"options":["...","..."],"example":"..."}]}'
+    ),
+}
+
+
+def _coerce_questions(data: dict, smart: bool) -> dict:
+    """AI JSON ni ichki shablon shakliga keltiradi.
+
+    Qaytaradi: {"known": {attr_key: {"label","value"}}, "questions": [
+        {"attr_key","attr_label","attr_type","is_required","hint"}]}.
+    Ichki shakl _ask_next_attr kutgan DB shablonlari bilan bir xil — shu sabab
+    AI savollari hech qanday qo'shimcha kodsiz mavjud atribut mashinasiga tushadi."""
+    known = {}
+    if smart:
+        for k in (data.get("known") or []):
+            if not isinstance(k, dict):
+                continue
+            key = str(k.get("key") or "").strip().lower()
+            val = str(k.get("value") or "").strip()
+            if key and val:
+                known[key] = {"label": str(k.get("label") or key).strip(), "value": val}
+
+    questions = []
+    seen = set(known.keys())
+    for q in (data.get("questions") or []):
+        if not isinstance(q, dict):
+            continue
+        key = str(q.get("key") or "").strip().lower()
+        label = str(q.get("label") or "").strip()
+        if not key or not label or key in seen:
+            continue
+        seen.add(key)
+        qtype = str(q.get("type") or "text").strip().lower()
+        options = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()]
+        if qtype == "select" and len(options) >= 2:
+            attr_type, hint = "select", "/".join(options)
+        elif qtype == "number":
+            attr_type, hint = "number", str(q.get("example") or "").strip()
+        else:
+            attr_type, hint = "text", str(q.get("example") or "").strip()
+        questions.append({
+            "attr_key": key,
+            "attr_label": label,
+            "attr_type": attr_type,
+            "is_required": 1 if q.get("required") else 0,
+            "hint": hint,
+        })
+        if len(questions) >= 6:
+            break
+    return {"known": known, "questions": questions}
+
+
+async def generate_product_questions(*, name, category="", description="",
+                                     lang="uz", smart=False) -> dict:
+    """Mahsulotga moslashtirilgan atribut savollarini generatsiya qiladi.
+
+    Qaytaradi {"known": {...}, "questions": [...]} yoki xato/AI o'chiq bo'lsa None
+    (chaqiruvchi klassik shablonlarga qaytadi)."""
+    if not is_enabled() or not (name or "").strip():
+        return None
+    lang = lang if lang in ('uz', 'ru') else 'uz'
+    facts = {
+        ("nom" if lang == 'uz' else "название"): name,
+        ("kategoriya" if lang == 'uz' else "категория"): category,
+        ("tavsif" if lang == 'uz' else "описание"): description,
+    }
+    facts = {k: v for k, v in facts.items() if v}
+    user_msg = ("Mahsulot:\n" if lang == 'uz' else "Товар:\n") + \
+               "\n".join(f"- {k}: {v}" for k, v in facts.items())
+    if smart:
+        user_msg += ("\n\nTavsifdan aniq bo'lganlarni 'known' ga, qolgan muhim "
+                     "savollarni 'questions' ga yoz." if lang == 'uz' else
+                     "\n\nЯсное из описания — в 'known', остальные важные вопросы — в 'questions'.")
+    else:
+        user_msg += ("\n\n'known' ni bo'sh qoldir, faqat 'questions' ni to'ldir." if lang == 'uz'
+                     else "\n\nОставь 'known' пустым, заполни только 'questions'.")
+
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _PRODUCT_Q_SYSTEM[lang]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 700,
+        "temperature": 0.3,   # past — barqaror, mantiqiy savollar
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Mahsulot savollari API xatosi {resp.status_code}")
+                return None
+            data = resp.json()
+            content = (data["choices"][0]["message"].get("content") or "").strip()
+            if not content:
+                return None
+            # JSON ni ajratamiz (ba'zan ```json ... ``` bilan o'raladi)
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            result = _coerce_questions(parsed, smart)
+            if not result["questions"] and not result["known"]:
+                return None
+            return result
+    except Exception as e:
+        log.warning(f"Mahsulot savollari yaratishda xato: {e}")
+        return None
+
+
+# ============================================================
+# SHARHGA JAVOB GENERATSIYASI (bir martalik, agent siklisiz)
+# ============================================================
+_REVIEW_REPLY_SYSTEM = {
+    'uz': (
+        "Sen — TezBozor marketplace sotuvchisining mijozlarga g'amxo'r yordamchisisan. "
+        "Mijozning sharhiga sotuvchi nomidan QISQA, samimiy va professional OCHIQ javob yoz "
+        "(boshqa xaridorlar ham o'qiydi). Qoidalar:\n"
+        "• Mijozga ism bilan (bo'lsa) murojaat qilib, ijobiy fikr uchun rahmat ayt.\n"
+        "• Past baho yoki shikoyat bo'lsa — bahslashmasdan uzr so'ra va yechim/yaxshilanish va'da qil.\n"
+        "• 1-3 jumla, samimiy. 1-2 emoji mumkin. HTML/markdown va hashtag ISHLATMA.\n"
+        "• Faqat javob matnini qaytar, izohsiz. 400 belgidan oshmasin."
+    ),
+    'ru': (
+        "Ты — заботливый помощник продавца маркетплейса TezBozor. "
+        "Напиши от имени магазина КОРОТКИЙ, искренний и профессиональный ПУБЛИЧНЫЙ ответ на отзыв "
+        "(его читают и другие покупатели). Правила:\n"
+        "• Обратись к клиенту по имени (если есть), поблагодари за положительный отзыв.\n"
+        "• Если оценка низкая или жалоба — без спора извинись и пообещай решение/улучшение.\n"
+        "• 1-3 предложения, искренне. Можно 1-2 эмодзи. БЕЗ HTML/markdown и хештегов.\n"
+        "• Верни только текст ответа, без пояснений. Не более 400 символов."
+    ),
+}
+
+
+async def generate_review_reply(*, product, comment, shop_rating=None,
+                                product_rating=None, buyer="", lang="uz") -> str:
+    """Mijoz sharhiga sotuvchi nomidan javob matnini tuzadi (bir martalik chaqiruv).
+    Xato yoki AI o'chiq bo'lsa — None qaytaradi."""
+    if not is_enabled():
+        return None
+    lang = lang if lang in ('uz', 'ru') else 'uz'
+    facts = {
+        ("mahsulot" if lang == 'uz' else "товар"): product,
+        ("xaridor" if lang == 'uz' else "покупатель"): buyer,
+        ("do'kon bahosi" if lang == 'uz' else "оценка магазина"):
+            (f"{shop_rating}/5" if shop_rating else None),
+        ("mahsulot bahosi" if lang == 'uz' else "оценка товара"):
+            (f"{product_rating}/5" if product_rating else None),
+        ("izoh" if lang == 'uz' else "отзыв"): comment,
+    }
+    facts = {k: v for k, v in facts.items() if v}
+    user_msg = ("Sharh ma'lumotlari:\n" if lang == 'uz' else "Данные отзыва:\n") + \
+               "\n".join(f"- {k}: {v}" for k, v in facts.items())
+
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _REVIEW_REPLY_SYSTEM[lang]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 300,
+        "temperature": 0.9,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Sharh javobi API xatosi {resp.status_code}")
+                return None
+            data = resp.json()
+            text = (data["choices"][0]["message"].get("content") or "").strip()
+            if not text:
+                return None
+            text = _strip_hashtags(text)
+            if len(text) > 500:
+                text = text[:500].rstrip()
+            return text or None
+    except Exception as e:
+        log.warning(f"Sharh javobi yaratishda xato: {e}")
+        return None
+
+
+# ============================================================
+# PROFILNI TO'LDIRISHGA ILTIMOS (admin → foydalanuvchi)
+# ============================================================
+_PROFILE_FILL_SYSTEM = {
+    'uz': (
+        "Sen — TezBozor marketplace ma'muriyatining xushmuomala yordamchisisan. "
+        "Foydalanuvchiga uning profilida TO'LDIRILMAGAN ma'lumotlarni to'ldirishni iltimos qilib "
+        "QISQA, samimiy va hurmatli xabar yoz. Qoidalar:\n"
+        "• Ism bilan (bo'lsa) iliq murojaat qil va salomlash.\n"
+        "• Qaysi ma'lumotlar yetishmayotganini aniq, ro'yxat ko'rinishida ko'rsat.\n"
+        "• Nega kerakligini bitta jumlada tushuntir (ishonch ortadi, buyurtmalar oson bo'ladi).\n"
+        "• Profilni «Profil» bo'limidan to'ldirish mumkinligini ayt.\n"
+        "• Iliq, hurmatli ohang. 1-2 emoji mumkin. HTML/markdown va hashtag ISHLATMA.\n"
+        "• Faqat xabar matnini qaytar, izohsiz. 700 belgidan oshmasin."
+    ),
+    'ru': (
+        "Ты — вежливый помощник администрации маркетплейса TezBozor. "
+        "Напиши пользователю КОРОТКОЕ, искреннее и уважительное сообщение с просьбой "
+        "заполнить НЕДОСТАЮЩИЕ данные в его профиле. Правила:\n"
+        "• Обратись по имени (если есть), тепло поздоровайся.\n"
+        "• Чётко, списком укажи, каких данных не хватает.\n"
+        "• Одним предложением объясни, зачем это нужно (доверие, удобство заказов).\n"
+        "• Скажи, что профиль можно заполнить в разделе «Профиль».\n"
+        "• Тёплый, уважительный тон. Можно 1-2 эмодзи. БЕЗ HTML/markdown и хештегов.\n"
+        "• Верни только текст сообщения, без пояснений. Не более 700 символов."
+    ),
+}
+
+
+async def generate_profile_completion_message(*, name="", missing_fields=None,
+                                               is_seller=False, lang="uz") -> str:
+    """Profilda yetishmayotgan maydonlar asosida foydalanuvchiga yuboriladigan
+    iltimos xabarini tuzadi. Har chaqiruvda yangi variant (temperature yuqori).
+    Xato yoki AI o'chiq bo'lsa — None qaytaradi."""
+    if not is_enabled():
+        return None
+    lang = lang if lang in ('uz', 'ru') else 'uz'
+    missing_fields = missing_fields or []
+    fields_str = "\n".join(f"- {m}" for m in missing_fields) or ("- (—)")
+    if lang == 'uz':
+        who = "Sotuvchi" if is_seller else "Xaridor"
+        user_msg = (f"Foydalanuvchi ismi: {name or '—'}\n"
+                    f"Roli: {who}\n"
+                    f"Profildagi to'ldirilmagan maydonlar:\n{fields_str}")
+    else:
+        who = "Продавец" if is_seller else "Покупатель"
+        user_msg = (f"Имя пользователя: {name or '—'}\n"
+                    f"Роль: {who}\n"
+                    f"Незаполненные поля профиля:\n{fields_str}")
+
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _PROFILE_FILL_SYSTEM[lang]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 500,
+        "temperature": 1.0,   # har safar takrorlanmas variant (admin "qayta yaratish"i uchun)
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Profil to'ldirish xabari API xatosi {resp.status_code}")
+                return None
+            data = resp.json()
+            text = (data["choices"][0]["message"].get("content") or "").strip()
+            if not text:
+                return None
+            text = _strip_hashtags(text)
+            if len(text) > 900:
+                text = text[:900].rstrip()
+            return text or None
+    except Exception as e:
+        log.warning(f"Profil to'ldirish xabari yaratishda xato: {e}")
         return None
 
 
@@ -702,8 +1214,11 @@ def _get_history(user_data: dict) -> list:
 # ASOSIY: AGENT CHAQIRUVI (tool-call sikli)
 # ============================================================
 async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
-              *, seller_id=None, user_name: str = "") -> dict:
+              *, seller_id=None, user_name: str = "", shop_filter=None, shop_name="") -> dict:
     """Foydalanuvchi xabariga agent javobini qaytaradi.
+
+    shop_filter — do'kon (sotuvchi) id si: berilsa, xaridor qidiruvi FAQAT shu
+    do'kon mahsulotlari bilan cheklanadi (do'kon ichida AI qidiruv).
 
     Natija: {"text": str, "products": [...]|None, "draft": {...}|None}
     Xato bo'lsa ham istisno tashlamaydi — text ichida tushunarli xabar bo'ladi.
@@ -712,13 +1227,25 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
         return {"text": _msg_disabled(lang), "products": None, "draft": None}
 
     role = role if role in ('admin', 'seller', 'buyer') else 'buyer'
-    actor = {'lang': lang, 'role': role, 'seller_id': seller_id}
+    actor = {'lang': lang, 'role': role, 'seller_id': seller_id, 'shop_filter': shop_filter}
 
     history = _get_history(user_data)
 
     # Ishchi xabarlar (system + tarix + joriy savol). Tool round-trip shu yerda kechadi,
     # lekin tarixga faqat toza user/assistant matn saqlanadi.
-    messages = [{"role": "system", "content": build_system_prompt(lang, role, user_name)}]
+    system_content = build_system_prompt(lang, role, user_name)
+    if shop_filter:
+        if lang == 'ru':
+            system_content += (f"\n\nВАЖНО: покупатель находится ВНУТРИ магазина "
+                               f"«{shop_name or '—'}». search_products ищет ТОЛЬКО товары этого "
+                               f"магазина. Если в этом магазине ничего не найдено — честно скажи, "
+                               f"что в этом магазине такого нет.")
+        else:
+            system_content += (f"\n\nMUHIM: xaridor «{shop_name or '—'}» do'koni ICHIDA. "
+                               f"search_products FAQAT shu do'kon mahsulotlarini qidiradi. "
+                               f"Shu do'kondan topilmasa — rostini ayt, shu do'konda bunday "
+                               f"mahsulot yo'qligini bildirib qo'y.")
+    messages = [{"role": "system", "content": system_content}]
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
 
@@ -726,6 +1253,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
     ui_products = None
     ui_draft = None
     ui_reactivated = None
+    ui_order_actions = []
+    ui_review_replies = []
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
     try:
@@ -747,7 +1276,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                 err = _http_error_text(resp, lang)
                 if err is not None:
                     return {"text": err, "products": ui_products, "draft": ui_draft,
-                            "reactivated_id": ui_reactivated}
+                            "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
+                            "review_replies": ui_review_replies}
 
                 data = resp.json()
                 msg = data["choices"][0]["message"]
@@ -763,7 +1293,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                     if len(history) > MAX_HISTORY:
                         del history[:len(history) - MAX_HISTORY]
                     return {"text": answer, "products": ui_products, "draft": ui_draft,
-                            "reactivated_id": ui_reactivated}
+                            "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
+                            "review_replies": ui_review_replies}
 
                 # Tool'larni bajaramiz
                 messages.append({
@@ -785,6 +1316,10 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                         ui_draft = ui["draft"]
                     elif ui and ui.get("type") == "reactivated":
                         ui_reactivated = ui["product_id"]
+                    elif ui and ui.get("type") == "order_action":
+                        ui_order_actions.append(ui)
+                    elif ui and ui.get("type") == "review_reply":
+                        ui_review_replies.append(ui)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id"),
@@ -795,7 +1330,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
             # Sikllar tugadi, javob yo'q — bor natijani qaytaramiz
             fallback = _msg_steps(lang)
             return {"text": fallback, "products": ui_products, "draft": ui_draft,
-                    "reactivated_id": ui_reactivated}
+                    "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
+                    "review_replies": ui_review_replies}
 
     except httpx.TimeoutException:
         log.warning("DeepSeek timeout")

@@ -3,6 +3,7 @@ import math
 import html
 import os
 import io
+import json
 import asyncio
 
 try:
@@ -17,7 +18,15 @@ if not TOKEN:
         "❌ BOT_TOKEN topilmadi. Uni .env faylida belgilang:  BOT_TOKEN=...\n"
         "   (Token endi kodda saqlanmaydi — xavfsizlik uchun.)"
     )
-ADMIN_ID = int(os.getenv("ADMIN_ID", "722266370"))
+# ADMIN_ID — faqat .env'dan o'qiladi. Kodda haqiqiy default qoldirmaymiz:
+# aks holda sozlamasdan deploy qilinsa, o'sha ID egasi avtomatik admin bo'lib qoladi.
+# O'rnatilmasa 0 (hech kim) — admin amallari hech kimga ochilmaydi.
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or "0")
+except ValueError:
+    ADMIN_ID = 0
+if not ADMIN_ID:
+    logging.warning("⚠️ ADMIN_ID .env'da o'rnatilmagan — admin huquqlari hech kimga berilmaydi.")
 
 # Markaziy kanal — mahsulotlar avtomatik shu yerga post qilinadi.
 # .env faylida belgilang:  CHANNEL_ID=@TezBozorUz24
@@ -27,19 +36,71 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")
 # @username bo'lsa — t.me havolasiga aylantiramiz.
 CHANNEL_URL = f"https://t.me/{str(CHANNEL_ID).lstrip('@')}" if CHANNEL_ID and str(CHANNEL_ID).startswith('@') else None
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
 from database import Database
 from languages import t, LANGS, DEFAULT_LANG, get_user_lang, region_name, category_name, all_labels as _lang_labels
 from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt_rating,
-                             fmt_datetime, is_shop_open_now, M,
+                             fmt_datetime, is_shop_open_now, M, TZ_TASHKENT,
                              human_address, best_location_text, maps_link, looks_like_coords)
 import ai_assistant
 import ad_design
 from telegram.constants import ChatAction
 
-logging.basicConfig(level=logging.INFO)
+# ===== LOGGING + (ixtiyoriy) MONITORING =====
+def _setup_logging():
+    """Konsol + aylanuvchi fayl loglari. Xatolarni keyinchalik tahlil qilish uchun
+    logs/bot.log faylida saqlanadi (har biri 5MB gacha, 5 ta zaxira nusxa)."""
+    import logging.handlers
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    fmt = logging.Formatter(
+        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+    root.addHandler(console)
+    try:
+        os.makedirs("logs", exist_ok=True)
+        fileh = logging.handlers.RotatingFileHandler(
+            os.path.join("logs", "bot.log"), maxBytes=5 * 1024 * 1024,
+            backupCount=5, encoding="utf-8")
+        fileh.setFormatter(fmt)
+        root.addHandler(fileh)
+    except Exception as e:
+        root.warning(f"Fayl logini yoqib bo'lmadi: {e}")
+    # Kutubxonalar juda gapdon — biroz tinchlantiramiz
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+_SENTRY_ENABLED = False
+
+
+def _setup_sentry():
+    """SENTRY_DSN o'rnatilgan bo'lsa — Sentry xato-kuzatuvini yoqadi. Aks holda hech
+    narsa qilmaydi. sentry-sdk o'rnatilmagan bo'lsa ham bot to'xtamaydi."""
+    global _SENTRY_ENABLED
+    dsn = os.getenv("SENTRY_DSN")
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+        sentry_sdk.init(dsn=dsn, traces_sample_rate=0.0,
+                        environment=os.getenv("ENV", "production"))
+        _SENTRY_ENABLED = True
+        logging.info("✅ Sentry monitoring yoqildi.")
+    except ImportError:
+        logging.warning("SENTRY_DSN berilgan, lekin sentry-sdk o'rnatilmagan "
+                        "(pip install sentry-sdk). Sentry o'chiq qoldi.")
+    except Exception as e:
+        logging.error(f"Sentry init xatosi: {e}")
+
+
+_setup_logging()
+_setup_sentry()
 
 db = Database()
 
@@ -478,12 +539,13 @@ def validate_fullname(raw, max_len=60):
 # Aks holda state'lar bir-birini ustidan yozib ketadi (BUG FIX #1)
 # ============================================================
 (PHONE, NAME, ROLE, SELLER_CATEGORY, SHOP_NAME, SHOP_LANDMARK,
- SHOP_ADDRESS, WORKING_DAYS, WORKING_HOURS, TELEGRAM_USERNAME) = range(10)
+ SHOP_ADDRESS, SHOP_ADDRESS_TEXT, WORKING_DAYS, WORKING_HOURS, TELEGRAM_USERNAME) = range(11)
 
 # Til tanlash (ro'yxatdan o'tishdan oldin) — alohida raqam, boshqa banddagilar bilan to'qnashmaydi
 SELECT_LANG = 200
 
-(PRODUCT_NAME, PRODUCT_PRICE, PRODUCT_CATEGORY, PRODUCT_DESC, PRODUCT_PHOTO, PRODUCT_ATTRS) = range(10, 16)
+(PRODUCT_NAME, PRODUCT_PRICE, PRODUCT_STOCK, PRODUCT_CATEGORY, PRODUCT_DESC, PRODUCT_PHOTO, PRODUCT_ATTRS) = range(10, 17)
+PRODUCT_MODE = 17   # mahsulot joylash usulini tanlash (klassik / AI savollar / AI aqlli)
 
 # Mahsulotni tahrirlash — endi "bir oyna + qaysi qismni tanlash" usulida.
 # Har bir maydon alohida fokuslangan tahrir holatiga ega.
@@ -497,8 +559,8 @@ MESSAGE_TEXT = 40
 (PRODUCT_RATING, PRODUCT_COMMENT, SELLER_RATING) = range(50, 53)
 
 (EDIT_PROFILE_NAME, EDIT_PROFILE_PHONE,
- EDIT_SHOP_NAME, EDIT_SHOP_LANDMARK, EDIT_SHOP_ADDRESS,
- EDIT_WORKING_DAYS, EDIT_WORKING_HOURS, EDIT_TELEGRAM_USERNAME) = range(60, 68)
+ EDIT_SHOP_NAME, EDIT_SHOP_LANDMARK, EDIT_SHOP_ADDRESS, EDIT_SHOP_ADDRESS_TEXT,
+ EDIT_WORKING_DAYS, EDIT_WORKING_HOURS, EDIT_TELEGRAM_USERNAME) = range(60, 69)
 
 (EDIT_CARD_TYPE, EDIT_CARD_NUMBER, EDIT_CARD_OWNER) = range(70, 73)
 
@@ -509,6 +571,14 @@ MESSAGE_TEXT = 40
 # shunda mavjud order_conv'ga umuman tegmaymiz.
 (CART_DELIVERY_TYPE, CART_ADDRESS, CART_PAYMENT, CART_CONFIRM) = range(100, 104)
 LINK_CHANNEL_WAIT = 110  # Sotuvchi kanalini ulash holati (forward kutilmoqda)
+
+# Shartnomani bekor qilish oqimi (kelishuv + nizo) — sabab tanlash holatlari
+(CANCEL_PICK_REASON, CANCEL_REASON_TEXT) = range(120, 122)
+
+# Admin nizo bo'yicha tomonga (bot orqali) xabar yozishi
+ADMIN_DISPUTE_MSG = 130
+# Xaridor/sotuvchi admin xabariga javob berishi
+DMREPLY_MSG = 131
 
 
 # ============================================================
@@ -522,8 +592,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # /start REF12345 ko'rinishida kelishi mumkin (context.args ichida)
     if not user and context.args:
         ref_code = context.args[0].strip()
-        # Deeplink emas — referral
-        if not ref_code.startswith("product_"):
+        # Deeplink emas — referral (product_/staff_ deeplinklarini chiqarib tashlaymiz)
+        if not ref_code.startswith("product_") and not ref_code.startswith("staff_"):
             referrer = db.get_user_by_referral_code(ref_code)
             if referrer:
                 context.user_data['referred_by'] = referrer['id']
@@ -553,6 +623,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return ConversationHandler.END
             except (ValueError, TypeError):
                 pass
+
+    # Deeplink: /start staff_<code> — do'konga sotuvchi-xodim bo'lib qo'shilish
+    if context.args and context.args[0].strip().startswith("staff_"):
+        code = context.args[0].strip()[len("staff_"):]
+        handled = await _handle_staff_deeplink(update, context, code, user)
+        if handled:
+            return ConversationHandler.END
+        # handled=False → yangi foydalanuvchi, staff_invite saqlandi, ro'yxat davom etadi
 
     if user and user['role'] != 'admin' and update.effective_user.id == ADMIN_ID:
         db.update_user(user['id'], role='admin')
@@ -609,6 +687,127 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     await admin_panel(update, context)
+    return ConversationHandler.END
+
+
+async def _notify_owner_new_staff(context, shop, staff_user, staff_id, department=None):
+    """Do'kon egasiga yangi xodim qo'shilgani haqida xabar (tasdiqlash uchun)."""
+    try:
+        owner = db.get_user_by_id(shop['owner_user_id'])
+        if not owner or not owner.get('telegram_id'):
+            return
+        olang = get_user_lang(owner)
+        await context.bot.send_message(
+            chat_id=owner['telegram_id'],
+            text=t(olang, 'owner_new_staff_notify',
+                   name=html.escape(staff_user.get('name') or '—'),
+                   phone=staff_user.get('phone_number') or '—',
+                   dept=html.escape(department or '—')),
+            parse_mode='HTML',
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(t(olang, 'btn_staff_activate'), callback_data=f"staff_toggle_{staff_id}")],
+                [InlineKeyboardButton(t(olang, 'btn_staff_reject'), callback_data=f"staff_reject_{staff_id}")],
+                [InlineKeyboardButton(t(olang, 'btn_manage_staff'), callback_data="staff_detail_%d" % staff_id)],
+            ])
+        )
+    except Exception as e:
+        logging.error(f"Egaga yangi xodim xabari ketmadi: {e}")
+
+
+async def _handle_staff_deeplink(update, context, code, user):
+    """staff_<code> deeplink. To'liq bajarilsa True (to'xta), yangi foydalanuvchi uchun
+    ro'yxat davom etishi kerak bo'lsa False qaytaradi."""
+    invite = db.get_invite_by_code(code)
+    lang = (get_user_lang(user) if user else context.user_data.get('lang', DEFAULT_LANG))
+    if not invite or invite.get('is_used'):
+        await update.message.reply_text(t(lang, 'staff_invite_invalid'))
+        return True
+    shop = db.get_shop_by_id(invite['shop_id'])
+    if not shop:
+        await update.message.reply_text(t(lang, 'staff_invite_invalid'))
+        return True
+
+    if user:
+        if user.get('role') == 'admin':
+            await update.message.reply_text(t(lang, 'staff_admin_cannot_join'))
+            return True
+        existing = db.get_staff_by_user(user['id'])
+        if existing:
+            # Ega o'z do'konini tashlab keta olmaydi
+            if existing.get('staff_role') == 'owner':
+                await update.message.reply_text(t(lang, 'staff_owner_cannot_join'))
+                return True
+            # Bu do'konning o'ziga qayta urinish — qayta qo'shishning hojati yo'q
+            if existing.get('shop_id') == shop['id']:
+                await update.message.reply_text(t(lang, 'staff_already_in_this_shop'))
+                return True
+            # Xodim — eski do'kondan chiqarib, yangisiga o'tkazamiz
+            old_shop = db.get_shop_by_id(existing['shop_id'])
+            db.remove_staff(existing['id'])
+            # Eski do'kon egasiga xabar
+            try:
+                if old_shop:
+                    old_owner = db.get_user_by_id(old_shop['owner_user_id'])
+                    if old_owner and old_owner.get('telegram_id'):
+                        await context.bot.send_message(
+                            chat_id=old_owner['telegram_id'],
+                            text=t(get_user_lang(old_owner), 'staff_left_old_shop',
+                                   name=html.escape(user.get('name') or '—')),
+                            parse_mode='HTML')
+            except Exception as e:
+                logging.error(f"Eski egaga xodim chiqdi xabari ketmadi: {e}")
+        staff_id = db.add_staff(shop['id'], user['id'], staff_role='staff',
+                                department=invite.get('department'), is_active=0,
+                                added_by=invite.get('created_by'))
+        db.update_user(user['id'], role='seller', is_approved=1)
+        db.mark_invite_used(code, user['id'])
+        await _notify_owner_new_staff(context, shop, user, staff_id, invite.get('department'))
+        await update.message.reply_text(
+            t(lang, 'staff_joined_pending', shop=html.escape(shop.get('name') or '—')),
+            parse_mode='HTML')
+        return True
+
+    # Yangi foydalanuvchi — kodni saqlab, ro'yxatdan o'tishni davom ettiramiz
+    context.user_data['staff_invite'] = code
+    return False
+
+
+async def _finalize_staff_registration(update, context):
+    """Yangi foydalanuvchi ro'yxatdan o'tib bo'lgach — xodim sifatida do'konga bog'laydi."""
+    code = context.user_data.get('staff_invite')
+    lang = context.user_data.get('lang', DEFAULT_LANG)
+    invite = db.get_invite_by_code(code) if code else None
+    context.user_data.pop('staff_invite', None)
+    if not invite or invite.get('is_used'):
+        await update.message.reply_text(t(lang, 'staff_invite_invalid'))
+        # Oddiy xaridor sifatida ro'yxatdan o'tkazamiz (kod yaroqsiz bo'lsa ham yo'qotmaymiz)
+        uid = db.create_user(telegram_id=update.effective_user.id,
+                             phone_number=context.user_data.get('phone'),
+                             name=context.user_data.get('name'), role='buyer')
+        db.update_user(uid, language=lang)
+        await buyer_panel(update, context)
+        return ConversationHandler.END
+    shop = db.get_shop_by_id(invite['shop_id'])
+    uid = db.create_user(telegram_id=update.effective_user.id,
+                         phone_number=context.user_data.get('phone'),
+                         name=context.user_data.get('name'), role='seller')
+    db.update_user(uid, language=lang, is_approved=1)
+    staff_id = db.add_staff(shop['id'], uid, staff_role='staff',
+                            department=invite.get('department'), is_active=0,
+                            added_by=invite.get('created_by'))
+    db.mark_invite_used(code, uid)
+    staff_user = db.get_user_by_id(uid)
+    await _notify_owner_new_staff(context, shop, staff_user, staff_id, invite.get('department'))
+    await notify_admins(
+        context,
+        f"👥 <b>Do'konga yangi sotuvchi-xodim qo'shildi!</b>\n\n"
+        f"Ism: {html.escape(context.user_data.get('name') or '')}\n"
+        f"Telefon: {context.user_data.get('phone') or ''}\n"
+        f"Do'kon: {html.escape(shop.get('name') or '—')}"
+    )
+    await update.message.reply_text(
+        t(lang, 'staff_joined_pending', shop=html.escape(shop.get('name') or '—')),
+        parse_mode='HTML')
     return ConversationHandler.END
 
 
@@ -676,6 +875,11 @@ async def registration_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['name'] = name
 
+    # MULTI-SOTUVCHI: staff_<code> deeplink orqali kelgan bo'lsa — rol so'ramaymiz,
+    # to'g'ridan-to'g'ri do'konga xodim sifatida bog'laymiz
+    if context.user_data.get('staff_invite'):
+        return await _finalize_staff_registration(update, context)
+
     keyboard = [
         [InlineKeyboardButton(T(update, context, 'role_buyer'), callback_data="reg_buyer")],
         [InlineKeyboardButton(T(update, context, 'role_seller'), callback_data="reg_seller")],
@@ -716,6 +920,16 @@ async def registration_role(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         # Tanlangan tilni saqlaymiz
         db.update_user(user_id, language=context.user_data.get('lang', DEFAULT_LANG))
+
+        # Adminlarga yangi foydalanuvchi haqida xabar
+        await notify_admins(
+            context,
+            f"👤 <b>Yangi foydalanuvchi qo'shildi!</b>\n\n"
+            f"Ism: {html.escape(context.user_data.get('name') or '')}\n"
+            f"Telefon: {context.user_data.get('phone') or ''}\n"
+            f"Rol: Xaridor"
+        )
+
         await query.edit_message_text(T(update, context, 'registration_success'))
         await buyer_panel(update, context)
         return ConversationHandler.END
@@ -753,30 +967,45 @@ async def registration_shop_landmark(update: Update, context: ContextTypes.DEFAU
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
     await update.message.reply_text(
-        T(update, context, 'shop_address_ask'),
+        T(update, context, 'shop_location_ask'),
         reply_markup=reply_markup
     )
     return SHOP_ADDRESS
 
 
 async def registration_shop_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """1/2-bosqich: do'kon LOKATSIYASI (xarita uchun). '-' yuborilsa o'tkazib yuboriladi."""
     if update.message.location:
         lat = update.message.location.latitude
         lon = update.message.location.longitude
-        # Koordinatani o'qiladigan manzilga aylantiramiz (xom raqam saqlamaymiz)
+        context.user_data['shop_lat'] = lat
+        context.user_data['shop_lon'] = lon
+        # Geocode'dan dastlabki manzil matni (keyingi bosqichda tahrirlanishi mumkin)
         address = await resolve_shop_address(lat, lon)
+        context.user_data['shop_address'] = address   # None bo'lishi mumkin
         if address:
             await update.message.reply_text(T(update, context, 'address_detected', address=address))
     else:
-        address = update.message.text.strip()
-        if len(address) < 5 or len(address) > 200:
-            await update.message.reply_text(T(update, context, 'address_invalid'))
-            return SHOP_ADDRESS
-        lat, lon = None, None
+        # Matn (odatda "-") — lokatsiyani o'tkazib yuborish
+        context.user_data['shop_lat'] = None
+        context.user_data['shop_lon'] = None
+        context.user_data.setdefault('shop_address', None)
 
-    context.user_data['shop_address'] = address
-    context.user_data['shop_lat'] = lat
-    context.user_data['shop_lon'] = lon
+    await update.message.reply_text(
+        T(update, context, 'shop_address_text_ask'),
+        reply_markup=ReplyKeyboardRemove()
+    )
+    return SHOP_ADDRESS_TEXT
+
+
+async def registration_shop_address_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """2/2-bosqich: manzil MATNI. "-" bo'lsa avvalgi (geocode) manzil saqlanadi."""
+    text = update.message.text.strip()
+    if text != '-':
+        if len(text) < 5 or len(text) > 200:
+            await update.message.reply_text(T(update, context, 'address_invalid'))
+            return SHOP_ADDRESS_TEXT
+        context.user_data['shop_address'] = text
 
     await update.message.reply_text(
         T(update, context, 'working_days_ask'),
@@ -820,6 +1049,33 @@ async def registration_telegram_username(update: Update, context: ContextTypes.D
 
     await complete_registration(update, context)
     return ConversationHandler.END
+
+
+async def notify_admins(context: ContextTypes.DEFAULT_TYPE, text, reply_markup=None, parse_mode='HTML'):
+    """Barcha adminlarga xabar yuboradi: .env'dagi ADMIN_ID va DB'dagi role='admin' foydalanuvchilar.
+    Bitta qabul qiluvchiga ketmasa (bloklagan/chat ochmagan), qolganlariga ketaveradi.
+    Shu sabab .env'dagi ADMIN_ID adashgan bo'lsa ham, DB'dagi haqiqiy admin xabarni oladi."""
+    recipients = set()
+    if ADMIN_ID:
+        recipients.add(ADMIN_ID)
+    try:
+        for a in db.get_all_users(role='admin'):
+            tid = a.get('telegram_id')
+            if tid:
+                recipients.add(tid)
+    except Exception as e:
+        logging.error(f"Adminlar ro'yxatini olishda xato: {e}")
+    if not recipients:
+        logging.warning("notify_admins: hech qanday admin topilmadi — ADMIN_ID o'rnatilmagan va DB'da admin yo'q.")
+        return
+    for chat_id in recipients:
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id, text=text,
+                parse_mode=parse_mode, reply_markup=reply_markup
+            )
+        except Exception as e:
+            logging.error(f"Adminga ({chat_id}) bildirishnoma ketmadi: {e}")
 
 
 async def complete_registration(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -879,31 +1135,40 @@ async def complete_registration(update: Update, context: ContextTypes.DEFAULT_TY
         db.create_seller_request(user_id)
         db.update_user(user_id, is_approved=0)
 
-        await update.message.reply_text(T(update, context, 'reg_success_seller'))
-
-        # Adminga bildirishnoma (admin tilida — odatda matn maydon nomlari saqlanadi)
+        # MULTI-SOTUVCHI: yangi sotuvchi uchun do'kon (owner shop_staff bilan) yaratamiz
         try:
-            user_name = html.escape(context.user_data.get('name') or '')
-            shop = html.escape(shop_name or '')
-            phone = context.user_data.get('phone') or ''
-            await context.bot.send_message(
-                chat_id=ADMIN_ID,
-                text=(
-                    f"🆕 <b>Yangi sotuvchi so'rovi!</b>\n\n"
-                    f"👤 Ism: {user_name}\n"
-                    f"📞 Telefon: {phone}\n"
-                    f"🏪 Do'kon: {shop}\n"
-                    f"📍 Manzil: {html.escape(context.user_data.get('shop_address') or '')}\n\n"
-                    f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari"
-                ),
-                parse_mode='HTML',
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user_id}")],
-                    [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user_id}")],
-                ])
+            db.create_shop(
+                user_id,
+                name=shop_name,
+                address=context.user_data.get('shop_address'),
+                landmark=context.user_data.get('shop_landmark'),
+                lat=context.user_data.get('shop_lat'),
+                lon=context.user_data.get('shop_lon'),
+                working_days=context.user_data.get('working_days'),
+                working_hours=context.user_data.get('working_hours'),
             )
         except Exception as e:
-            logging.error(f"Admin bildirishnomasi ketmadi: {e}")
+            logging.error(f"Yangi sotuvchi uchun do'kon yaratilmadi: {e}")
+
+        await update.message.reply_text(T(update, context, 'reg_success_seller'))
+
+        # Adminlarga bildirishnoma
+        user_name = html.escape(context.user_data.get('name') or '')
+        shop = html.escape(shop_name or '')
+        phone = context.user_data.get('phone') or ''
+        await notify_admins(
+            context,
+            f"🆕 <b>Yangi sotuvchi so'rovi!</b>\n\n"
+            f"👤 Ism: {user_name}\n"
+            f"📞 Telefon: {phone}\n"
+            f"🏪 Do'kon: {shop}\n"
+            f"📍 Manzil: {html.escape(context.user_data.get('shop_address') or '')}\n\n"
+            f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user_id}")],
+                [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user_id}")],
+            ])
+        )
 
         await buyer_panel(update, context)
     elif role == 'admin':
@@ -1032,29 +1297,23 @@ async def become_seller_finish(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.message.reply_text(T(update, context, 'become_seller_saved'))
 
-    # Adminga bildirishnoma
-    try:
-        user_name = html.escape(user.get('name') or '')
-        shop = html.escape(context.user_data.get('shop_name') or '')
-        phone = user.get('phone_number') or ''
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"🆕 <b>Yangi sotuvchi so'rovi!</b>\n\n"
-                f"👤 Ism: {user_name}\n"
-                f"📞 Telefon: {phone}\n"
-                f"🏪 Do'kon: {shop}\n"
-                f"📍 Manzil: {html.escape(context.user_data.get('shop_address') or '')}\n\n"
-                f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari"
-            ),
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user['id']}")],
-                [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user['id']}")],
-            ])
-        )
-    except Exception as e:
-        logging.error(f"Admin bildirishnomasi ketmadi: {e}")
+    # Adminlarga bildirishnoma
+    user_name = html.escape(user.get('name') or '')
+    shop = html.escape(context.user_data.get('shop_name') or '')
+    phone = user.get('phone_number') or ''
+    await notify_admins(
+        context,
+        f"🆕 <b>Yangi sotuvchi so'rovi!</b>\n\n"
+        f"👤 Ism: {user_name}\n"
+        f"📞 Telefon: {phone}\n"
+        f"🏪 Do'kon: {shop}\n"
+        f"📍 Manzil: {html.escape(context.user_data.get('shop_address') or '')}\n\n"
+        f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user['id']}")],
+            [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user['id']}")],
+        ])
+    )
 
     context.user_data['active_mode'] = 'buyer'
     await buyer_panel(update, context)
@@ -1085,29 +1344,23 @@ async def reapply_seller(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
     )
 
-    # Adminga bildirishnoma
-    try:
-        user_name = html.escape(user.get('name') or '')
-        shop = html.escape(user.get('shop_name') or '')
-        phone = user.get('phone_number') or ''
-        await context.bot.send_message(
-            chat_id=ADMIN_ID,
-            text=(
-                f"🔄 <b>Qayta sotuvchi so'rovi!</b>\n\n"
-                f"👤 Ism: {user_name}\n"
-                f"📞 Telefon: {phone}\n"
-                f"🏪 Do'kon: {shop}\n"
-                f"📍 Manzil: {html.escape(user.get('shop_address') or '')}\n\n"
-                f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari"
-            ),
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user['id']}")],
-                [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user['id']}")],
-            ])
-        )
-    except Exception as e:
-        logging.error(f"Admin bildirishnomasi ketmadi: {e}")
+    # Adminlarga bildirishnoma
+    user_name = html.escape(user.get('name') or '')
+    shop = html.escape(user.get('shop_name') or '')
+    phone = user.get('phone_number') or ''
+    await notify_admins(
+        context,
+        f"🔄 <b>Qayta sotuvchi so'rovi!</b>\n\n"
+        f"👤 Ism: {user_name}\n"
+        f"📞 Telefon: {phone}\n"
+        f"🏪 Do'kon: {shop}\n"
+        f"📍 Manzil: {html.escape(user.get('shop_address') or '')}\n\n"
+        f"Tasdiqlash uchun: Admin panel → Sotuvchi so'rovlari",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"approve_seller_{user['id']}")],
+            [InlineKeyboardButton("❌ Rad etish", callback_data=f"reject_seller_{user['id']}")],
+        ])
+    )
 
 
 # ============================================================
@@ -1127,6 +1380,7 @@ async def buyer_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(t(lang, 'btn_search_menu'), callback_data="buyer_search_menu")],
         [InlineKeyboardButton(t(lang, 'btn_my_orders'), callback_data="buyer_orders")],
+        [InlineKeyboardButton(t(lang, 'btn_my_debts'), callback_data="buyer_debts")],
         [InlineKeyboardButton(t(lang, 'btn_messages'), callback_data="buyer_messages")],
         [InlineKeyboardButton(t(lang, 'btn_reviews'), callback_data="buyer_reviews")],
         [InlineKeyboardButton(t(lang, 'btn_profile'), callback_data="buyer_profile")],
@@ -1134,6 +1388,10 @@ async def buyer_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(t(lang, 'btn_ai_assistant'), callback_data="ai_assistant")],
         [InlineKeyboardButton(t(lang, 'btn_contact_admin'), callback_data="contact_admin")],
     ]
+    # MULTI-SOTUVCHI: do'konga taklif kodi bilan qo'shilish (faqat hali do'konda bo'lmaganlarga)
+    if user and not db.get_staff_by_user(user['id']):
+        keyboard.insert(6, [InlineKeyboardButton(t(lang, 'btn_join_with_code'), callback_data="join_with_code")])
+
     if CHANNEL_URL:
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_official_channel'), url=CHANNEL_URL)])
 
@@ -1265,15 +1523,24 @@ async def _send_product_card(context, chat_id, images, text, keyboard):
     images = [i for i in (images or []) if i][:4]
     if len(images) <= 1:
         if images:
-            await context.bot.send_photo(
-                chat_id=chat_id, photo=images[0], caption=text,
-                reply_markup=markup, parse_mode='HTML'
-            )
+            try:
+                await context.bot.send_photo(
+                    chat_id=chat_id, photo=images[0], caption=text,
+                    reply_markup=markup, parse_mode='HTML'
+                )
+            except BadRequest as e:
+                # file_id yaroqsiz bo'lsa (rasm boshqa bot tomonidan yuklangan yoki
+                # o'chirilgan) — kartochkani matn bilan ko'rsatamiz, qulamaymiz.
+                logging.warning(f"send_photo file_id xatosi, matnga o'tildi: {e}")
+                await context.bot.send_message(
+                    chat_id=chat_id, text=text, reply_markup=markup, parse_mode='HTML'
+                )
         else:
             await context.bot.send_message(
                 chat_id=chat_id, text=text, reply_markup=markup, parse_mode='HTML'
             )
         return
+    # 2-4 rasm: albomни ham xavfsiz yuboramiz (file_id buzilsa, matn baribir boradi)
     media = [InputMediaPhoto(media=images[0])]
     for fid in images[1:]:
         media.append(InputMediaPhoto(media=fid))
@@ -1359,6 +1626,18 @@ async def buyer_product_details(update: Update, context: ContextTypes.DEFAULT_TY
             t(lang, 'btn_recommend'),
             callback_data=f"recommend_{product_id}"
         )])
+
+    # O'xshash mahsulotlar — sotuvni oshirish uchun shu do'kondan taklif
+    similar = db.get_similar_products(product_id, limit=3)
+    if similar:
+        keyboard.append([InlineKeyboardButton(t(lang, 'similar_title'), callback_data="noop")])
+        for sp in similar:
+            emoji = sp.get('category_emoji') or '🛍'
+            keyboard.append([InlineKeyboardButton(
+                t(lang, 'btn_similar_item', emoji=emoji,
+                  name=(sp['name'] or '')[:25], price=fmt_price(sp['price'])),
+                callback_data=f"prod_{sp['id']}"
+            )])
 
     # Orqaga — do'kon kontekstida do'konga, aks holda kategoriyalarga
     if in_shop_ctx:
@@ -1478,6 +1757,9 @@ async def product_reviews_view(update: Update, context: ContextTypes.DEFAULT_TYP
         block = f"\n{stars}\n👤 {buyer} · {date}"
         if comment:
             block += f"\n💬 {comment}"
+        reply = html.escape(r.get('seller_reply') or '')
+        if reply:
+            block += f"\n   ↳ {t(lang, 'review_shop_reply')} {reply}"
         lines.append(block)
 
     text = "\n".join(lines)
@@ -1512,6 +1794,7 @@ async def skip_search_location(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 PAGE_SIZE = 10  # sahifadagi mahsulotlar soni
+CATALOG_PAGE_SIZE = 8  # do'kon mahsulotlari (rasmli albom grid) sahifasidagi soni (albom maks. 10)
 HISTORY_LIMIT = 20  # ko'rilgan mahsulotlar tarixi
 
 
@@ -1896,14 +2179,27 @@ async def buyer_shop_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     seller_id = int(query.data.split("_")[1])
+
+    # Rasmli katalogdan qaytilgan bo'lsa — kartochka xabarlarini tozalab,
+    # do'kon sahifasini yangi xabar bilan ko'rsatamiz (rasmni edit qilib bo'lmaydi).
+    from_catalog = bool(context.user_data.get('shop_catalog_msgs'))
+    if from_catalog:
+        await _clear_catalog_messages(context, update.effective_chat.id)
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
     lang = get_lang(update, context)
     shop = db.get_seller_public_info(seller_id)
 
     if not shop:
-        await query.edit_message_text(
-            t(lang, 'shop_not_found'),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")]])
-        )
+        not_found_kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")]])
+        if from_catalog:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id, text=t(lang, 'shop_not_found'),
+                reply_markup=not_found_kb)
+        else:
+            await query.edit_message_text(t(lang, 'shop_not_found'), reply_markup=not_found_kb)
         return
 
     # Do'kon konteksti — mahsulot sahifasida "savatga qo'shish" tugmasi shu do'kon uchun chiqsin
@@ -1973,20 +2269,145 @@ async def buyer_shop_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )])
     keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")])
 
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    if from_catalog:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id, text=text,
+            reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    else:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def _clear_catalog_messages(context, chat_id):
+    """Oldingi katalog sahifasida yuborilgan rasm-kartochkalar va sarlavha/footer
+    xabarlarini o'chiradi (sahifalashda eski sahifa qolib ketmasligi uchun)."""
+    context.user_data.pop('catalog_footer', None)
+    ids = context.user_data.pop('shop_catalog_msgs', [])
+    for mid in ids:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=mid)
+        except Exception:
+            pass
+
+
+async def _refresh_catalog_footer(context, chat_id, lang):
+    """Savatga mahsulot qo'shilganda katalog footer'idagi savat tugmasini (soni+summasi)
+    JONLI yangilaydi — foydalanuvchi savatga tushganini darhol ko'rsin."""
+    info = context.user_data.get('catalog_footer')
+    if not info:
+        return
+    try:
+        markup = _catalog_footer_buttons(lang, info['seller_id'], info['page'], info['pages'], context)
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id, message_id=info['msg_id'], reply_markup=markup)
+    except Exception:
+        pass
+
+
+def _product_is_new(created_at, days=7):
+    """Mahsulot oxirgi `days` kun ichida qo'shilganmi? Aniqlay olmasa — False."""
+    if not created_at:
+        return False
+    try:
+        from datetime import datetime, timezone, timedelta
+        dt = datetime.strptime(str(created_at)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt) <= timedelta(days=days)
+    except Exception:
+        return False
+
+
+def _format_catalog_card(lang, product, pos, total):
+    """Bitta mahsulot kartochkasi matni — Uzum uslubi:
+    badge (YANGI yoki kategoriya) + nom + narx + reyting (+ zahira)."""
+    # Badge: yangi mahsulot bo'lsa "YANGI", aks holda kategoriya nomi
+    if _product_is_new(product.get('created_at')):
+        badge = t(lang, 'catalog_badge_new')
+    elif product.get('category_name'):
+        badge = t(lang, 'catalog_badge_cat',
+                  emoji=product.get('category_emoji') or '🏷',
+                  name=html.escape(product['category_name']))
+    else:
+        badge = ""
+
+    # Reyting (mahsulot bo'yicha) + baholar soni
+    prod_avg = product.get('prod_avg_rating') or 0
+    prod_count = product.get('prod_review_count') or 0
+    if prod_count > 0:
+        rating = fmt_rating(prod_avg, prod_count)        # "⭐ 4.8 (227 baho)"
+    else:
+        rating = t(lang, 'catalog_card_new_rating')      # "✨ Yangi mahsulot"
+
+    # Zahira
+    stock = ""
+    if product.get('stock_count') is not None:
+        stock = t(lang, 'catalog_stock_frag', n=product['stock_count'])
+
+    return t(lang, 'catalog_card_feed',
+             badge=badge,
+             name=html.escape(product.get('name') or ''),
+             price=fmt_price(product.get('price')),
+             rating=rating, stock=stock)
+
+
+def _catalog_card_buttons(lang, product, cart_items):
+    """Kartochka tugmalari:
+    1-qator: [🛍 Sotib olish] (yakka buyurtma oqimi) — asosiy amal.
+    2-qator: [➕ Savatga / 🛒 N] [📦 Batafsil]."""
+    pid = product['id']
+    in_cart = cart_items.get(str(pid))
+    if in_cart:
+        cart_btn = InlineKeyboardButton(
+            t(lang, 'btn_cart_qty_short', n=in_cart['qty']), callback_data="cart_view")
+    else:
+        cart_btn = InlineKeyboardButton(
+            t(lang, 'btn_add_to_cart'), callback_data=f"cart_add_{pid}")
+    buy_btn = InlineKeyboardButton(t(lang, 'btn_buy_now'), callback_data=f"order_{pid}")
+    details_btn = InlineKeyboardButton(t(lang, 'btn_details'), callback_data=f"prod_{pid}")
+    return InlineKeyboardMarkup([[buy_btn], [cart_btn, details_btn]])
+
+
+def _catalog_footer_buttons(lang, seller_id, page, pages, context):
+    """Lenta oxiridagi boshqaruv: sahifalash + savatni rasmiylashtirish + AI + do'konga qaytish."""
+    kb = []
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton(t(lang, 'btn_page_prev'),
+                                        callback_data=f"shop_products_{seller_id}_{page-1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton(t(lang, 'btn_page_next'),
+                                        callback_data=f"shop_products_{seller_id}_{page+1}"))
+    if nav:
+        kb.append(nav)
+    # Savat tugmasi — DOIM ko'rinadi (savatni ko'rish uchun orqaga qaytish shart emas).
+    # Mahsulot bor bo'lsa — soni + summasi, bo'lmasa — oddiy "Savatni ko'rish".
+    cnt = _cart_count(context)
+    if cnt > 0:
+        cart_label = t(lang, 'btn_my_cart_summary', n=cnt, total=fmt_price(_cart_total(context)))
+    else:
+        cart_label = t(lang, 'btn_view_cart')
+    kb.append([InlineKeyboardButton(cart_label, callback_data="cart_view")])
+    if ai_assistant.is_enabled():
+        kb.append([InlineKeyboardButton(
+            t(lang, 'btn_shop_ai_search'), callback_data=f"shop_ai_{seller_id}")])
+    kb.append([InlineKeyboardButton(t(lang, 'btn_back_to_shop'), callback_data=f"shop_{seller_id}")])
+    return InlineKeyboardMarkup(kb)
 
 
 async def buyer_shop_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Do'konning barcha mahsulotlari (paginatsiya bilan)."""
+    """Do'kon mahsulotlari — rasmli LENTA (Uzum uslubi): RASM va ma'lumot BIRGA.
+
+    Har bir mahsulot — rasm + caption (nom + narx + reyting + zahira) bitta kartochkada,
+    tagida ixcham [➕ Savatga] [📦 Batafsil]. Pastga aylantirib ko'riladi. Sahifada
+    CATALOG_PAGE_SIZE ta; pastda sahifalash + savat + AI + do'konga qaytish.
+    callback: shop_products_{seller_id}_{page}  (page — sahifa raqami, 0-based)."""
     query = update.callback_query
     await query.answer()
 
-    # callback: shop_products_{seller_id}_{page}
     parts = query.data.split("_")
     seller_id = int(parts[2])
     page = int(parts[3])
 
     lang = get_lang(update, context)
+    chat_id = update.effective_chat.id
     products = db.get_shop_products(seller_id)
     shop = db.get_seller_public_info(seller_id)
     shop_name = shop.get('shop_name') if (shop and shop.get('shop_name')) else t(lang, 'shop_word')
@@ -1994,64 +2415,123 @@ async def buyer_shop_products(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Do'kon konteksti — savat shu do'kon uchun
     context.user_data['shop_ctx'] = seller_id
 
+    # Oldingi lenta xabarlarini va tugma bosilgan xabarni tozalaymiz —
+    # rasm-kartochkalarni edit qilib bo'lmaydi, shuning uchun har safar qaytadan yuboriladi.
+    await _clear_catalog_messages(context, chat_id)
+    try:
+        await query.message.delete()
+    except Exception:
+        pass
+
     if not products:
-        await query.edit_message_text(
-            t(lang, 'shop_no_products', shop=html.escape(shop_name)),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=f"shop_{seller_id}")]])
+        sent = await context.bot.send_message(
+            chat_id=chat_id,
+            text=t(lang, 'shop_no_products', shop=html.escape(shop_name)),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=f"shop_{seller_id}")]]),
+            parse_mode='HTML'
         )
+        context.user_data['shop_catalog_msgs'] = [sent.message_id]
         return
 
     cart = _cart(context)
     cart_items = cart.get('items', {}) if (cart and cart.get('seller_id') == seller_id) else {}
 
     total = len(products)
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    page = max(0, min(page, total_pages - 1))
-    start = page * PAGE_SIZE
-    end = min(start + PAGE_SIZE, total)
+    pages = max(1, (total + CATALOG_PAGE_SIZE - 1) // CATALOG_PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    start = page * CATALOG_PAGE_SIZE
+    chunk = products[start:start + CATALOG_PAGE_SIZE]
 
-    keyboard = []
-    for product in products[start:end]:
-        rating = product.get('prod_avg_rating') or product.get('avg_rating') or 0
-        emoji = product.get('category_emoji') or '📦'
-        in_cart = cart_items.get(str(product['id']))
-        # 1-qator: mahsulot (batafsil sahifa)
-        keyboard.append([InlineKeyboardButton(
-            f"{emoji} ⭐{rating:.1f} | {product['name']} — {fmt_price(product['price'])}",
-            callback_data=f"prod_{product['id']}"
-        )])
-        # 2-qator: tezkor "savatga qo'shish" (yoki savatdagi soni)
-        if in_cart:
-            keyboard.append([InlineKeyboardButton(
-                t(lang, 'btn_in_cart_manage', n=in_cart['qty']),
-                callback_data="cart_view"
-            )])
-        else:
-            keyboard.append([InlineKeyboardButton(
-                t(lang, 'btn_add_to_cart'), callback_data=f"cart_add_{product['id']}"
-            )])
+    sent_ids = []
 
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton("⬅️", callback_data=f"shop_products_{seller_id}_{page-1}"))
-    nav.append(InlineKeyboardButton(f"{page+1}/{total_pages}", callback_data="noop"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("➡️", callback_data=f"shop_products_{seller_id}_{page+1}"))
-    if nav:
-        keyboard.append(nav)
-    # Savat footer
-    if cart_items:
-        keyboard.append([InlineKeyboardButton(
-            t(lang, 'btn_checkout_cart', n=_cart_count(context), total=fmt_price(_cart_total(context))),
-            callback_data="cart_view"
-        )])
-    keyboard.append([InlineKeyboardButton(t(lang, 'btn_back_to_shop'), callback_data=f"shop_{seller_id}")])
+    # 1) Sarlavha
+    try:
+        h = await context.bot.send_message(
+            chat_id=chat_id,
+            text=t(lang, 'catalog_feed_header',
+                   shop=html.escape(shop_name), total=total, page=page + 1, pages=pages),
+            parse_mode='HTML')
+        sent_ids.append(h.message_id)
+    except Exception:
+        pass
 
-    await query.edit_message_text(
-        t(lang, 'shop_products_header', shop=html.escape(shop_name),
-          total=total, page=page+1, pages=total_pages),
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML'
+    # 2) Har bir mahsulot — RASM + ma'lumot BIRGA bitta kartochkada (rasm caption'ida
+    # nom + narx + reyting), tagida ixcham [➕ Savatga] [📦 Batafsil]. Pastga aylantirib
+    # ko'riladi (Uzum uslubidagi lenta).
+    for i, product in enumerate(chunk):
+        caption = _format_catalog_card(lang, product, start + i + 1, total)
+        markup = _catalog_card_buttons(lang, product, cart_items)
+        images = db.get_product_images(product['id'])
+        photo = images[0] if images else None
+        try:
+            if photo:
+                m = await context.bot.send_photo(
+                    chat_id=chat_id, photo=photo, caption=caption,
+                    reply_markup=markup, parse_mode='HTML')
+            else:
+                m = await context.bot.send_message(
+                    chat_id=chat_id, text=caption,
+                    reply_markup=markup, parse_mode='HTML')
+            sent_ids.append(m.message_id)
+        except Exception:
+            # Rasm yuborilmasa (buzuq file_id va h.k.) — matn bilan davom etamiz
+            try:
+                m = await context.bot.send_message(
+                    chat_id=chat_id, text=caption,
+                    reply_markup=markup, parse_mode='HTML')
+                sent_ids.append(m.message_id)
+            except Exception:
+                pass
+        await asyncio.sleep(0.04)  # Telegram flud-limitiga ehtiyot
+
+    # 3) Footer — sahifalash + savat + AI + do'kon tugmalari
+    try:
+        f = await context.bot.send_message(
+            chat_id=chat_id,
+            text=t(lang, 'catalog_feed_footer', page=page + 1, pages=pages, total=total),
+            reply_markup=_catalog_footer_buttons(lang, seller_id, page, pages, context),
+            parse_mode='HTML')
+        sent_ids.append(f.message_id)
+        # Savatga qo'shilganda footer savat tugmasini JONLI yangilash uchun ma'lumot saqlaymiz
+        context.user_data['catalog_footer'] = {
+            'msg_id': f.message_id, 'seller_id': seller_id, 'page': page, 'pages': pages}
+    except Exception:
+        pass
+
+    context.user_data['shop_catalog_msgs'] = sent_ids
+
+
+async def buyer_shop_ai_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Do'kon ichida AI qidiruvni boshlaydi (callback: shop_ai_{seller_id}).
+    Keyingi matn xabari faqat shu do'kon mahsulotlari bo'yicha AI orqali qidiriladi."""
+    query = update.callback_query
+    seller_id = int(query.data.split("_")[2])
+    lang = get_lang(update, context)
+
+    if not ai_assistant.is_enabled():
+        await query.answer(t(lang, 'ai_disabled_alert'), show_alert=True)
+        return
+    await query.answer()
+
+    shop = db.get_seller_public_info(seller_id)
+    shop_name = (shop.get('shop_name') if shop else None) or t(lang, 'shop_word')
+
+    # AI qidiruv rejimi + do'kon konteksti (topilgan mahsulotni savatga qo'shish uchun)
+    context.user_data['ai_chat'] = True
+    context.user_data['ai_shop_filter'] = seller_id
+    context.user_data['ai_shop_name'] = shop_name
+    context.user_data['shop_ctx'] = seller_id
+    context.user_data.pop('ai_draft', None)
+    ai_assistant.reset_history(context.user_data)
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'btn_back_to_shop'), callback_data=f"shop_products_{seller_id}_0")],
+        [InlineKeyboardButton(t(lang, 'ai_exit'), callback_data="ai_exit")],
+    ])
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=t(lang, 'shop_ai_prompt', shop=html.escape(shop_name)),
+        reply_markup=kb, parse_mode='HTML'
     )
 
 
@@ -2385,6 +2865,19 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(t(lang, 'order_not_found'))
         return
 
+    # XAVFSIZLIK: bu kartada sotuvchi kontakti/manzili bor — faqat shu buyurtma xaridori (yoki admin) ko'rsin
+    actor = db.get_user_by_telegram_id(update.effective_user.id) if update.effective_user else None
+    is_owner = bool(actor and actor.get('id') == order.get('buyer_id'))
+    is_admin = (update.effective_user and update.effective_user.id == ADMIN_ID) or \
+               (actor and actor.get('role') == 'admin')
+    if not (is_owner or is_admin):
+        logging.warning(
+            f"Ruxsatsiz buyurtma ko'rishga urinish (buyer): user_tg={getattr(update.effective_user, 'id', None)} "
+            f"order_id={order_id} (xaridori buyer_id={order.get('buyer_id')})"
+        )
+        await query.edit_message_text(t(lang, 'not_your_order_plain'))
+        return
+
     dlv = order.get('delivery_type', 'delivery')
     pay = order.get('payment_method', 'cash')
     status = order['status']
@@ -2417,6 +2910,22 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
         'cancelled': t(lang, 'status_guide_cancelled'),
     }
 
+    # Bekor qilish jarayoni ketayotgan bo'lsa — holat izohiga eslatma qo'shamiz
+    cstate = order.get('cancel_state') or ''
+    if status == 'confirmed' and cstate:
+        if cstate == 'disputed':
+            status_guide['confirmed'] += t(lang, 'cancel_note_disputed')
+        elif cstate == 'requested':
+            if order.get('cancel_by') == 'buyer':
+                status_guide['confirmed'] += t(lang, 'cancel_note_waiting')
+            else:
+                status_guide['confirmed'] += t(lang, 'cancel_note_incoming')
+    if status == 'cancelled' and order.get('cancel_reason'):
+        status_guide['cancelled'] += t(lang, 'cancel_note_reason',
+                                       reason=cancel_reason_display(order.get('cancel_reason'), lang))
+    if status == 'confirmed' and order.get('buyer_received'):
+        status_guide['confirmed'] += "\n" + t(lang, 'buyer_awaiting_finalize')
+
     # Holat ketma-ketligi vizual
     steps = [t(lang, 'step_new'), t(lang, 'step_confirmed'),
              t(lang, 'step_delivered') if dlv == 'delivery' else t(lang, 'step_picked'),
@@ -2438,11 +2947,24 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
             t(lang, 'btn_cancel_order'), callback_data=f"buyer_cancel_{order_id}"
         )])
 
-    # Pickup: xaridor o'zi "Oldim" tugmasini bosadi → 'delivered' ga o'tadi
-    if status == 'confirmed' and dlv == 'pickup':
+    # Pickup: xaridor o'zi "Oldim" tugmasini bosadi. DIQQAT: bu buyurtmani YOPMAYDI —
+    # to'lovni sotuvchi yakunlaydi. Shu sababli «oldim» bosilgach tugma qayta ko'rsatilmaydi.
+    if status == 'confirmed' and dlv == 'pickup' and not order.get('buyer_received'):
         keyboard.append([InlineKeyboardButton(
             t(lang, 'btn_got_item'), callback_data=f"buyer_confirm_pickup_{order_id}"
         )])
+
+    # Tasdiqlangan shartnomani bekor qilish oqimi (xaridor tomoni)
+    if status == 'confirmed':
+        cstate = order.get('cancel_state') or ''
+        if not cstate:
+            keyboard.append([InlineKeyboardButton(
+                t(lang, 'btn_request_cancel'), callback_data=f"ccl_req_{order_id}"
+            )])
+        elif cstate == 'requested' and order.get('cancel_by') == 'seller':
+            # Sotuvchi bekor qilishni so'ragan — xaridor javob beradi
+            keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel_agree'), callback_data=f"cclagree_{order_id}")])
+            keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel_deny'), callback_data=f"ccldeny_{order_id}")])
 
     if status in ('delivered', 'cancelled'):
         keyboard.append([InlineKeyboardButton(
@@ -2457,7 +2979,9 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )])
 
     # Reyting: delivery — faqat 'delivered' da; pickup — 'confirmed' da ham mumkin
-    can_rate = (status == 'delivered') or (status == 'confirmed' and dlv == 'pickup')
+    # Reyting faqat buyurtma YAKUNLANGACH (sotuvchi to'lovni belgilab 'delivered' qilgach).
+    # «oldim» bosilganda emas — aks holda reyting ikki marta so'ralardi.
+    can_rate = (status == 'delivered')
     if can_rate:
         keyboard.append([InlineKeyboardButton(
             t(lang, 'btn_leave_rating'), callback_data=f"order_rate_{order_id}"
@@ -2515,6 +3039,9 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
              location=location_line, phone=order.get('seller_phone') or '—',
              date=fmt_datetime(order.get('created_at')),
              timeline=timeline, guide=status_guide.get(status, ''))
+    _sb = _settlement_badge(lang, order)
+    if _sb:
+        text += "\n" + _sb
 
     await query.edit_message_text(
         text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML'
@@ -2541,30 +3068,548 @@ async def buyer_confirm_pickup(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    db.update_order_status(order_id, 'delivered')
+    # MUHIM: xaridor «oldim» bossa ham buyurtma YOPILMAYDI. Status 'confirmed' qoladi —
+    # sotuvchi to'lov holatini (to'liq/qarz/bo'lib) belgilab, yakunlashi shart.
+    db.set_buyer_received(order_id)
 
-    # Sotuvchiga xabar (sotuvchi tilida)
+    # Sotuvchiga xabar (sotuvchi tilida) — to'lovni belgilab yakunlashga chaqiramiz
     try:
         if order.get('seller_tg'):
             seller = db.get_user_by_id(order['seller_id'])
+            slang = get_user_lang(seller) if seller else DEFAULT_LANG
+            skb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(slang, 'btn_finalize_payment'), callback_data=f"seller_order_{order_id}")]])
             await context.bot.send_message(
                 chat_id=order['seller_tg'],
-                text=t(seller or 'uz', 'pickup_seller_notify',
+                text=t(slang, 'pickup_seller_finalize',
                        oid=fmt_order_id(order_id),
                        pname=html.escape(order.get('product_name') or ''),
                        buyer=html.escape(order.get('buyer_name') or '')),
+                reply_markup=skb,
                 parse_mode='HTML'
             )
     except Exception as e:
         logging.error(f"Pickup tasdiqlash bildirishnomasi ketmadi: {e}")
 
     await query.edit_message_text(
-        t(lang, 'pickup_done', oid=fmt_order_id(order_id)),
+        t(lang, 'pickup_received_buyer', oid=fmt_order_id(order_id)),
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(t(lang, 'btn_leave_rating'), callback_data=f"order_rate_{order_id}")],
             [InlineKeyboardButton(t(lang, 'btn_orders_back'), callback_data="buyer_orders")],
-        ])
+        ]),
+        parse_mode='HTML'
     )
+
+
+# ============================================================
+# SHARTNOMANI BEKOR QILISH (kelishuv + nizo)
+# Tasdiqlangan (confirmed) buyurtma bir tomonlama bekor qilinmaydi:
+#   1) bir tomon sabab bilan so'raydi  -> cancel_state='requested'
+#   2) ikkinchi tomon rozi bo'lsa       -> 'cancelled'
+#      rozi bo'lmasa                     -> 'disputed' (admin hakam)
+#   3) admin qaror chiqaradi: bekor yoki kuchda qoldirish
+# ============================================================
+
+# Sabab kodlari — tarjima kalitlari 'crsn_<code>' ko'rinishida (languages.py)
+BUYER_CANCEL_REASONS = ['bchg', 'bprice', 'bfound', 'blate', 'bnoreach']
+SELLER_CANCEL_REASONS = ['sstock', 'sprice', 'snoreach', 'snoaddr', 'snopay']
+
+
+def _order_party(order, user):
+    """Foydalanuvchi shu buyurtmada kim: 'buyer' | 'seller' | None."""
+    if not user or not order:
+        return None
+    if user['id'] == order['buyer_id']:
+        return 'buyer'
+    if user['id'] == order['seller_id']:
+        return 'seller'
+    return None
+
+
+def cancel_reason_display(reason, lang):
+    """Saqlangan sababni o'qiladigan, til-aware matnga aylantiradi.
+    'code:<kod>' -> tarjima; 'text:<matn>' -> erkin matn."""
+    if not reason:
+        return t(lang, 'crsn_unknown')
+    if reason.startswith('code:'):
+        return t(lang, 'crsn_' + reason[5:])
+    if reason.startswith('text:'):
+        return html.escape(reason[5:])
+    return html.escape(reason)
+
+
+async def _maybe_restock_on_cancel(context, order):
+    """Tasdiqlangan buyurtma bekor qilinganda zaxirani qaytaradi (xato yutiladi)."""
+    try:
+        db.restock_on_cancel(order['product_id'], order.get('quantity') or 1)
+    except Exception as e:
+        logging.error(f"Bekorda zaxirani qaytarish xatosi: {e}")
+
+
+async def cancel_request_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """'Bekor qilishni so'rash' tugmasi -> sabab tanlash (ccl_req_<oid>)."""
+    query = update.callback_query
+    await query.answer()
+    order_id = int(query.data.split("_")[2])
+    order = db.get_order_by_id(order_id)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    lang = get_lang(update, context)
+
+    party = _order_party(order, user)
+    if not order or not party:
+        await query.edit_message_text(t(lang, 'order_not_yours'))
+        return ConversationHandler.END
+    if order['status'] != 'confirmed' or (order.get('cancel_state') or ''):
+        await query.edit_message_text(t(lang, 'cancel_not_available'))
+        return ConversationHandler.END
+
+    context.user_data['cancel_order_id'] = order_id
+    context.user_data['cancel_party'] = party
+
+    codes = BUYER_CANCEL_REASONS if party == 'buyer' else SELLER_CANCEL_REASONS
+    keyboard = [[InlineKeyboardButton(t(lang, 'crsn_' + c), callback_data=f"ccl_rsn_{c}")]
+                for c in codes]
+    keyboard.append([InlineKeyboardButton(t(lang, 'crsn_other'), callback_data="ccl_rsn_other")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel'), callback_data="ccl_abort")])
+
+    await query.edit_message_text(
+        t(lang, 'cancel_pick_reason', oid=fmt_order_id(order_id)),
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML'
+    )
+    return CANCEL_PICK_REASON
+
+
+async def cancel_reason_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sabab tugmasi tanlandi (ccl_rsn_<code> yoki ccl_abort)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+
+    if query.data == "ccl_abort":
+        await query.edit_message_text(t(lang, 'cancel_aborted'))
+        context.user_data.pop('cancel_order_id', None)
+        context.user_data.pop('cancel_party', None)
+        return ConversationHandler.END
+
+    code = query.data.split("_", 2)[2]
+    if code == 'other':
+        await query.edit_message_text(t(lang, 'cancel_reason_ask'))
+        return CANCEL_REASON_TEXT
+
+    await _finalize_cancel_request(update, context, 'code:' + code, via_query=True)
+    return ConversationHandler.END
+
+
+async def cancel_reason_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """'Boshqa sabab' uchun erkin matn."""
+    text = (update.message.text or '').strip()
+    lang = get_lang(update, context)
+    if not text:
+        await update.message.reply_text(t(lang, 'cancel_reason_ask'))
+        return CANCEL_REASON_TEXT
+    await _finalize_cancel_request(update, context, 'text:' + text[:300], via_query=False)
+    return ConversationHandler.END
+
+
+async def _finalize_cancel_request(update, context, reason, via_query):
+    """Bekor so'rovini saqlaydi va ikkinchi tomonga rozilik so'rovini yuboradi."""
+    order_id = context.user_data.get('cancel_order_id')
+    party = context.user_data.get('cancel_party')
+    lang = get_lang(update, context)
+    order = db.get_order_by_id(order_id) if order_id else None
+
+    async def _reply(text, kb=None):
+        if via_query:
+            await update.callback_query.edit_message_text(text, reply_markup=kb, parse_mode='HTML')
+        else:
+            await update.message.reply_text(text, reply_markup=kb, parse_mode='HTML')
+
+    if not order or not party:
+        await _reply(t(lang, 'order_not_found'))
+        return
+
+    if not db.request_order_cancel(order_id, party, reason):
+        await _reply(t(lang, 'cancel_not_available'))
+        return
+
+    await _reply(t(lang, 'cancel_requested_sent', oid=fmt_order_id(order_id)))
+
+    # Ikkinchi tomonga rozilik so'rovi (uning tilida)
+    if party == 'buyer':
+        other_tg, other = order.get('seller_tg'), db.get_user_by_id(order['seller_id'])
+    else:
+        other_tg, other = order.get('buyer_tg'), db.get_user_by_id(order['buyer_id'])
+    olang = get_user_lang(other) if other else DEFAULT_LANG
+
+    if other_tg:
+        try:
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton(t(olang, 'btn_cancel_agree'), callback_data=f"cclagree_{order_id}")],
+                [InlineKeyboardButton(t(olang, 'btn_cancel_deny'), callback_data=f"ccldeny_{order_id}")],
+            ])
+            await context.bot.send_message(
+                chat_id=other_tg,
+                text=t(olang, 'cancel_request_notify',
+                       oid=fmt_order_id(order_id),
+                       pname=html.escape(order.get('product_name') or ''),
+                       reason=cancel_reason_display(reason, olang)),
+                reply_markup=kb, parse_mode='HTML'
+            )
+        except Exception as e:
+            logging.error(f"Bekor so'rovi bildirishnomasi ketmadi: {e}")
+
+    context.user_data.pop('cancel_order_id', None)
+    context.user_data.pop('cancel_party', None)
+
+
+async def cancel_respond(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ikkinchi tomon javobi: cclagree_<oid> (rozi) yoki ccldeny_<oid> (rozi emas)."""
+    query = update.callback_query
+    await query.answer()
+    action, _, oid_s = query.data.partition("_")
+    order_id = int(oid_s)
+    order = db.get_order_by_id(order_id)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    lang = get_lang(update, context)
+
+    party = _order_party(order, user)
+    if not order or not party:
+        await query.edit_message_text(t(lang, 'order_not_yours'))
+        return
+    if order.get('cancel_state') != 'requested':
+        await query.edit_message_text(t(lang, 'cancel_already_handled'))
+        return
+    # Faqat so'ramagan tomon javob beradi
+    if order.get('cancel_by') == party:
+        await query.answer(t(lang, 'cancel_wait_other'), show_alert=True)
+        return
+
+    requester = db.get_user_by_id(order['buyer_id'] if order.get('cancel_by') == 'buyer' else order['seller_id'])
+    rlang = get_user_lang(requester) if requester else DEFAULT_LANG
+    req_tg = order.get('buyer_tg') if order.get('cancel_by') == 'buyer' else order.get('seller_tg')
+    oid = fmt_order_id(order_id)
+    pname = html.escape(order.get('product_name') or '')
+
+    if action == "cclagree":
+        if db.agree_order_cancel(order_id):
+            await _maybe_restock_on_cancel(context, order)
+        await query.edit_message_text(t(lang, 'cancel_agreed_done', oid=oid), parse_mode='HTML')
+        if req_tg:
+            try:
+                await context.bot.send_message(
+                    chat_id=req_tg,
+                    text=t(rlang, 'cancel_agreed_notify', oid=oid, pname=pname),
+                    parse_mode='HTML')
+            except Exception as e:
+                logging.error(f"Bekor roziligi bildirishnomasi ketmadi: {e}")
+    else:  # ccldeny
+        db.dispute_order_cancel(order_id)
+        await query.edit_message_text(t(lang, 'cancel_denied_done', oid=oid), parse_mode='HTML')
+        if req_tg:
+            try:
+                await context.bot.send_message(
+                    chat_id=req_tg,
+                    text=t(rlang, 'cancel_denied_notify', oid=oid, pname=pname),
+                    parse_mode='HTML')
+            except Exception as e:
+                logging.error(f"Bekor rad bildirishnomasi ketmadi: {e}")
+        # Admin'ga nizo haqida xabar
+        await _notify_admin_dispute(context, order_id)
+
+
+async def _notify_admin_dispute(context, order_id):
+    """Admin'ga yangi nizo haqida bildirishnoma + tezkor tugma."""
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return
+    try:
+        alang = DEFAULT_LANG
+        admin_user = db.get_user_by_telegram_id(ADMIN_ID)
+        if admin_user:
+            alang = get_user_lang(admin_user)
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(alang, 'btn_open_dispute'), callback_data=f"admin_disp_{order_id}")
+        ]])
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=t(alang, 'admin_dispute_notify',
+                   oid=fmt_order_id(order_id),
+                   pname=html.escape(order.get('product_name') or ''),
+                   by=t(alang, 'party_buyer' if order.get('cancel_by') == 'buyer' else 'party_seller'),
+                   reason=cancel_reason_display(order.get('cancel_reason'), alang)),
+            reply_markup=kb, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Admin'ga nizo bildirishnomasi ketmadi: {e}")
+
+
+async def admin_disputes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — nizodagi (disputed) buyurtmalar ro'yxati."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    disputes = db.get_disputed_orders()
+    if not disputes:
+        await query.edit_message_text(
+            t(lang, 'no_disputes'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")]]))
+        return
+    keyboard = []
+    for o in disputes[:20]:
+        label = f"⚖️ {fmt_order_id(o['id'])} — {(o.get('product_name') or '')}"[:45]
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"admin_disp_{o['id']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")])
+    await query.edit_message_text(
+        t(lang, 'disputes_header', n=len(disputes)),
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def admin_dispute_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bitta nizo detali + qaror tugmalari (admin_disp_<oid>)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    order_id = int(query.data.split("_")[2])
+    order = db.get_order_by_id(order_id)
+    if not order or order.get('cancel_state') != 'disputed':
+        await query.edit_message_text(
+            t(lang, 'dispute_not_found'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_disputes")]]))
+        return
+    by = t(lang, 'party_buyer' if order.get('cancel_by') == 'buyer' else 'party_seller')
+    text = t(lang, 'dispute_detail_body',
+             oid=fmt_order_id(order_id),
+             pname=html.escape(order.get('product_name') or ''),
+             qty=order.get('quantity'), total=fmt_price(order.get('total_price')),
+             buyer=html.escape(order.get('buyer_name') or ''),
+             bphone=fmt_phone(order.get('buyer_phone')),
+             seller=html.escape(order.get('shop_name') or order.get('seller_name') or ''),
+             sphone=fmt_phone(order.get('seller_phone')),
+             by=by, reason=cancel_reason_display(order.get('cancel_reason'), lang))
+
+    keyboard = []
+    # Admin -> tomonga bot orqali xabar yozish (doim ishlaydi — telegram_id bor)
+    keyboard.append([
+        InlineKeyboardButton(t(lang, 'btn_contact_buyer'), callback_data=f"admindm_buyer_{order_id}"),
+        InlineKeyboardButton(t(lang, 'btn_contact_seller'), callback_data=f"admindm_seller_{order_id}"),
+    ])
+    keyboard += [
+        [InlineKeyboardButton(t(lang, 'btn_dispute_cancel'), callback_data=f"adisp_cancel_{order_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_dispute_keep'), callback_data=f"adisp_keep_{order_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_dispute_messages'), callback_data=f"admin_dispmsgs_{order_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_correspondence'), callback_data=f"msgs_{order_id}")],
+        [InlineKeyboardButton(t(lang, 'back'), callback_data="admin_disputes")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def admin_resolve_dispute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin qarori: adisp_cancel_<oid> (bekor) | adisp_keep_<oid> (kuchda qoldirish)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    parts = query.data.split("_")
+    decision = parts[1]          # cancel | keep
+    order_id = int(parts[2])
+    order = db.get_order_by_id(order_id)
+    if not order or order.get('cancel_state') != 'disputed':
+        await query.edit_message_text(
+            t(lang, 'dispute_not_found'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_disputes")]]))
+        return
+
+    do_cancel = (decision == 'cancel')
+    db.resolve_order_dispute(order_id, do_cancel)
+    if do_cancel:
+        await _maybe_restock_on_cancel(context, order)
+
+    oid = fmt_order_id(order_id)
+    pname = html.escape(order.get('product_name') or '')
+    # Ikkala tomonga qaror haqida bildirishnoma (har biri o'z tilida)
+    for uid_key, tg_key in (('buyer_id', 'buyer_tg'), ('seller_id', 'seller_tg')):
+        u = db.get_user_by_id(order[uid_key])
+        ulang = get_user_lang(u) if u else DEFAULT_LANG
+        tg = order.get(tg_key)
+        if not tg:
+            continue
+        key = 'dispute_resolved_cancel' if do_cancel else 'dispute_resolved_keep'
+        try:
+            await context.bot.send_message(chat_id=tg, text=t(ulang, key, oid=oid, pname=pname), parse_mode='HTML')
+        except Exception as e:
+            logging.error(f"Nizo qarori bildirishnomasi ketmadi: {e}")
+
+    await query.edit_message_text(
+        t(lang, 'dispute_resolved_admin_cancel' if do_cancel else 'dispute_resolved_admin_keep', oid=oid),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_disputes")]]))
+
+
+async def admin_dispute_msg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin nizo bo'yicha tomonga bot orqali xabar yozadi (admindm_buyer_<oid> | admindm_seller_<oid>)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    # Xavfsizlik: bu callback'ni ConversationHandler ushlaydi, shuning uchun
+    # admin tekshiruvini shu yerda bajaramiz (button_handler dagi gate ishlamaydi).
+    uid = update.effective_user.id
+    _u = db.get_user_by_telegram_id(uid)
+    if not (_u and (_u.get('role') == 'admin' or uid == ADMIN_ID)):
+        await query.answer(t(lang, 'admin_only_action'), show_alert=True)
+        return ConversationHandler.END
+    await query.answer()
+    parts = query.data.split("_")
+    target = parts[1]            # buyer | seller
+    order_id = int(parts[2])
+    order = db.get_order_by_id(order_id)
+    if not order:
+        await query.edit_message_text(t(lang, 'order_not_found'))
+        return ConversationHandler.END
+
+    context.user_data['adm_msg_target'] = target
+    context.user_data['adm_msg_order'] = order_id
+    who = t(lang, 'party_buyer' if target == 'buyer' else 'party_seller')
+    await query.edit_message_text(
+        t(lang, 'admin_dm_ask', who=who, oid=fmt_order_id(order_id)),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(lang, 'btn_cancel'), callback_data=f"admin_disp_{order_id}")
+        ]]), parse_mode='HTML')
+    return ADMIN_DISPUTE_MSG
+
+
+async def admin_dispute_msg_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin yozgan matnni tegishli tomonga (bot orqali) yetkazadi."""
+    lang = get_lang(update, context)
+    target = context.user_data.pop('adm_msg_target', None)
+    order_id = context.user_data.pop('adm_msg_order', None)
+    text = (update.message.text or '').strip()
+    if not target or not order_id:
+        return ConversationHandler.END
+    order = db.get_order_by_id(order_id)
+    if not order:
+        await update.message.reply_text(t(lang, 'order_not_found'))
+        return ConversationHandler.END
+
+    if target == 'buyer':
+        tg, u = order.get('buyer_tg'), db.get_user_by_id(order['buyer_id'])
+    else:
+        tg, u = order.get('seller_tg'), db.get_user_by_id(order['seller_id'])
+    ulang = get_user_lang(u) if u else DEFAULT_LANG
+
+    ok = False
+    if tg:
+        try:
+            reply_kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton(t(ulang, 'btn_reply_admin'), callback_data=f"dmreply_{order_id}")
+            ]])
+            await context.bot.send_message(
+                chat_id=tg,
+                text=t(ulang, 'admin_dm_notify', oid=fmt_order_id(order_id), msg=html.escape(text)),
+                reply_markup=reply_kb, parse_mode='HTML')
+            ok = True
+        except Exception as e:
+            logging.error(f"Admin nizo xabari yetkazilmadi: {e}")
+
+    # Audit uchun saqlaymiz (yetkazilgan-yetkazilmaganidan qat'i nazar)
+    actor = db.get_user_by_telegram_id(update.effective_user.id)
+    db.add_dispute_message(order_id, target, 'admin',
+                           actor['id'] if actor else None,
+                           (actor.get('name') if actor else None) or 'Admin', text)
+
+    await update.message.reply_text(
+        t(lang, 'admin_dm_sent' if ok else 'admin_dm_failed'),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(lang, 'back'), callback_data=f"admin_disp_{order_id}")
+        ]]))
+    return ConversationHandler.END
+
+
+async def dispute_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xaridor/sotuvchi admin xabariga javob beradi (dmreply_<oid>)."""
+    query = update.callback_query
+    await query.answer()
+    order_id = int(query.data.split("_")[1])
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    order = db.get_order_by_id(order_id)
+    party = _order_party(order, user)
+    if not order or not party:
+        await query.edit_message_text(t(lang, 'order_not_yours'))
+        return ConversationHandler.END
+
+    context.user_data['dmreply_order'] = order_id
+    context.user_data['dmreply_party'] = party
+    back_cb = f"order_detail_{order_id}" if party == 'buyer' else f"seller_order_{order_id}"
+    await query.edit_message_text(
+        t(lang, 'dmreply_ask', oid=fmt_order_id(order_id)),
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(lang, 'btn_cancel'), callback_data=back_cb)
+        ]]), parse_mode='HTML')
+    return DMREPLY_MSG
+
+
+async def dispute_reply_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Tomonning javobini admin'ga yetkazadi (admin yana javob bera oladi)."""
+    lang = get_lang(update, context)
+    order_id = context.user_data.pop('dmreply_order', None)
+    party = context.user_data.pop('dmreply_party', None)
+    text = (update.message.text or '').strip()
+    if not order_id or not party:
+        return ConversationHandler.END
+    order = db.get_order_by_id(order_id)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    if not order or not user:
+        return ConversationHandler.END
+
+    sender_name = user.get('shop_name') if party == 'seller' else user.get('name')
+    # Audit uchun saqlaymiz
+    db.add_dispute_message(order_id, party, party, user['id'], sender_name or '', text)
+    admin_user = db.get_user_by_telegram_id(ADMIN_ID)
+    alang = get_user_lang(admin_user) if admin_user else DEFAULT_LANG
+    who = t(alang, 'party_buyer' if party == 'buyer' else 'party_seller')
+
+    try:
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(alang, 'btn_reply'), callback_data=f"admindm_{party}_{order_id}")
+        ]])
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=t(alang, 'dmreply_notify', oid=fmt_order_id(order_id), who=who,
+                   name=html.escape(sender_name or ''), msg=html.escape(text)),
+            reply_markup=kb, parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Adminga javob yetkazilmadi: {e}")
+
+    await update.message.reply_text(t(lang, 'dmreply_sent'))
+    return ConversationHandler.END
+
+
+async def admin_dispute_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — nizo yozishmalari tarixi (audit). admin_dispmsgs_<oid>."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    order_id = int(query.data.split("_")[2])
+    order = db.get_order_by_id(order_id)
+    back_cb = (f"admin_disp_{order_id}"
+               if (order and order.get('cancel_state') == 'disputed')
+               else f"admin_order_{order_id}")
+    msgs = db.get_dispute_messages(order_id)
+    if not msgs:
+        await query.edit_message_text(
+            t(lang, 'no_dispute_messages'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=back_cb)]]))
+        return
+    lines = [t(lang, 'dispute_messages_header', oid=fmt_order_id(order_id))]
+    for m in msgs[-40:]:
+        role, party = m.get('sender_role'), m.get('party')
+        if role == 'admin':
+            arrow = t(lang, 'dm_admin_to_buyer' if party == 'buyer' else 'dm_admin_to_seller')
+        else:
+            arrow = t(lang, 'dm_buyer_to_admin' if role == 'buyer' else 'dm_seller_to_admin')
+        lines.append(f"{arrow} · {fmt_datetime(m.get('created_at'))}\n{html.escape(m.get('message') or '')}\n")
+    text = "\n".join(lines)
+    if len(text) > 3800:
+        text = text[:3800] + t(lang, 'old_messages_cut')
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=back_cb)]]),
+        parse_mode='HTML')
 
 
 async def buyer_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2785,14 +3830,7 @@ async def order_delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Sotuvchi karta ma'lumotini oldindan olamiz (P2P uchun ko'rsatish uchun)
     product = context.user_data.get('order_product', {})
-    seller = db.get_user_by_id(product.get('seller_id')) if product.get('seller_id') else None
-    seller_card = None
-    if seller and seller.get('card_number'):
-        seller_card = {
-            'card_number': seller['card_number'],
-            'card_owner': seller.get('card_owner'),
-            'card_type': seller.get('card_type'),
-        }
+    seller_card = resolve_payment_card(product.get('seller_id'), product.get('created_by'))
 
     if choice == 'pickup':
         await _ask_payment(query, seller_card_info=seller_card, lang=lang)
@@ -2830,16 +3868,37 @@ async def order_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardRemove()
     )
     product = context.user_data.get('order_product', {})
-    seller = db.get_user_by_id(product.get('seller_id')) if product.get('seller_id') else None
-    seller_card = None
-    if seller and seller.get('card_number'):
-        seller_card = {
-            'card_number': seller['card_number'],
-            'card_owner': seller.get('card_owner'),
-            'card_type': seller.get('card_type'),
-        }
+    seller_card = resolve_payment_card(product.get('seller_id'), product.get('created_by'))
     await _ask_payment(update.message, seller_card_info=seller_card, lang=lang)
     return ORDER_PAYMENT
+
+
+def resolve_payment_card(seller_id, created_by=None):
+    """Do'kon payment_mode'iga qarab to'lov kartasini qaytaradi.
+    seller_id = do'kon EGASIning user id'si; created_by = mahsulotni joylagan xodim (ixtiyoriy).
+    'shop' rejim → do'kon (yoki ega) kartasi; 'staff' rejim → xodim kartasi (yo'q bo'lsa egaga qaytadi).
+    Qaytaradi: {'card_number','card_owner','card_type'} yoki None."""
+    if not seller_id:
+        return None
+    shop = db.get_shop_by_owner(seller_id)
+    mode = (shop.get('payment_mode') if shop else None) or 'shop'
+    if mode == 'staff' and created_by and created_by != seller_id:
+        staff = db.get_staff_by_user(created_by)
+        if staff and staff.get('card_number'):
+            return {'card_number': staff['card_number'],
+                    'card_owner': staff.get('card_owner'),
+                    'card_type': staff.get('card_type')}
+    # shop rejim yoki xodim kartasi yo'q → do'kon kartasi, bo'lmasa egasi kartasi
+    if shop and shop.get('card_number'):
+        return {'card_number': shop['card_number'],
+                'card_owner': shop.get('card_owner'),
+                'card_type': shop.get('card_type')}
+    owner = db.get_user_by_id(seller_id)
+    if owner and owner.get('card_number'):
+        return {'card_number': owner['card_number'],
+                'card_owner': owner.get('card_owner'),
+                'card_type': owner.get('card_type')}
+    return None
 
 
 async def _ask_payment(target, seller_card_info=None, cb_prefix="ord_pay_", cancel_cb="ord_cancel",
@@ -2947,34 +4006,13 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    # 10 daqiqadan keyin avtomatik bekor qilish
-    if context.application.job_queue:
-        context.application.job_queue.run_once(
-            auto_cancel_order_job,
-            when=600,  # 10 daqiqa = 600 sekund
-            data={
-                'order_id': order_id,
-                'buyer_tg': update.effective_user.id,
-                'seller_tg': product.get('seller_tg'),
-            },
-            name=f"auto_cancel_{order_id}"
-        )
+    # Avto-bekor muddati (deadline) — DB'da saqlanadi. Jonli teskari sanoq shunga
+    # bog'lanadi va bot restart bo'lsa ham real (o'zgarmas) qoladi.
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    deadline = _dt.now(_tz.utc) + _td(seconds=ORDER_TTL_SECONDS)
+    db.set_order_deadline(order_id, deadline)
 
-        # 5 daqiqadan keyin sotuvchiga eslatma
-        context.application.job_queue.run_once(
-            reminder_order_job,
-            when=300,  # 5 daqiqa = 300 sekund
-            data={
-                'order_id': order_id,
-                'seller_tg': product.get('seller_tg'),
-                'product_name': product.get('name', ''),
-                'buyer_name': buyer.get('name', ''),
-                'total_price': total,
-            },
-            name=f"reminder_{order_id}"
-        )
-
-    # Sotuvchiga bildirishnoma (sotuvchi tilida)
+    # Sotuvchiga bildirishnoma (mahsulot rasmi + bog'lanish + jonli sanoq, sotuvchi tilida)
     try:
         seller_tg = product.get('seller_tg')
         if seller_tg:
@@ -3011,23 +4049,31 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             text += "💳 " + pay_label(context.user_data.get('order_payment'), slang)
 
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"confirm_order_{order_id}")],
-                [InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"cancel_order_{order_id}")],
-            ])
-            await context.bot.send_message(
-                chat_id=seller_tg, text=text, reply_markup=kb,
-                parse_mode='HTML', disable_notification=False
-            )
+            # Xaridorning @username'i bo'lsa — matnda ham ko'rsatamiz (oson bog'lanish uchun)
+            if buyer.get('telegram_username'):
+                text += t(slang, 'frag_buyer_username', uname=html.escape(buyer['telegram_username']))
 
-            # Agar xaridor lokatsiya yuborgan bo'lsa — alohida Telegram location xabari
-            # Sotuvchi bosadi → Telegram xaritasi ochiladi va yo'l ko'rsatadi
+            photo = product.get('image_url')
+            kb = _order_notify_kb(slang, order_id=order_id,
+                                  buyer_tg=buyer.get('telegram_id'),
+                                  buyer_username=buyer.get('telegram_username'))
+            msg_id, is_cap = await _send_order_notification(
+                context, seller_tg, slang, photo=photo, static_caption=text,
+                kb=kb, deadline=deadline)
+            if msg_id:
+                db.set_order_notify_ref(order_id, seller_tg, msg_id, is_cap, text)
+
+            # Jonli teskari sanoq jobini ishga tushiramiz (har 60s)
+            _schedule_order_countdown(context.application.job_queue, order_id=order_id, first=60)
+
+            # Xaridor lokatsiya yuborgan bo'lsa — alohida Telegram location (yo'l ko'rsatish)
             if dlv == 'delivery' and buyer_lat and buyer_lon:
                 await context.bot.send_location(
-                    chat_id=seller_tg,
-                    latitude=buyer_lat,
-                    longitude=buyer_lon
-                )
+                    chat_id=seller_tg, latitude=buyer_lat, longitude=buyer_lon)
+
+            # MULTI-SOTUVCHI: mahsulotni joylagan xodimga ham (rasm + bog'lanish, sanoqsiz)
+            await _fanout_order_to_staff(context, product, text, kb,
+                                         dlv, buyer_lat, buyer_lon, owner_tg=seller_tg, photo=photo)
 
     except Exception as e:
         logging.error(f"Sotuvchiga bildirishnoma ketmadi: {e}")
@@ -3038,6 +4084,245 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop(k, None)
 
     return ConversationHandler.END
+
+
+async def _fanout_order_to_staff(context, product, text, kb, dlv=None,
+                                 buyer_lat=None, buyer_lon=None, owner_tg=None, photo=None):
+    """Buyurtma xabarini mahsulotni joylagan xodimga ham yuboradi (ega allaqachon olgan).
+    Xodim = ega bo'lsa yoki topilmasa — hech narsa qilmaydi. photo berilsa rasm bilan
+    yuboriladi (jonli sanoqsiz — sanoq faqat egadagi asosiy xabarda)."""
+    try:
+        creator_id = product.get('created_by')
+        if not creator_id or creator_id == product.get('seller_id'):
+            return
+        staff_user = db.get_user_by_id(creator_id)
+        if not staff_user or not staff_user.get('telegram_id'):
+            return
+        staff_tg = staff_user['telegram_id']
+        if owner_tg and str(staff_tg) == str(owner_tg):
+            return
+        await _send_order_notification(context, staff_tg, DEFAULT_LANG, photo=photo,
+                                       static_caption=text, kb=kb, deadline=None,
+                                       with_countdown=False)
+        if dlv == 'delivery' and buyer_lat and buyer_lon:
+            await context.bot.send_location(chat_id=staff_tg, latitude=buyer_lat, longitude=buyer_lon)
+    except Exception as e:
+        logging.error(f"Xodimga buyurtma fan-out ketmadi: {e}")
+
+
+# ============================================================
+# BUYURTMA BILDIRISHNOMASI — rasm + xaridor bilan bog'lanish + jonli teskari sanoq
+# ============================================================
+ORDER_TTL_SECONDS = 600  # buyurtma tasdiqlash muddati (10 daqiqa)
+
+
+def _parse_utc(ts):
+    from datetime import datetime, timezone
+    if not ts:
+        return None
+    try:
+        return datetime.strptime(str(ts)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _order_deadline(order):
+    """Buyurtmaning avto-bekor muddati (UTC). auto_cancel_at bo'lsa — o'sha; aks holda
+    (eski buyurtmalar) created_at + TTL."""
+    from datetime import timedelta
+    dl = _parse_utc(order.get('auto_cancel_at'))
+    if dl is not None:
+        return dl
+    ca = _parse_utc(order.get('created_at'))
+    if ca is not None:
+        return ca + timedelta(seconds=ORDER_TTL_SECONDS)
+    return None
+
+
+def _countdown_line(slang, deadline):
+    """'⏳ N daqiqa qoldi (HH:MM gacha)' qatori, yoki muddat tugagan bo'lsa tegishli matn."""
+    from datetime import datetime, timezone
+    if deadline is None:
+        return ""
+    rem = (deadline - datetime.now(timezone.utc)).total_seconds()
+    if rem <= 0:
+        return t(slang, 'countdown_expired')
+    mins = max(1, int((rem + 59) // 60))  # yuqoriga yaxlitlangan daqiqa
+    until = deadline.astimezone(TZ_TASHKENT).strftime("%H:%M")
+    return t(slang, 'countdown_line', mins=mins, until=until)
+
+
+def _order_contact_rows(slang, relay_order_id, buyer_tg, buyer_username):
+    """Xaridor bilan bog'lanish tugmalari: Telegram chat (URL) + bot orqali (relay)."""
+    rows = []
+    url = None
+    if buyer_username:
+        url = f"https://t.me/{str(buyer_username).lstrip('@')}"
+    elif buyer_tg:
+        url = f"tg://user?id={buyer_tg}"
+    if url:
+        rows.append([InlineKeyboardButton(t(slang, 'btn_contact_tg'), url=url)])
+    if relay_order_id:
+        rows.append([InlineKeyboardButton(t(slang, 'btn_contact_relay'),
+                                          callback_data=f"order_msg_{relay_order_id}")])
+    return rows
+
+
+def _order_notify_kb(slang, *, order_id=None, group_id=None, relay_order_id=None,
+                     buyer_tg=None, buyer_username=None):
+    """Bildirishnoma klaviaturasi: Tasdiqlash/Bekor + xaridor bilan bog'lanish."""
+    if group_id:
+        rows = [[InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"gconfirm_{group_id}"),
+                 InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"gcancel_{group_id}")]]
+    else:
+        rows = [[InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"confirm_order_{order_id}"),
+                 InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"cancel_order_{order_id}")]]
+    rows += _order_contact_rows(slang, relay_order_id or order_id, buyer_tg, buyer_username)
+    return InlineKeyboardMarkup(rows)
+
+
+async def _send_order_notification(context, recipient_tg, slang, *, photo, static_caption,
+                                   kb, deadline, with_countdown=True):
+    """Bildirishnomani yuboradi: mahsulot rasmi ALOHIDA xabar, so'ng tugmali MATN xabari.
+    (message_id, is_caption=False) qaytaradi. Tugmali xabar doim matn bo'lgani uchun
+    tasdiqlash/relay handlerlari (edit_message_text) va jonli sanoq muammosiz ishlaydi."""
+    cd = _countdown_line(slang, deadline) if with_countdown else ""
+    full = static_caption + (t(slang, 'countdown_sep') + cd if cd else "")
+    try:
+        if photo:
+            try:
+                await context.bot.send_photo(chat_id=recipient_tg, photo=photo)
+            except Exception as e:
+                logging.warning(f"Buyurtma rasmi yuborilmadi (chat {recipient_tg}): {e}")
+        msg = await context.bot.send_message(chat_id=recipient_tg, text=full,
+                                             parse_mode='HTML', reply_markup=kb)
+        return msg.message_id, False
+    except Exception as e:
+        logging.error(f"Buyurtma bildirishnomasini yuborishda xato: {e}")
+        return None, False
+
+
+def _schedule_order_countdown(job_queue, *, order_id=None, group_id=None, first=60):
+    """Buyurtma uchun jonli sanoq (har 60s) jobini qo'yadi. Xotirada — restartda
+    _reschedule_pending_order_timers tiklaydi."""
+    if not job_queue:
+        return
+    if group_id:
+        job_queue.run_repeating(order_countdown_job, interval=60, first=first,
+                                data={'group_id': str(group_id)}, name=f"countdown_group_{group_id}")
+    else:
+        job_queue.run_repeating(order_countdown_job, interval=60, first=first,
+                                data={'order_id': order_id}, name=f"countdown_order_{order_id}")
+
+
+async def _autocancel_order_or_group(context, order, gid, oid, slang):
+    """Muddat tugadi — yakka yoki guruh buyurtmani avtomatik bekor qiladi va xabar beradi."""
+    try:
+        buyer_tg = order.get('buyer_tg')
+        seller_tg = order.get('seller_tg')
+        if gid:
+            orders = db.get_orders_in_group(gid)
+            pend = [o for o in orders if o['status'] == 'pending']
+            if not pend:
+                return
+            for o in pend:
+                db.update_order_status(o['id'], 'cancelled')
+            disp = fmt_order_id(int(gid))
+            buyer = db.get_user_by_id(order['buyer_id'])
+            seller = db.get_user_by_id(order['seller_id'])
+            if buyer_tg:
+                await context.bot.send_message(chat_id=buyer_tg,
+                    text=t(buyer or 'uz', 'job_group_autocancel_buyer', oid=disp))
+            if seller_tg:
+                await context.bot.send_message(chat_id=seller_tg,
+                    text=t(seller or 'uz', 'job_group_autocancel_seller', oid=disp))
+        else:
+            o = db.get_order_by_id(oid)
+            if not o or o['status'] != 'pending':
+                return
+            db.update_order_status(oid, 'cancelled')
+            disp = fmt_order_id(oid)
+            buyer = db.get_user_by_id(o['buyer_id'])
+            seller = db.get_user_by_id(o['seller_id'])
+            if buyer_tg:
+                await context.bot.send_message(chat_id=buyer_tg,
+                    text=t(buyer or 'uz', 'job_autocancel_buyer', oid=disp), parse_mode='HTML')
+            if seller_tg:
+                await context.bot.send_message(chat_id=seller_tg,
+                    text=t(seller or 'uz', 'job_autocancel_seller', oid=disp), parse_mode='HTML')
+        # Bildirishnoma xabarini yakuniy holatga keltiramiz (tugmalar olib tashlanadi)
+        try:
+            chat_id = order.get('notify_chat_id'); msg_id = order.get('notify_message_id')
+            if chat_id and msg_id:
+                final = (order.get('notify_caption') or '') + "\n" + t(slang, 'countdown_cancelled')
+                if order.get('notify_is_caption'):
+                    await context.bot.edit_message_caption(chat_id=chat_id, message_id=msg_id,
+                                                           caption=final, parse_mode='HTML')
+                else:
+                    await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                                                        text=final, parse_mode='HTML')
+        except Exception:
+            pass
+        logging.info(f"Avto-bekor: buyurtma {oid or gid} muddati tugadi.")
+    except Exception as e:
+        logging.error(f"Avto-bekor (order {oid or gid}) xatosi: {e}")
+
+
+async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har ~60s: sotuvchi bildirishnomasidagi jonli teskari sanoqni yangilaydi va
+    muddat tugaganda buyurtmani avto-bekor qiladi. Buyurtma 'pending' bo'lmasa to'xtaydi."""
+    from datetime import datetime, timezone
+    try:
+        d = context.job.data
+        gid = d.get('group_id')
+        oid = d.get('order_id')
+        if gid:
+            orders = db.get_orders_in_group(gid)
+            order = orders[0] if orders else None
+        else:
+            order = db.get_order_by_id(oid)
+        if not order:
+            context.job.schedule_removal(); return
+        if order.get('status') != 'pending':
+            # Tasdiqlangan/bekor qilingan — handler xabarni o'zi yangilagan, sanoqni to'xtatamiz
+            context.job.schedule_removal(); return
+
+        seller = db.get_user_by_id(order.get('seller_id')) if order.get('seller_id') else None
+        slang = get_user_lang(seller) if seller else DEFAULT_LANG
+        deadline = _order_deadline(order)
+        now = datetime.now(timezone.utc)
+
+        if deadline is None or (deadline - now).total_seconds() <= 0:
+            await _autocancel_order_or_group(context, order, gid, oid, slang)
+            context.job.schedule_removal()
+            return
+
+        chat_id = order.get('notify_chat_id')
+        msg_id = order.get('notify_message_id')
+        if not chat_id or not msg_id:
+            return  # tahrirlanadigan xabar yo'q (eski buyurtma) — faqat muddatni kutamiz
+
+        static_caption = order.get('notify_caption') or ''
+        is_caption = bool(order.get('notify_is_caption'))
+        cd = _countdown_line(slang, deadline)
+        full = static_caption + (t(slang, 'countdown_sep') + cd if cd else "")
+        kb = _order_notify_kb(slang, order_id=(None if gid else oid), group_id=gid,
+                              relay_order_id=order.get('id'),
+                              buyer_tg=order.get('buyer_tg'), buyer_username=order.get('buyer_username'))
+        try:
+            if is_caption:
+                await context.bot.edit_message_caption(chat_id=chat_id, message_id=msg_id,
+                                                       caption=full, parse_mode='HTML', reply_markup=kb)
+            else:
+                await context.bot.edit_message_text(chat_id=chat_id, message_id=msg_id,
+                                                    text=full, parse_mode='HTML', reply_markup=kb)
+        except BadRequest as e:
+            if 'not modified' not in str(e).lower():
+                logging.warning(f"Sanoq tahrir xatosi (order {oid or gid}): {e}")
+        except Exception as e:
+            logging.warning(f"Sanoq tahrir kutilmagan xato (order {oid or gid}): {e}")
+    except Exception as e:
+        logging.error(f"order_countdown_job xatosi: {e}")
 
 
 # ============================================================
@@ -3120,6 +4405,36 @@ async def cart_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer(t(lang, 'cart_stock_empty'), show_alert=True)
         return
     await query.answer(t(lang, 'cart_added_toast', name=product['name'][:30], qty=item['qty']), show_alert=False)
+    # Tugmani darhol "Savatda: N" ga aylantiramiz — xaridor qo'shilganini aniq ko'rsin
+    await _refresh_cart_add_button(query, lang, product_id, item['qty'])
+    # Katalog footer'idagi savat tugmasini (soni+summasi) JONLI yangilaymiz
+    await _refresh_catalog_footer(context, update.effective_chat.id, lang)
+
+
+async def _refresh_cart_add_button(query, lang, product_id, qty):
+    """Mahsulot kartochkasidagi '➕ Savatga qo'shish' tugmasini '🛒 Savatda: N' ga
+    almashtiradi (qaysi kontekstda bo'lishidan qat'i nazar — katalog yoki batafsil)."""
+    msg = getattr(query, 'message', None)
+    if not msg or not msg.reply_markup:
+        return
+    changed = False
+    new_kb = []
+    for row in msg.reply_markup.inline_keyboard:
+        new_row = []
+        for btn in row:
+            if btn.callback_data == f"cart_add_{product_id}":
+                # Qisqa yorliq — katalog ro'yxati qatori ixcham qolsin; bosilsa savatga o'tadi
+                label = ("🛒 " + str(qty)) if len(btn.text or "") <= 3 else t(lang, 'btn_in_cart_manage', n=qty)
+                new_row.append(InlineKeyboardButton(label, callback_data="cart_view"))
+                changed = True
+            else:
+                new_row.append(btn)
+        new_kb.append(new_row)
+    if changed:
+        try:
+            await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(new_kb))
+        except Exception:
+            pass
 
 
 async def cart_reset_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3384,14 +4699,8 @@ async def cart_delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['cart_dlv'] = choice
 
     cart = _cart(context)
-    seller = db.get_user_by_id(cart['seller_id']) if cart else None
-    seller_card = None
-    if seller and seller.get('card_number'):
-        seller_card = {
-            'card_number': seller['card_number'],
-            'card_owner': seller.get('card_owner'),
-            'card_type': seller.get('card_type'),
-        }
+    # Savat bitta do'kon uchun; turli xodim mahsuloti bo'lishi mumkin → do'kon/ega kartasi
+    seller_card = resolve_payment_card(cart['seller_id']) if cart else None
 
     if choice == 'pickup':
         await _ask_payment(query, seller_card_info=seller_card,
@@ -3427,14 +4736,7 @@ async def cart_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(t(lang, 'address_accepted'), reply_markup=ReplyKeyboardRemove())
 
     cart = _cart(context)
-    seller = db.get_user_by_id(cart['seller_id']) if cart else None
-    seller_card = None
-    if seller and seller.get('card_number'):
-        seller_card = {
-            'card_number': seller['card_number'],
-            'card_owner': seller.get('card_owner'),
-            'card_type': seller.get('card_type'),
-        }
+    seller_card = resolve_payment_card(cart['seller_id']) if cart else None
     await _ask_payment(update.message, seller_card_info=seller_card,
                        cb_prefix="cart_pay_", cancel_cb="cart_cancel", lang=lang)
     return CART_PAYMENT
@@ -3564,23 +4866,17 @@ async def cart_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    # Guruh uchun avtomatik bekor + eslatma
-    if context.application.job_queue:
-        context.application.job_queue.run_once(
-            auto_cancel_group_job, when=600,
-            data={'group_id': group_id, 'buyer_tg': update.effective_user.id, 'seller_tg': seller_tg},
-            name=f"auto_cancel_group_{group_id}"
-        )
-        context.application.job_queue.run_once(
-            reminder_group_job, when=300,
-            data={'group_id': group_id, 'seller_tg': seller_tg},
-            name=f"reminder_group_{group_id}"
-        )
+    # Avto-bekor muddati (deadline) — DB'da saqlanadi (jonli sanoq va restart uchun)
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    deadline = _dt.now(_tz.utc) + _td(seconds=ORDER_TTL_SECONDS)
+    db.set_group_deadline(group_id, deadline)
 
-    # Sotuvchiga BITTA bildirishnoma (barcha mahsulotlar bilan)
+    # Sotuvchiga BITTA bildirishnoma (barcha mahsulotlar bilan) + jonli sanoq jobi
     try:
         if seller_tg:
-            await _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr)
+            await _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr,
+                                       deadline=deadline)
+        _schedule_order_countdown(context.application.job_queue, group_id=group_id, first=60)
     except Exception as e:
         logging.error(f"Sotuvchiga savat bildirishnomasi ketmadi: {e}")
 
@@ -3588,7 +4884,8 @@ async def cart_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr):
+async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr,
+                               deadline=None):
     """Sotuvchiga savat buyurtmasi bo'yicha bitta bildirishnoma (mahsulotlar ro'yxati bilan)."""
     orders = db.get_orders_in_group(group_id)
     if not orders:
@@ -3610,6 +4907,8 @@ async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat
     lines.append(t(slang, 'seller_group_total', total=fmt_price(grand)))
     lines.append(t(slang, 'seller_group_buyer', buyer=html.escape(first.get('buyer_name') or '')))
     lines.append(f"📞 {first.get('buyer_phone') or '—'}")
+    if first.get('buyer_username'):
+        lines.append(f"💬 @{str(first['buyer_username']).lstrip('@')}")
     lines.append(f"🚚 {dlv_label(dlv, slang)}")
 
     if dlv == 'delivery' and b_lat and b_lon:
@@ -3630,17 +4929,44 @@ async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat
     lines.append("💳 " + pay_label(payment, slang))
     lines.append(t(slang, 'seller_group_confirm_prompt'))
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"gconfirm_{group_id}")],
-        [InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"gcancel_{group_id}")],
-    ])
-    await context.bot.send_message(chat_id=seller_tg, text="\n".join(lines),
-                                   reply_markup=kb, parse_mode='HTML')
+    body = "\n".join(lines)
+    photo = first.get('product_image')
+    kb = _order_notify_kb(slang, group_id=group_id, relay_order_id=first.get('id'),
+                          buyer_tg=first.get('buyer_tg'), buyer_username=first.get('buyer_username'))
+    msg_id, is_cap = await _send_order_notification(
+        context, seller_tg, slang, photo=photo, static_caption=body, kb=kb, deadline=deadline)
+    if msg_id:
+        db.set_group_notify_ref(group_id, seller_tg, msg_id, is_cap, body)
     if dlv == 'delivery' and b_lat and b_lon:
         try:
             await context.bot.send_location(chat_id=seller_tg, latitude=b_lat, longitude=b_lon)
         except Exception:
             pass
+
+    # MULTI-SOTUVCHI: guruhdagi mahsulotlarni joylagan xodimlarga ham yuboramiz
+    try:
+        seen = set()
+        for o in orders:
+            prod = db.get_product_basic(o.get('product_id')) if o.get('product_id') else None
+            if not prod:
+                continue
+            cb = prod.get('created_by')
+            if not cb or cb == prod.get('seller_id') or cb in seen:
+                continue
+            seen.add(cb)
+            su = db.get_user_by_id(cb)
+            if not su or not su.get('telegram_id') or str(su['telegram_id']) == str(seller_tg):
+                continue
+            await _send_order_notification(context, su['telegram_id'], slang, photo=photo,
+                                           static_caption=body, kb=kb, deadline=None,
+                                           with_countdown=False)
+            if dlv == 'delivery' and b_lat and b_lon:
+                try:
+                    await context.bot.send_location(chat_id=su['telegram_id'], latitude=b_lat, longitude=b_lon)
+                except Exception:
+                    pass
+    except Exception as e:
+        logging.error(f"Guruh xodim fan-out ketmadi: {e}")
 
 
 # --- Guruh (savat) buyurtma — SOTUVCHI tomoni ---
@@ -3659,12 +4985,27 @@ async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(T(update, context, 'order_not_found'))
         return
 
-    # Egalik tekshiruvi
+    # Egalik tekshiruvi (ega, admin, yoki guruhdagi mahsulotni joylagan xodim — ruxsat bilan)
     seller_user = db.get_user_by_telegram_id(update.effective_user.id)
     is_owner = bool(seller_user and seller_user.get('id') == orders[0].get('seller_id'))
     is_admin = (update.effective_user.id == ADMIN_ID) or (seller_user and seller_user.get('role') == 'admin')
-    if not (is_owner or is_admin):
+    is_staff_creator = False
+    if seller_user and not (is_owner or is_admin):
+        staff_rec = db.get_staff_by_user(seller_user['id'])
+        if staff_rec and staff_rec.get('perm_confirm_orders', 1) and staff_rec.get('is_active', 1):
+            for o in orders:
+                prod = db.get_product_basic(o.get('product_id')) if o.get('product_id') else None
+                if prod and prod.get('created_by') == seller_user['id']:
+                    is_staff_creator = True
+                    break
+    if not (is_owner or is_admin or is_staff_creator):
         await query.answer(t(get_lang(update, context), 'not_your_order_toast'), show_alert=True)
+        return
+
+    # BERISH: avval to'lov holatini so'raymiz (settlement oqimi yakuniy 'delivered' qo'yadi)
+    if action == 'gdeliver':
+        grand = sum(float(o.get('total_price') or 0) for o in orders)
+        await _ask_settlement(update, context, scope='g', key=group_id, total=grand)
         return
 
     status_map = {'gconfirm': 'confirmed', 'gcancel': 'cancelled', 'gdeliver': 'delivered'}
@@ -3674,7 +5015,7 @@ async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Guruh taymerlarini o'chiramiz
     if new_status in ('confirmed', 'cancelled') and context.application.job_queue:
-        for nm in (f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
+        for nm in (f"countdown_group_{group_id}", f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
             for job in context.application.job_queue.get_jobs_by_name(nm):
                 job.schedule_removal()
 
@@ -3682,7 +5023,9 @@ async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     if new_status == 'confirmed':
         for o in orders:
             try:
-                db.decrement_stock_on_confirm(o['product_id'], o['quantity'])
+                left = db.decrement_stock_on_confirm(o['product_id'], o['quantity'])
+                if left == 0:
+                    await _notify_seller_sold_out(context, o['product_id'])
             except Exception as e:
                 logging.error(f"Guruh stock kamaytirish xatosi: {e}")
 
@@ -3745,11 +5088,11 @@ async def seller_group_order_detail(update: Update, context: ContextTypes.DEFAUL
 
     pay_note = ""
     if pay == 'p2p':
-        seller_user = db.get_user_by_telegram_id(update.effective_user.id)
-        if seller_user and seller_user.get('card_number'):
-            cnum = seller_user['card_number']
+        card = resolve_payment_card(first.get('seller_id'))
+        if card and card.get('card_number'):
+            cnum = card['card_number']
             masked = f"{cnum[:4]} **** **** {cnum[-4:]}"
-            ctype = CARD_TYPE_LABELS.get(seller_user.get('card_type', ''), '💳')
+            ctype = CARD_TYPE_LABELS.get(card.get('card_type', ''), '💳')
             pay_note = t(lang, 'p2p_your_card', ctype=ctype, masked=masked)
     lines.append(t(lang, 'grp_pay_line', pay=pay_label(pay, lang), paynote=pay_note))
     lines.append("\n" + t(lang, 'seller_group_buyer', buyer=html.escape(first.get('buyer_name') or '')))
@@ -3768,6 +5111,16 @@ async def seller_group_order_detail(update: Update, context: ContextTypes.DEFAUL
                 if d is not None:
                     lines.append(t(lang, 'courier_dist', km=f"{d:.1f}"))
     lines.append(t(lang, 'grp_date_plain', date=fmt_datetime(first.get('created_at'))))
+    _pbadge = _progress_badge(lang, first)
+    if _pbadge:
+        lines.append(_pbadge)
+    if status == 'pending':
+        _gcd = _countdown_line(lang, _order_deadline(first))
+        if _gcd:
+            lines.append(_gcd)
+    _badge = _settlement_badge(lang, first)
+    if _badge:
+        lines.append(_badge)
 
     keyboard = []
     if status == 'pending':
@@ -3920,16 +5273,23 @@ async def buyer_group_order_detail(update: Update, context: ContextTypes.DEFAULT
                 url=f"https://www.google.com/maps/search/?api=1&query={slat},{slon}")
 
     lines.append(t(lang, 'group_date_line', date=fmt_datetime(first.get('created_at'))))
+    _badge = _settlement_badge(lang, first)
+    if _badge:
+        lines.append(_badge)
     lines.append(f"<b>{t(lang, 'label_status')}:</b>\n{timeline}")
     lines.append(f"<i>{status_guide.get(status, '')}</i>")
+    if status == 'confirmed' and first.get('buyer_received'):
+        lines.append(t(lang, 'buyer_awaiting_finalize'))
 
     if status == 'pending':
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel_order'), callback_data=f"gbuyer_cancel_{group_id}")])
-    if status == 'confirmed' and dlv == 'pickup':
+    if status == 'confirmed' and dlv == 'pickup' and not first.get('buyer_received'):
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_got_item'), callback_data=f"gbuyer_pickup_{group_id}")])
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_send_message'), callback_data=f"order_msg_{first['id']}")])
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_correspondence'), callback_data=f"msgs_{first['id']}")])
-    can_rate = (status == 'delivered') or (status == 'confirmed' and dlv == 'pickup')
+    # Reyting faqat buyurtma YAKUNLANGACH (sotuvchi to'lovni belgilab 'delivered' qilgach).
+    # «oldim» bosilganda emas — aks holda reyting ikki marta so'ralardi.
+    can_rate = (status == 'delivered')
     if can_rate:
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_leave_rating'), callback_data=f"order_rate_{first['id']}")])
     if map_button:
@@ -3966,7 +5326,7 @@ async def buyer_cancel_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # Taymerlarni o'chiramiz va guruhni bekor qilamiz
     if context.application.job_queue:
-        for nm in (f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
+        for nm in (f"countdown_group_{group_id}", f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
             for job in context.application.job_queue.get_jobs_by_name(nm):
                 job.schedule_removal()
     for o in orders:
@@ -4006,8 +5366,29 @@ async def buyer_pickup_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if orders[0]['status'] != 'confirmed':
         await buyer_group_order_detail(update, context, group_id=group_id)
         return
-    for o in orders:
-        db.update_order_status(o['id'], 'delivered')
+    # MUHIM: «oldim» bosilsa ham savat buyurtmasi YOPILMAYDI. Status 'confirmed' qoladi —
+    # sotuvchi to'lov holatini belgilab yakunlashi shart.
+    db.set_group_buyer_received(group_id)
+
+    # Sotuvchiga xabar — to'lovni belgilab yakunlashga chaqiramiz
+    try:
+        first = orders[0]
+        if first.get('seller_tg'):
+            seller = db.get_user_by_id(first['seller_id'])
+            slang = get_user_lang(seller) if seller else DEFAULT_LANG
+            skb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(slang, 'btn_finalize_payment'), callback_data=f"seller_gorder_{group_id}")]])
+            await context.bot.send_message(
+                chat_id=first['seller_tg'],
+                text=t(slang, 'pickup_seller_finalize_group',
+                       oid=fmt_order_id(int(group_id)), n=len(orders),
+                       buyer=html.escape(first.get('buyer_name') or '')),
+                reply_markup=skb,
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        logging.error(f"Guruh pickup bildirishnomasi ketmadi: {e}")
+
     await buyer_group_order_detail(update, context, group_id=group_id)
 
 
@@ -4054,13 +5435,24 @@ async def reminder_group_job(context: ContextTypes.DEFAULT_TYPE):
             seller = db.get_user_by_id(orders[0]['seller_id'])
             slang = get_user_lang(seller) if seller else DEFAULT_LANG
             grand = sum(float(o['total_price']) for o in orders)
-            await context.bot.send_message(
-                chat_id=data['seller_tg'],
-                text=t(slang, 'job_group_reminder_seller',
-                       oid=fmt_order_id(int(group_id)), n=len(orders), total=fmt_price(grand)),
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
-                    t(slang, 'btn_open_order'), callback_data=f"seller_gorder_{group_id}")]])
-            )
+            rtext = t(slang, 'job_group_reminder_seller',
+                      oid=fmt_order_id(int(group_id)), n=len(orders), total=fmt_price(grand))
+            rkb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(slang, 'btn_open_order'), callback_data=f"seller_gorder_{group_id}")]])
+            await context.bot.send_message(chat_id=data['seller_tg'], text=rtext, reply_markup=rkb)
+            # MULTI-SOTUVCHI: eslatma guruhdagi mahsulot egasi xodimlarga ham
+            seen = set()
+            for o in orders:
+                prod = db.get_product_basic(o.get('product_id')) if o.get('product_id') else None
+                if not prod:
+                    continue
+                cb = prod.get('created_by')
+                if not cb or cb == prod.get('seller_id') or cb in seen:
+                    continue
+                seen.add(cb)
+                su = db.get_user_by_id(cb)
+                if su and su.get('telegram_id') and str(su['telegram_id']) != str(data['seller_tg']):
+                    await context.bot.send_message(chat_id=su['telegram_id'], text=rtext, reply_markup=rkb)
     except Exception as e:
         logging.error(f"reminder_group_job xatosi: {e}")
 
@@ -4073,7 +5465,11 @@ async def seller_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYP
     """Sotuvchining ulangan kanallari ro'yxati + qo'shish/o'chirish."""
     query = update.callback_query
     if query:
-        await query.answer()
+        # answer allaqachon berilgan bo'lishi mumkin (masalan recheck'dan keyin) — xato bermaymiz
+        try:
+            await query.answer()
+        except Exception:
+            pass
     lang = get_lang(update, context)
     user = db.get_user_by_telegram_id(update.effective_user.id)
     channels = db.get_seller_channels(user['id']) if user else []
@@ -4093,21 +5489,33 @@ async def seller_channels_menu(update: Update, context: ContextTypes.DEFAULT_TYP
                         db.update_seller_channel_title(user['id'], ch['channel_id'], title)
                 except Exception:
                     title = ch['channel_id']
+            is_group = ch.get('chat_type') in ('group', 'supergroup')
+            type_icon = "👥" if is_group else "📢"
             is_active = ch.get('is_active', 1)
-            mark = "✅" if is_active else "⚠️"
             if not is_active:
                 has_inactive = True
-            text += f"\n{mark} {html.escape(str(title))}"
+            warn = "  ⚠️" if not is_active else ""
+            text += f"\n{type_icon} {html.escape(str(title))}{warn}"
             label = f"🗑 {title}"
             if len(label) > 32:
                 label = label[:31] + "…"
             keyboard.append([InlineKeyboardButton(label, callback_data=f"chremove_{ch['channel_id']}")])
         if has_inactive:
             text += "\n\n" + t(lang, 'channels_menu_inactive_hint')
+        # Botni guruh/kanaldan chiqarmasdan, hozir post yubora olishini qayta sinab,
+        # nofaol bo'lganlarini tiklash uchun.
+        keyboard.append([InlineKeyboardButton(t(lang, 'btn_recheck_channels'),
+                                              callback_data="seller_channels_recheck")])
     else:
         text = t(lang, 'channels_menu_empty')
 
+    # Qayta tekshiruv natijasi (agar menyu recheck'dan keyin ochilgan bo'lsa) — tepada ko'rsatamiz
+    summary = context.user_data.pop('channels_recheck_summary', None)
+    if summary:
+        text = summary + "\n\n" + text
+
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_add_channel'), callback_data="seller_link_channel")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'btn_add_group'), callback_data="seller_link_group")])
     keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
     markup = InlineKeyboardMarkup(keyboard)
 
@@ -4124,6 +5532,87 @@ async def seller_channel_remove(update: Update, context: ContextTypes.DEFAULT_TY
     channel_id = query.data.replace("chremove_", "", 1)
     if user:
         db.remove_seller_channel(user['id'], channel_id)
+    await seller_channels_menu(update, context)
+
+
+# Forum (mavzuli) guruhda topic yaroqsiz bo'lganini bildiruvchi xato belgilari
+_TOPIC_ERR_MARKERS = ("thread not found", "topic_closed", "topic was closed",
+                      "topic_deleted", "message thread not found")
+
+
+async def _probe_can_post(context, chat_id, thread_id):
+    """Berilgan kanal/guruhga (forum bo'lsa topic ichiga) qisqa probe xabar yuborib,
+    bot HOZIR post yubora olishini aniqlaydi. Probe darrov o'chiriladi — guruhda iz
+    qolmaydi (delete imkonsiz bo'lsa ham, '✅' xabari zarar qilmaydi).
+
+    Qaytaradi: (ok, used_general)
+      ok=True          — bot post yubora oladi;
+      used_general=True — forum topic yaroqsiz edi, General topicga muvaffaqiyatli yuborildi
+                          (chaqiruvchi thread_id ni tozalashi kerak)."""
+    async def _try(th):
+        probe = await context.bot.send_message(
+            chat_id=chat_id, text="✅", message_thread_id=th,
+            disable_notification=True,
+        )
+        try:
+            await context.bot.delete_message(chat_id, probe.message_id)
+        except Exception:
+            pass
+
+    try:
+        await _try(thread_id)
+        return True, False
+    except (Forbidden, BadRequest) as e:
+        # Forum topic yopiq/o'chgan bo'lsa — General topicga urinib ko'ramiz
+        if thread_id is not None and any(m in str(e).lower() for m in _TOPIC_ERR_MARKERS):
+            try:
+                await _try(None)
+                return True, True
+            except Exception:
+                return False, False
+        return False, False
+    except Exception:
+        return False, False
+
+
+async def seller_channels_recheck(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ulangan barcha kanal/guruhlarni qayta tekshiradi: bot hozir post yubora olsa —
+    nofaol bo'lib qolganlarini QAYTA FAOLLASHTIRADI. Shu sababli sotuvchi botni
+    guruhdan chiqarib qayta qo'shishi shart emas (admin qilib qo'ygach shu tugma yetadi)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    if query:
+        try:
+            await query.answer(t(lang, 'channels_recheck_running'))
+        except Exception:
+            pass
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    channels = db.get_seller_channels(user['id']) if user else []
+
+    reactivated = 0  # nofaol edi → endi ishladi
+    failing = 0      # hali ham yubora olmadi
+    for ch in channels:
+        cid = ch.get('channel_id')
+        th = ch.get('thread_id')
+        th = int(th) if th not in (None, '') else None
+        was_active = bool(ch.get('is_active', 1))
+        ok, used_general = await _probe_can_post(context, cid, th)
+        if ok:
+            if used_general:
+                # Eski topic yaroqsiz — bundan keyin General topicga yuboramiz
+                db.set_seller_channel_thread(user['id'], cid, None)
+            if not was_active:
+                # add_seller_channel mavjud yozuvni faollashtiradi (is_active=1, xato tozalanadi)
+                db.add_seller_channel(user['id'], cid, ch.get('channel_title'))
+                reactivated += 1
+        else:
+            if was_active:
+                db.deactivate_seller_channel(user['id'], cid, 'recheck_no_post')
+            failing += 1
+
+    # Natijani menyu tepasida bir martalik banner sifatida ko'rsatamiz
+    context.user_data['channels_recheck_summary'] = t(
+        lang, 'channels_recheck_done', ok=reactivated, bad=failing)
     await seller_channels_menu(update, context)
 
 
@@ -4202,10 +5691,177 @@ async def link_channel_receive(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
+async def seller_link_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Guruhni ulash yo'riqnomasi.
+
+    Kanaldan farqli — guruh ID si forward orqali ko'rinmaydi. Shu sababli bog'lash
+    sotuvchi botni guruhga QO'SHGANDA avtomatik (my_chat_member orqali) amalga oshadi;
+    bu yerda alohida holat (state) kerak emas — faqat ko'rsatma beramiz."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    lang = get_lang(update, context)
+    bot_me = await context.bot.get_me()
+    text = t(lang, 'link_group_prompt', bot=bot_me.username)
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'back'), callback_data="seller_channels_menu")]
+    ])
+    if query:
+        await query.edit_message_text(text, reply_markup=keyboard,
+                                      parse_mode='HTML', disable_web_page_preview=True)
+    else:
+        await update.message.reply_text(text, reply_markup=keyboard,
+                                        parse_mode='HTML', disable_web_page_preview=True)
+
+
+async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Botning guruh/superguruhdagi a'zoligi o'zgarganda ishlaydi.
+
+    Bot guruhga YANGI qo'shilsa — qo'shgan odamni (sotuvchini) aniqlaymiz va guruhni
+    unga bog'laymiz. Endi yangi mahsulotlar avtomatik shu guruhga ham chiqadi.
+    (Kanallar 'forward' orqali ulanadi — bu yerda faqat guruhlar bilan ishlaymiz.)
+
+    Eslatma: 'my_chat_member' Telegram'ning standart yangilanishlari ichida keladi
+    (alohida 'chat_member' obunasi shart emas)."""
+    cmu = update.my_chat_member
+    if cmu is None:
+        return
+    chat = cmu.chat
+    _old = getattr(cmu.old_chat_member, 'status', None)
+    _new = getattr(cmu.new_chat_member, 'status', None)
+    logging.info(f"my_chat_member: chat={chat.id} type={chat.type} "
+                 f"status {_old}->{_new} by={getattr(cmu.from_user, 'id', None)}")
+    if chat.type not in ('group', 'supergroup'):
+        return
+
+    old_status = cmu.old_chat_member.status if cmu.old_chat_member else None
+    new_status = cmu.new_chat_member.status if cmu.new_chat_member else None
+
+    OUTSIDE = ('left', 'kicked')
+    INSIDE = ('member', 'administrator', 'creator', 'restricted')
+    ADMIN = ('administrator', 'creator')
+
+    # Ulanishni (qayta) o'rnatadigan IKKI holat:
+    #   1) just_joined — bot guruhga YANGI qo'shildi (tashqaridan ichkariga);
+    #   2) promoted    — bot ichkarida turib ADMIN huquqini oldi (member->administrator).
+    # 2-holat MUHIM: ko'p guruhlarda a'zolarga yozish taqiqlangan, shuning uchun bot avval
+    # oddiy a'zo bo'lib qo'shilganda post yubora olmaydi va guruh "nofaol" bo'lib qoladi.
+    # Keyin sotuvchi botni admin qilganda aynan shu yangilanish keladi — uni ham ushlab,
+    # guruhni qayta faollashtirib, post yuborishni qaytadan sinaymiz. Aks holda bot
+    # abadiy "nofaol" qolib, hech qachon xabar yubora olmaydi.
+    just_joined = (new_status in INSIDE) and (old_status in OUTSIDE or old_status is None)
+    promoted = (new_status in ADMIN) and (old_status not in ADMIN) and not just_joined
+    if not (just_joined or promoted):
+        return
+
+    # Eslatma: sotuvchilar guruhga ortiqcha xabar yozilishidan norozi edi. Shu sababli
+    # bot guruhga UMUMAN hech narsa yozmaydi — barcha bildirishnomalar sotuvchining
+    # shaxsiy chatiga (DM) yuboriladi.
+    actor = cmu.from_user  # odatda — botni guruhga qo'shgan kishi
+    seller = db.get_user_by_telegram_id(actor.id) if actor else None
+    approved = bool(seller and (seller.get('is_approved') or seller.get('role') in ('seller', 'admin')))
+
+    try:
+        bot_me = await context.bot.get_me()
+    except Exception:
+        bot_me = None
+    bot_username = bot_me.username if bot_me else "TezBozor"
+    title = chat.title or str(chat.id)
+
+    # Qo'shgan odam tasdiqlangan sotuvchi emas — guruhga hech narsa yozmaymiz, jim chiqamiz.
+    if not approved:
+        return
+
+    slang = get_user_lang(seller)
+
+    # Mavzuli (forum) guruh bo'lsa — postlar "General" topicga emas, alohida ochilgan
+    # topicga borishi uchun topic yaratishga harakat qilamiz (bot admin + topic boshqaruvi bo'lsa).
+    is_forum = bool(getattr(chat, 'is_forum', False))
+    thread_id = None
+    if is_forum:
+        # Avval shu guruh uchun saqlangan topic bormi (qayta ulanish)?
+        for ch in db.get_seller_channels(seller['id']):
+            if str(ch.get('channel_id')) == str(chat.id) and ch.get('thread_id'):
+                try:
+                    thread_id = int(ch['thread_id'])
+                except Exception:
+                    thread_id = None
+                break
+        if thread_id is None:
+            try:
+                topic = await context.bot.create_forum_topic(
+                    chat_id=chat.id, name="🛒 Yangi mahsulotlar")
+                thread_id = topic.message_thread_id
+            except Exception as e:
+                # Huquq yo'q — post General topicga boradi (topic yopiq bo'lsa avtomatik unga qaytamiz)
+                logging.info(f"Forum topic ochib bo'lmadi (chat {chat.id}): {e} — General ishlatiladi")
+
+    is_new = db.add_seller_channel(seller['id'], chat.id, title, chat_type='group',
+                                   is_forum=is_forum, thread_id=thread_id)
+
+    # Bot post yubora oladimi — guruhga HECH NARSA yozmasdan, botning a'zolik huquqidan
+    # aniqlaymiz (avval bu "jonli test" sifatida guruhga tasdiq xabari yuborilardi, lekin
+    # sotuvchilar guruhga ortiqcha xabardan norozi edi).
+    can_post = True
+    try:
+        if bot_me is not None:
+            bot_member = await context.bot.get_chat_member(chat.id, bot_me.id)
+            bstatus = getattr(bot_member, 'status', None)
+            if bstatus in ('administrator', 'creator'):
+                can_post = True
+            elif bstatus in ('member', 'restricted'):
+                # 'restricted' a'zoda can_send_messages aniq beriladi; oddiy 'member'da
+                # huquq guruh sozlamasiga bog'liq — True deb hisoblaymiz. Agar baribir
+                # yubora olmasa, birinchi mahsulot posti muvaffaqiyatsiz bo'lib,
+                # post_product_to_channel kanalni avtomatik o'chiradi va sotuvchini ogohlantiradi.
+                can_post = bool(getattr(bot_member, 'can_send_messages', True))
+            else:
+                can_post = False
+    except Exception as e:
+        logging.warning(f"Bot a'zolik huquqini tekshirib bo'lmadi (chat {chat.id}): {e}")
+
+    # Bot guruhda post yubora olmasa — uni FAOL ro'yxatda qoldirmaymiz (aks holda har postda
+    # behuda urinish bo'ladi). Sotuvchi botni admin qilib qaytadan ulashi mumkin.
+    if not can_post:
+        db.deactivate_seller_channel(seller['id'], chat.id, 'no_post_permission_on_join')
+
+    # Sotuvchiga shaxsiy xabar (u botni allaqachon ishga tushirgan — DM yetadi).
+    try:
+        seller_tg = seller.get('telegram_id')
+        if seller_tg:
+            if not can_post:
+                key = 'group_linked_need_admin'
+            elif is_new:
+                key = 'group_linked_notify'
+            else:
+                key = 'group_relinked_notify'
+            await context.bot.send_message(
+                chat_id=seller_tg,
+                text=t(slang, key, title=html.escape(title)),
+                parse_mode='HTML', disable_web_page_preview=True,
+            )
+    except Exception as e:
+        logging.warning(f"Sotuvchiga guruh-bog'lanish xabari yuborilmadi: {e}")
+
+
 async def seller_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user_by_telegram_id(update.effective_user.id)
     context.user_data['active_mode'] = 'seller'
     lang = get_lang(update, context)
+
+    # MULTI-SOTUVCHI: tasdiqlanmagan (nofaol) xodim — kutish ekrani
+    _srec = db.get_staff_by_user(user['id']) if user else None
+    if _srec and _srec.get('staff_role') != 'owner' and not _srec.get('is_active'):
+        text = t(lang, 'staff_pending_panel')
+        keyboard = [
+            [InlineKeyboardButton(t(lang, 'btn_buyer_mode'), callback_data="switch_to_buyer_confirm")],
+            [InlineKeyboardButton(t(lang, 'btn_contact_admin'), callback_data="contact_admin")],
+        ]
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        else:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+        return
 
     # Tasdiqlanmagan sotuvchi — maxsus panel ko'rsatamiz
     if user and not user.get('is_approved') and user.get('role') != 'admin':
@@ -4238,19 +5894,18 @@ async def seller_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # Tugmalar bo'limlarga guruhlangan — har bo'limga bossa ichidagi tugmalar ochiladi.
+    # (Eng ko'p ishlatiladigan «Mahsulot qo'shish» va «AI yordamchi» tepada qoladi.)
     keyboard = [
         [InlineKeyboardButton(t(lang, 'btn_add_product'), callback_data="seller_add_product")],
-        [InlineKeyboardButton(t(lang, 'btn_my_products'), callback_data="seller_products")],
-        [InlineKeyboardButton(t(lang, 'btn_my_channels'), callback_data="seller_channels_menu")],
-        [InlineKeyboardButton(t(lang, 'btn_orders'), callback_data="seller_orders")],
-        [InlineKeyboardButton(t(lang, 'btn_stats'), callback_data="seller_stats")],
-        [InlineKeyboardButton(t(lang, 'btn_messages'), callback_data="seller_messages")],
-        [InlineKeyboardButton(t(lang, 'btn_seller_reviews'), callback_data="seller_reviews")],
-        [InlineKeyboardButton(t(lang, 'btn_profile'), callback_data="seller_profile")],
-        [InlineKeyboardButton(t(lang, 'btn_buyer_mode'), callback_data="switch_to_buyer_confirm")],
         [InlineKeyboardButton(t(lang, 'btn_ai_assistant'), callback_data="ai_assistant")],
-        [InlineKeyboardButton(t(lang, 'btn_contact_admin'), callback_data="contact_admin")],
+        [InlineKeyboardButton(t(lang, 'grp_products'), callback_data="sellergrp_products")],
+        [InlineKeyboardButton(t(lang, 'grp_sales'), callback_data="sellergrp_sales")],
+        [InlineKeyboardButton(t(lang, 'grp_customers'), callback_data="sellergrp_customers")],
+        [InlineKeyboardButton(t(lang, 'grp_settings'), callback_data="sellergrp_settings")],
+        [InlineKeyboardButton(t(lang, 'btn_buyer_mode'), callback_data="switch_to_buyer_confirm")],
     ]
+
     if CHANNEL_URL:
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_official_channel'), url=CHANNEL_URL)])
 
@@ -4266,6 +5921,509 @@ async def seller_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             t(lang, 'bottom_hint'),
             reply_markup=seller_bottom_kb(lang)
         )
+
+
+# ============================================================
+# SOTUVCHI PANELI — BO'LIM (guruh) MENYULARI
+# Asosiy panel tartibli bo'lishi uchun tugmalar 4 bo'limga bo'lingan.
+# Har bo'lim — alohida ekran, ichidagi tugmalar mavjud handlerlarga boradi.
+# ============================================================
+async def _show_seller_group(update, context, title, kb):
+    """Bo'lim ekranini ko'rsatadi (Orqaga — asosiy panelga)."""
+    kb = kb + [[InlineKeyboardButton(t(get_lang(update, context), 'back'), callback_data="seller_panel")]]
+    query = update.callback_query
+    markup = InlineKeyboardMarkup(kb)
+    if query:
+        await query.answer()
+        try:
+            await query.edit_message_text(title, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=title,
+                                           reply_markup=markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(title, reply_markup=markup, parse_mode='HTML')
+
+
+async def seller_group_products(update, context):
+    """📦 Sotuv va e'lonlar — mahsulot, kanal, rejalashtirilgan post, avto-reklama."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_my_products'), callback_data="seller_products")],
+        [InlineKeyboardButton(t(lang, 'btn_my_channels'), callback_data="seller_channels_menu")],
+        [InlineKeyboardButton(t(lang, 'btn_scheduled_posts'), callback_data="seller_scheduled")],
+        [InlineKeyboardButton(t(lang, 'btn_autoreposts'), callback_data="seller_autoreposts")],
+    ]
+    await _show_seller_group(update, context, t(lang, 'grp_products_title'), kb)
+
+
+async def seller_group_sales(update, context):
+    """🛒 Savdo va hisob — buyurtmalar, qarzlar, statistika/Excel."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_orders'), callback_data="seller_orders")],
+        [InlineKeyboardButton(t(lang, 'btn_debts'), callback_data="seller_debts")],
+        [InlineKeyboardButton(t(lang, 'btn_stats'), callback_data="seller_stats")],
+    ]
+    await _show_seller_group(update, context, t(lang, 'grp_sales_title'), kb)
+
+
+async def seller_group_customers(update, context):
+    """💬 Mijozlar — xabarlar, sharhlar."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_messages'), callback_data="seller_messages")],
+        [InlineKeyboardButton(t(lang, 'btn_seller_reviews'), callback_data="seller_reviews")],
+    ]
+    await _show_seller_group(update, context, t(lang, 'grp_customers_title'), kb)
+
+
+async def seller_group_settings(update, context):
+    """⚙️ Sozlamalar — profil, (ega uchun) sotuvchilar, admin bilan bog'lanish."""
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    kb = [[InlineKeyboardButton(t(lang, 'btn_profile'), callback_data="seller_profile")]]
+    # MULTI-SOTUVCHI: ega/manager bo'lsa — "Sotuvchilar" boshqaruv tugmasi
+    _staff_rec = db.get_staff_by_user(user['id']) if user else None
+    if _staff_rec and _staff_rec.get('staff_role') in ('owner', 'manager'):
+        kb.append([InlineKeyboardButton(t(lang, 'btn_manage_staff'), callback_data="staff_panel")])
+    kb.append([InlineKeyboardButton(t(lang, 'btn_contact_admin'), callback_data="contact_admin")])
+    await _show_seller_group(update, context, t(lang, 'grp_settings_title'), kb)
+
+
+# ============================================================
+# MULTI-SOTUVCHI: do'kon egasi paneli (sotuvchilarni boshqarish)
+# ============================================================
+
+PERM_KEYS = {
+    'add':   'perm_add_product',
+    'conf':  'perm_confirm_orders',
+    'price': 'perm_edit_price',
+    'rev':   'perm_reply_reviews',
+}
+
+
+async def _require_owner(update, context):
+    """Joriy foydalanuvchi do'kon egasi/manageri ekanini tekshiradi.
+    (user, shop, staff_rec) yoki (None, None, None) qaytaradi (xabar bilan)."""
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    staff_rec = db.get_staff_by_user(user['id']) if user else None
+    shop = db.get_shop_for_user(user['id']) if user else None
+    if not (staff_rec and shop and staff_rec.get('staff_role') in ('owner', 'manager')):
+        q = update.callback_query
+        if q:
+            await q.answer(t(lang, 'staff_owner_only'), show_alert=True)
+        return None, None, None
+    return user, shop, staff_rec
+
+
+async def staff_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sotuvchilarni boshqarish — asosiy menyu (faqat ega/manager)."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_all = db.get_shop_staff(shop['id'], include_owner=False)
+    active_n = sum(1 for s in staff_all if s.get('is_active'))
+    pending_n = sum(1 for s in staff_all if not s.get('is_active'))
+    pay_mode = shop.get('payment_mode') or 'shop'
+    pay_lbl = t(lang, 'paymode_shop' if pay_mode == 'shop' else 'paymode_staff')
+
+    text = t(lang, 'staff_panel_text', total=len(staff_all), active=active_n, pending=pending_n,
+             paymode=pay_lbl, mod=t(lang, 'mod_owner' if shop.get('moderation') == 'owner_approve' else 'mod_direct'))
+    inv_n = len(db.get_active_invites(shop['id']))
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_staff_list'), callback_data="staff_list")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_add'), callback_data="staff_add")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_invites', n=inv_n), callback_data="staff_invites")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_stats'), callback_data="staff_stats")],
+        [InlineKeyboardButton(t(lang, 'btn_paymode', mode=pay_lbl), callback_data="shop_paymode")],
+    ]
+    if shop.get('moderation') == 'owner_approve':
+        cnt = len(db.get_seller_products_by_status(shop['owner_user_id'], 'pending_owner'))
+        kb.append([InlineKeyboardButton(t(lang, 'btn_pending_products', n=cnt), callback_data="shop_pending")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+
+    if query:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Do'kondagi xodimlar ro'yxati."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_all = db.get_shop_staff(shop['id'], include_owner=False)
+    if not staff_all:
+        await query.edit_message_text(
+            t(lang, 'staff_list_empty'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")]]),
+            parse_mode='HTML')
+        return
+    kb = []
+    for s in staff_all:
+        mark = "✅" if s.get('is_active') else "⏳"
+        dept = s.get('department') or '—'
+        kb.append([InlineKeyboardButton(f"{mark} {s.get('name') or '—'} · {dept}",
+                                        callback_data=f"staff_detail_{s['id']}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")])
+    await query.edit_message_text(t(lang, 'staff_list_header'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bitta xodim — ma'lumot, statistika va amallar."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_id = int(query.data.split("_")[2])
+    # Xodim shu do'konga tegishlimi?
+    target = next((s for s in db.get_shop_staff(shop['id']) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    st = db.get_staff_stats(target['user_id'])
+    perms = []
+    for k, col in PERM_KEYS.items():
+        perms.append(("✅" if target.get(col) else "❌") + " " + t(lang, f'perm_{k}'))
+    role_name = t(lang, 'role_manager' if target.get('staff_role') == 'manager' else 'role_staff')
+    text = t(lang, 'staff_detail_text',
+             name=html.escape(target.get('name') or '—'),
+             dept=html.escape(target.get('department') or '—'),
+             role=role_name,
+             status=t(lang, 'staff_active' if target.get('is_active') else 'staff_pending'),
+             products=st['products_count'], delivered=st['delivered'],
+             revenue=fmt_price(st['total_revenue']), pending=st['pending'],
+             perms="\n".join(perms))
+    toggle_lbl = t(lang, 'btn_staff_freeze' if target.get('is_active') else 'btn_staff_activate')
+    role_lbl = t(lang, 'btn_staff_make_staff' if target.get('staff_role') == 'manager' else 'btn_staff_make_manager')
+    kb = [
+        [InlineKeyboardButton(toggle_lbl, callback_data=f"staff_toggle_{staff_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_set_dept'), callback_data=f"staff_dept_{staff_id}")],
+        [InlineKeyboardButton(role_lbl, callback_data=f"staff_role_{staff_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_perms'), callback_data=f"staff_perm_{staff_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_staff_remove'), callback_data=f"staff_rm_{staff_id}")],
+        [InlineKeyboardButton(t(lang, 'back'), callback_data="staff_list")],
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xodimni muzlatish/faollashtirish."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_id = int(query.data.split("_")[2])
+    target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    new_active = 0 if target.get('is_active') else 1
+    db.set_staff_active(staff_id, new_active)
+    # Xodimga xabar
+    try:
+        su = db.get_user_by_id(target['user_id'])
+        if su and su.get('telegram_id'):
+            slang = get_user_lang(su)
+            await context.bot.send_message(
+                chat_id=su['telegram_id'],
+                text=t(slang, 'staff_you_activated' if new_active else 'staff_you_frozen'))
+    except Exception as e:
+        logging.error(f"Xodimga holat xabari ketmadi: {e}")
+    await staff_detail(update, context)
+
+
+async def staff_perm_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xodim ruxsatlarini sozlash menyusi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    parts = query.data.split("_")
+    staff_id = int(parts[2])
+    target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    # staff_pset_<id>_<key> — toggle
+    if len(parts) >= 4 and parts[1] == 'pset':
+        key = parts[3]
+        col = PERM_KEYS.get(key)
+        if col:
+            db.update_staff(staff_id, **{col: 0 if target.get(col) else 1})
+            target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    kb = []
+    for k, col in PERM_KEYS.items():
+        mark = "✅" if target.get(col) else "❌"
+        kb.append([InlineKeyboardButton(f"{mark} {t(lang, f'perm_{k}')}",
+                                        callback_data=f"staff_pset_{staff_id}_{k}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data=f"staff_detail_{staff_id}")])
+    await query.edit_message_text(t(lang, 'staff_perms_header', name=html.escape(target.get('name') or '—')),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xodimni o'chirish (tasdiq bilan)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    parts = query.data.split("_")
+    staff_id = int(parts[2])
+    confirmed = (len(parts) >= 4 and parts[3] == 'yes')
+    target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    if not confirmed:
+        kb = [
+            [InlineKeyboardButton(t(lang, 'btn_staff_remove_yes'), callback_data=f"staff_rm_{staff_id}_yes")],
+            [InlineKeyboardButton(t(lang, 'back'), callback_data=f"staff_detail_{staff_id}")],
+        ]
+        await query.edit_message_text(t(lang, 'staff_remove_confirm', name=html.escape(target.get('name') or '—')),
+                                      reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+        return
+    db.remove_staff(staff_id)
+    await query.edit_message_text(
+        t(lang, 'staff_removed_done', name=html.escape(target.get('name') or '—')),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_list")]]),
+        parse_mode='HTML')
+
+
+async def staff_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yangi sotuvchi taklifi — avval bo'lim nomini so'raydi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    context.user_data['staff_invite_dept'] = shop['id']
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_skip_dept'), callback_data="staff_add_nodept")],
+        [InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")],
+    ]
+    await query.edit_message_text(t(lang, 'staff_add_ask_dept'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def _send_invite_link(update, context, shop, department, user_id):
+    """Taklif kodi + deeplink yaratib ko'rsatadi (callback yoki matn javobi orqali)."""
+    lang = get_lang(update, context)
+    code = db.create_invite(shop['id'], department=department, created_by=user_id)
+    bot_me = await context.bot.get_me()
+    link = f"https://t.me/{bot_me.username}?start=staff_{code}"
+    dept_line = department or t(lang, 'not_specified')
+    text = t(lang, 'staff_invite_created', link=link, code=code, dept=html.escape(dept_line))
+    kb = [[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")]]
+    if update.callback_query:
+        await update.callback_query.edit_message_text(
+            text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML', disable_web_page_preview=True)
+    else:
+        await update.message.reply_text(
+            text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML', disable_web_page_preview=True)
+
+
+async def staff_add_nodept(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bo'limsiz taklif yaratish."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop('staff_invite_dept', None)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    await _send_invite_link(update, context, shop, None, user['id'])
+
+
+async def staff_invites(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Faol (ishlatilmagan) takliflar ro'yxati — har birini bekor qilish mumkin."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    invites = db.get_active_invites(shop['id'])
+    if not invites:
+        await query.edit_message_text(
+            t(lang, 'invites_empty'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")]]),
+            parse_mode='HTML')
+        return
+    kb = []
+    for inv in invites[:20]:
+        dept = inv.get('department') or t(lang, 'not_specified')
+        kb.append([InlineKeyboardButton(f"🔗 {inv['code']} · {dept}"[:50], callback_data="noop")])
+        kb.append([InlineKeyboardButton(t(lang, 'btn_invite_cancel'), callback_data=f"inv_cancel_{inv['id']}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")])
+    await query.edit_message_text(t(lang, 'invites_header'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def invite_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Faol taklifni bekor qiladi (o'chiradi)."""
+    query = update.callback_query
+    await query.answer()
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    invite_id = int(query.data.split("_")[2])
+    db.delete_invite(invite_id, shop_id=shop['id'])
+    await staff_invites(update, context)
+
+
+async def staff_reject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Qo'shilgan (yoki kutilayotgan) xodimni rad etadi/o'chiradi — notog'ri odam qo'shilsa."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_id = int(query.data.split("_")[2])
+    target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.edit_message_text(t(lang, 'staff_not_found'))
+        return
+    uid = target['user_id']
+    db.remove_staff(staff_id)
+    try:
+        su = db.get_user_by_id(uid)
+        if su and su.get('telegram_id'):
+            await context.bot.send_message(
+                chat_id=su['telegram_id'],
+                text=t(get_user_lang(su), 'staff_join_rejected', shop=html.escape(shop.get('name') or '—')),
+                parse_mode='HTML')
+    except Exception as e:
+        logging.error(f"Rad etilgan xodimga xabar ketmadi: {e}")
+    await query.edit_message_text(
+        t(lang, 'staff_reject_done', name=html.escape(target.get('name') or '—')),
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'btn_manage_staff'), callback_data="staff_panel")]]),
+        parse_mode='HTML')
+
+
+async def join_with_code_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Foydalanuvchi taklif kodini qo'lda kiritib do'konga qo'shilmoqchi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    if user and db.get_staff_by_user(user['id']):
+        await query.answer(t(lang, 'staff_already_member'), show_alert=True)
+        return
+    context.user_data['joining_with_code'] = True
+    kb = [[InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")]]
+    await query.edit_message_text(t(lang, 'join_code_ask'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_role_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xodim rolini almashtiradi: oddiy xodim ↔ manager."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_id = int(query.data.split("_")[2])
+    target = next((s for s in db.get_shop_staff(shop['id'], include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    new_role = 'staff' if target.get('staff_role') == 'manager' else 'manager'
+    db.update_staff(staff_id, staff_role=new_role)
+    await staff_detail(update, context)
+
+
+async def staff_set_dept_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xodim bo'limini o'zgartirish — matn so'raydi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    staff_id = int(query.data.split("_")[2])
+    context.user_data['staff_set_dept_for'] = staff_id
+    kb = [[InlineKeyboardButton(t(lang, 'back'), callback_data=f"staff_detail_{staff_id}")]]
+    await query.edit_message_text(t(lang, 'staff_set_dept_ask'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def staff_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Har bir xodim bo'yicha sotuv ko'rsatkichi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    rows = db.get_shop_staff_performance(shop['id'])
+    lines = [t(lang, 'staff_stats_header')]
+    for r in rows:
+        role_mark = "👑" if r.get('staff_role') == 'owner' else "•"
+        lines.append(t(lang, 'staff_stats_row',
+                       mark=role_mark, name=html.escape(r.get('name') or '—'),
+                       products=r.get('products_count', 0), sold=r.get('sold', 0),
+                       revenue=fmt_price(r.get('revenue', 0))))
+    kb = [[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")]]
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def shop_paymode_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """To'lov rejimini almashtiradi: do'kon kartasi ↔ har xodim kartasi."""
+    query = update.callback_query
+    await query.answer()
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    new_mode = 'staff' if (shop.get('payment_mode') or 'shop') == 'shop' else 'shop'
+    db.update_shop(shop['id'], payment_mode=new_mode)
+    await staff_panel(update, context)
+
+
+async def shop_pending_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ega tasdig'ini kutayotgan mahsulotlar (moderation='owner_approve')."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    user, shop, _ = await _require_owner(update, context)
+    if not shop:
+        return
+    pend = db.get_seller_products_by_status(shop['owner_user_id'], 'pending_owner')
+    if not pend:
+        await query.edit_message_text(
+            t(lang, 'pending_products_empty'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")]]),
+            parse_mode='HTML')
+        return
+    kb = []
+    for p in pend[:20]:
+        creator = db.get_user_by_id(p.get('created_by')) if p.get('created_by') else None
+        who = (creator.get('name') if creator else '') or '—'
+        kb.append([InlineKeyboardButton(f"📦 {p['name'][:30]} · {who}", callback_data=f"ownappr_{p['id']}")])
+        kb.append([InlineKeyboardButton(t(lang, 'btn_reject') + f" — {p['name'][:20]}", callback_data=f"ownrej_{p['id']}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="staff_panel")])
+    await query.edit_message_text(t(lang, 'pending_products_header'),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
 
 
 async def seller_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4289,27 +6447,48 @@ async def seller_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     lines = [t(lang, 'seller_avg_header', avg=f"{avg:.1f}", count=len(reviews))]
+    shop_lbl = t(lang, 'review_shop_to').strip()       # "🏪 Do'konga:"
+    prod_lbl = t(lang, 'review_product_to').strip()    # "📦 Mahsulotga:"
 
-    for r in reviews[:20]:  # so'nggi 20 ta
+    reply_btns = []  # izohi bor, lekin javob berilmagan sharhlarga javob tugmalari
+    for idx, r in enumerate(reviews[:20], start=1):  # so'nggi 20 ta
         sr = r['rating'] or 0
         s_stars = "⭐" * sr + "☆" * (5 - sr)
         buyer = html.escape(r.get('buyer_name') or t(lang, 'anonymous'))
         comment = html.escape(r.get('comment') or '')
         date = fmt_datetime(r.get('created_at'))
-        line = t(lang, 'review_shop_to') + s_stars
+        product = html.escape(r.get('product_name') or t(lang, 'review_product_unknown'))
+        reply = html.escape(r.get('seller_reply') or '')
+
+        # Har bir sharh — alohida, tushunarli karta: qaysi mahsulot/buyurtma aniq ko'rinadi
+        block = ["➖➖➖➖➖➖➖➖➖➖"]
+        head = f"<b>{idx})</b> 📦 <b>{product}</b>"
+        if r.get('order_id'):
+            head += f"  ·  {fmt_order_id(r['order_id'])}"
+        block.append(head)
+        block.append(f"{shop_lbl} {s_stars}")
         pr = r.get('product_rating')
         if pr:
-            line += t(lang, 'review_product_to') + f"{'⭐' * pr}{'☆' * (5 - pr)}"
-        line += f"\n👤 {buyer} · {date}"
-        if comment:
-            line += f"\n💬 {comment}"
-        lines.append(line)
+            block.append(f"{prod_lbl} {'⭐' * pr}{'☆' * (5 - pr)}")
+        block.append(f"👤 {buyer}  ·  {date}")
+        block.append(f"💬 {comment}" if comment else f"💬 <i>{t(lang, 'review_no_comment')}</i>")
+        if reply:
+            block.append(f"   ↳ {t(lang, 'review_shop_reply')} {reply}")
+        elif comment:
+            # Javob berilmagan, izohli sharh — javob tugmasi taklif qilamiz
+            reply_btns.append(InlineKeyboardButton(
+                t(lang, 'review_reply_btn', n=idx), callback_data=f"rvreply_{r['id']}"
+            ))
+        lines.append("\n".join(block))
 
     text = "\n".join(lines)
     if len(text) > 4000:
         text = text[:3900] + t(lang, 'reviews_old_cut_seller')
 
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")]])
+    # Tugmalar: javob tugmalarini 2 tadan qatorga joylaymiz + orqaga
+    kb_rows = [reply_btns[i:i + 2] for i in range(0, len(reply_btns), 2)]
+    kb_rows.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+    kb = InlineKeyboardMarkup(kb_rows)
 
     if query:
         await query.edit_message_text(text, reply_markup=kb, parse_mode='HTML')
@@ -4364,6 +6543,9 @@ async def buyer_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         line += f"\n🏪 {shop} — {s_stars}"
         if comment:
             line += f"\n💬 {comment}"
+        reply = html.escape(r.get('seller_reply') or '')
+        if reply:
+            line += f"\n   ↳ {t(lang, 'review_shop_reply')} {reply}"
         lines.append(line)
 
     text = "\n".join(lines)
@@ -4373,6 +6555,89 @@ async def buyer_reviews(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=kb, parse_mode='HTML')
     else:
         await update.message.reply_text(text, reply_markup=kb, parse_mode='HTML')
+
+
+async def review_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sotuvchi sharhga javob yozishni boshlaydi (callback: rvreply_{review_id}).
+    Keyingi matn xabari javob sifatida qabul qilinadi (text_handler orqali)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    chat_id = update.effective_chat.id
+    try:
+        review_id = int(query.data.split("_")[1])
+    except (ValueError, IndexError):
+        return
+
+    # XAVFSIZLIK: faqat shu sharhning sotuvchisi javob yoza oladi
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    review = db.get_review_by_id(review_id)
+    if not review or not user or review.get('seller_id') != user['id']:
+        await context.bot.send_message(chat_id, t(lang, 'review_reply_not_yours'))
+        return
+
+    context.user_data['awaiting_review_reply'] = review_id
+    product = html.escape(review.get('product_name') or t(lang, 'review_product_unknown'))
+    comment = html.escape(review.get('comment') or '')
+    # AI yoqilgan bo'lsa — javobni AI yozib berishi uchun tugma taklif qilamiz
+    kb = None
+    if ai_assistant.is_enabled():
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(lang, 'ai_review_gen_btn'), callback_data=f"airvgen_{review_id}")
+        ]])
+    await context.bot.send_message(
+        chat_id, t(lang, 'review_reply_prompt', product=product, comment=comment),
+        parse_mode='HTML', reply_markup=kb
+    )
+
+
+async def _notify_buyer_of_reply(context, review_id):
+    """Sotuvchi sharhga javob yozganda — sharh egasi xaridorga xabar yuboradi.
+    Xato bo'lsa jim yutiladi (javob baribir saqlangan va ommaviy ko'rinadi)."""
+    try:
+        review = db.get_review_by_id(review_id)
+        if not review or not (review.get('seller_reply') or '').strip():
+            return
+        buyer = db.get_user_by_id(review.get('buyer_id'))
+        if not buyer or not buyer.get('telegram_id'):
+            return
+        blang = get_user_lang(buyer)
+        seller = db.get_user_by_id(review.get('seller_id'))
+        shop = html.escape((seller.get('shop_name') or seller.get('name') or '') if seller else '')
+        product = html.escape(review.get('product_name') or t(blang, 'review_product_unknown'))
+        comment = html.escape(review.get('comment') or '')
+        reply = html.escape(review.get('seller_reply') or '')
+        await context.bot.send_message(
+            chat_id=buyer['telegram_id'],
+            text=t(blang, 'buyer_review_reply_notify',
+                   shop=shop, product=product, comment=comment, reply=reply),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logging.warning(f"Sharh javobi bildirishnomasi ketmadi: {e}")
+
+
+async def review_reply_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sotuvchi yozgan javob matnini qabul qiladi va saqlaydi."""
+    lang = get_lang(update, context)
+    review_id = context.user_data.get('awaiting_review_reply')
+    if not review_id:
+        return
+    reply_text = (update.message.text or '').strip()
+    if len(reply_text) < 2:
+        await update.message.reply_text(t(lang, 'review_reply_too_short'))
+        return  # bayroq saqlanadi — yana matn kutamiz
+    context.user_data.pop('awaiting_review_reply', None)
+    if len(reply_text) > 500:
+        reply_text = reply_text[:500].rstrip()
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    ok = db.set_review_reply(review_id, user['id'], reply_text) if user else False
+    if ok:
+        await _notify_buyer_of_reply(context, review_id)
+        await update.message.reply_text(t(lang, 'review_reply_saved'))
+        await seller_reviews(update, context)
+    else:
+        await update.message.reply_text(t(lang, 'review_reply_not_yours'))
 
 
 async def seller_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4453,6 +6718,11 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
             'reserve': 'В резерве' if ru else 'Zahirada',
             'deleted': 'Удалён' if ru else "O'chirilgan",
         }
+        settlement_label = {
+            'paid': 'Оплачено' if ru else "To'langan",
+            'debt': 'Долг' if ru else 'Qarz',
+            'installment': 'Рассрочка' if ru else "Bo'lib to'lash",
+        }
 
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill("solid", fgColor="1a8a2e")
@@ -4477,14 +6747,17 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
         ws.append(
             ["ID заказа", "Дата", "Покупатель", "Телефон покупателя",
              "Товар", "Цена за шт", "Кол-во", "Сумма",
-             "Статус", "Тип доставки", "Способ оплаты", "Адрес"]
+             "Статус", "Тип доставки", "Способ оплаты", "Адрес",
+             "Статус оплаты", "Оплачено", "Остаток долга"]
             if ru else
             ["Buyurtma ID", "Sana", "Xaridor", "Xaridor telefoni",
              "Mahsulot", "Dona narxi", "Miqdor", "Jami summa",
-             "Holat", "Yetkazish turi", "To'lov usuli", "Manzil"]
+             "Holat", "Yetkazish turi", "To'lov usuli", "Manzil",
+             "To'lov holati", "To'langan", "Qolgan qarz"]
         )
         style_header(ws)
         for o in orders:
+            stt = o.get('settlement_type') or ''
             ws.append([
                 o.get('id'),
                 fmt_datetime(o.get('created_at')),
@@ -4498,6 +6771,9 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
                 delivery_label.get(o.get('delivery_type') or '', o.get('delivery_type') or ''),
                 payment_label.get(o.get('payment_method') or '', o.get('payment_method') or ''),
                 o.get('delivery_address') or '',
+                settlement_label.get(stt, '—' if not stt else stt),
+                o.get('amount_paid') if o.get('amount_paid') is not None else '',
+                o.get('amount_due') if o.get('amount_due') is not None else '',
             ])
         auto_width(ws)
 
@@ -4553,6 +6829,9 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
         ws4 = wb.create_sheet("Сводка" if ru else "Umumiy")
         ws4.append(["Показатель", "Значение"] if ru else ["Ko'rsatkich", "Qiymat"])
         style_header(ws4)
+        # To'lov holati bo'yicha jami: qolgan qarz va to'langan summa
+        total_debt = sum((o.get('amount_due') or 0) for o in orders)
+        total_paid = sum((o.get('amount_paid') or 0) for o in orders)
         if ru:
             summary = [
                 ("Название магазина", user.get('shop_name') or '—'),
@@ -4569,6 +6848,8 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
                 ("Последние 30 дней — заказы", stats.get('month_orders', 0)),
                 ("Последние 30 дней — доход", stats.get('month_revenue', 0)),
                 ("Общий доход (доставленные)", stats.get('total_revenue', 0)),
+                ("Всего оплачено (при выдаче)", total_paid),
+                ("Остаток долга (всего)", total_debt),
             ]
         else:
             summary = [
@@ -4586,6 +6867,8 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
                 ("So'nggi 30 kun — buyurtma", stats.get('month_orders', 0)),
                 ("So'nggi 30 kun — daromad", stats.get('month_revenue', 0)),
                 ("Jami daromad (yetkazilgan)", stats.get('total_revenue', 0)),
+                ("Jami to'langan (berishda)", total_paid),
+                ("Qolgan qarz (jami)", total_debt),
             ]
         for k, v in summary:
             ws4.append([k, v])
@@ -4619,6 +6902,102 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.message.reply_text(t(lang, 'error_generic', e=e))
 
 
+# ============================================================
+# MAHSULOT QO'SHISH — bosqichlar va navigatsiya (Orqaga / O'tkazib yuborish)
+# ============================================================
+def _add_nav_kb(lang, *, back=None, skip=None, extra=None):
+    """Bosqich tugmalari + navigatsiya qatori. back/skip — maqsad bosqich nomi."""
+    rows = list(extra or [])
+    nav = []
+    if back:
+        nav.append(InlineKeyboardButton(t(lang, 'btn_back_step'), callback_data=f"addnav_{back}"))
+    if skip:
+        nav.append(InlineKeyboardButton(t(lang, 'btn_skip_step'), callback_data=f"addnav_{skip}"))
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+async def _ask_price(update, context):
+    lang = get_lang(update, context)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=t(lang, 'add_product_price_ask'),
+        reply_markup=_add_nav_kb(lang, back='name'))
+    return PRODUCT_PRICE
+
+
+async def _ask_stock(update, context):
+    lang = get_lang(update, context)
+    extra = [
+        [InlineKeyboardButton(t(lang, 'btn_stock_unlimited'), callback_data="apstock_unlim")],
+        [InlineKeyboardButton(t(lang, 'btn_stock_limited'), callback_data="apstock_num")],
+    ]
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=t(lang, 'add_product_stock_ask'),
+        reply_markup=_add_nav_kb(lang, back='price', extra=extra))
+    return PRODUCT_STOCK
+
+
+async def _ask_category(update, context):
+    lang = get_lang(update, context)
+    categories = db.get_all_categories()
+    extra = [[InlineKeyboardButton(f"{cat[2]} {category_name(cat[1], lang)}",
+                                   callback_data=f"prodcat_{cat[0]}")] for cat in categories]
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=t(lang, 'choose_category'),
+        reply_markup=_add_nav_kb(lang, back='stock', extra=extra))
+    return PRODUCT_CATEGORY
+
+
+async def _ask_desc(update, context):
+    lang = get_lang(update, context)
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=t(lang, 'add_product_desc_ask'),
+        reply_markup=_add_nav_kb(lang, back='category', skip='photo'))
+    return PRODUCT_DESC
+
+
+async def _ask_photo(update, context):
+    lang = get_lang(update, context)
+    context.user_data.setdefault('product_photos', [])
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=t(lang, 'add_photo_ask'),
+        reply_markup=_add_nav_kb(lang, back='desc', skip='attrs'))
+    return PRODUCT_PHOTO
+
+
+async def add_product_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Orqaga / O'tkazib yuborish tugmalari — maqsad bosqichga o'tadi.
+    callback: addnav_<bosqich>"""
+    query = update.callback_query
+    await query.answer()
+    target = query.data.split("_", 1)[1]
+    # Eski xabardagi tugmalarni olib tashlaymiz (chalkashmaslik uchun)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if target == 'price':
+        return await _ask_price(update, context)
+    if target == 'stock':
+        return await _ask_stock(update, context)
+    if target == 'category':
+        return await _ask_category(update, context)
+    if target == 'desc':
+        return await _ask_desc(update, context)
+    if target == 'photo':
+        return await _ask_photo(update, context)
+    if target == 'attrs':
+        # Rasmlarni o'tkazib yuborish — atributlar/saqlashga o'tamiz
+        return await _proceed_after_photos(update, context)
+    if target == 'name':
+        lang = get_lang(update, context)
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=t(lang, 'add_product_name_ask'))
+        return PRODUCT_NAME
+    return None
+
+
 async def seller_add_product_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if query:
@@ -4647,11 +7026,45 @@ async def seller_add_product_start(update: Update, context: ContextTypes.DEFAULT
 
     context.user_data['adding_product'] = True
     # Eski qiymatlarni tozalaymiz (oldingi yarim qolgan jarayonni)
-    for k in ('product_name', 'product_price', 'product_category', 'product_desc',
-              'product_photo', 'product_photos'):
+    for k in ('product_name', 'product_price', 'product_stock', 'product_category',
+              'product_desc', 'product_photo', 'product_photos', 'question_mode',
+              'attr_templates', 'attr_index', 'product_attrs'):
         context.user_data.pop(k, None)
     context.user_data['product_photos'] = []   # 4 tagacha rasm shu yerda yig'iladi
-    await _show(t(lang, 'add_product_name_ask'))
+
+    # Joylash usulini tanlash. AI o'chiq bo'lsa — to'g'ridan-to'g'ri klassikka o'tamiz
+    # (sotuvchini ishlamaydigan tugmalar bilan chalkashtirmaymiz).
+    if not ai_assistant.is_enabled():
+        context.user_data['question_mode'] = 'classic'
+        await _show(t(lang, 'add_product_name_ask'))
+        return PRODUCT_NAME
+
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'btn_mode_classic'), callback_data="pmode_classic")],
+        [InlineKeyboardButton(t(lang, 'btn_mode_ai_guided'), callback_data="pmode_ai_guided")],
+        [InlineKeyboardButton(t(lang, 'btn_mode_ai_smart'), callback_data="pmode_ai_smart")],
+    ])
+    await _show(t(lang, 'choose_post_mode'), parse_mode='HTML', reply_markup=kb)
+    return PRODUCT_MODE
+
+
+async def seller_add_product_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Joylash usulini tanlash: pmode_classic | pmode_ai_guided | pmode_ai_smart.
+    Tanlovdan keyin oddiy nom bosqichiga o'tamiz — qolgan oqim barcha rejimlar uchun bir xil,
+    farq faqat rasm bosqichidan keyingi atribut bosqichida (_proceed_after_photos)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    mode = query.data.split("_", 1)[1]  # 'classic' | 'ai_guided' | 'ai_smart'
+    if mode not in ('classic', 'ai_guided', 'ai_smart'):
+        mode = 'classic'
+    context.user_data['question_mode'] = mode
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                   text=t(lang, 'add_product_name_ask'))
     return PRODUCT_NAME
 
 
@@ -4667,8 +7080,7 @@ async def seller_add_product_name(update: Update, context: ContextTypes.DEFAULT_
         return PRODUCT_NAME
 
     context.user_data['product_name'] = name
-    await update.message.reply_text(t(lang, 'add_product_price_ask'))
-    return PRODUCT_PRICE
+    return await _ask_price(update, context)
 
 
 async def seller_add_product_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4689,11 +7101,44 @@ async def seller_add_product_price(update: Update, context: ContextTypes.DEFAULT
         return PRODUCT_PRICE
 
     context.user_data['product_price'] = price
+    return await _ask_stock(update, context)
 
-    categories = db.get_all_categories()
-    keyboard = [[InlineKeyboardButton(f"{cat[2]} {category_name(cat[1], lang)}", callback_data=f"prodcat_{cat[0]}")] for cat in categories]
-    await update.message.reply_text(t(lang, 'choose_category'), reply_markup=InlineKeyboardMarkup(keyboard))
-    return PRODUCT_CATEGORY
+
+async def seller_add_product_stock_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mahsulot qo'shishda zaxira tugmasi: '♾ Cheksiz' yoki '🔢 Aniq miqdor'."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    if query.data == "apstock_unlim":
+        context.user_data['product_stock'] = None
+        try:
+            await query.edit_message_text(t(lang, 'stock_set_unlimited'))
+        except Exception:
+            pass
+        return await _ask_category(update, context)
+    # apstock_num — aniq son so'raymiz (orqaga qaytish tugmasi bilan)
+    try:
+        await query.edit_message_text(
+            t(lang, 'add_product_stock_enter'),
+            reply_markup=_add_nav_kb(lang, back='price'))
+    except Exception:
+        pass
+    return PRODUCT_STOCK
+
+
+async def seller_add_product_stock_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """'🔢 Aniq miqdor' tanlangach — sotuvga qo'yiladigan sonni qabul qiladi."""
+    lang = get_lang(update, context)
+    raw = (update.message.text or "").strip()
+    try:
+        n = int(raw)
+        if n <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(t(lang, 'stock_enter_invalid'))
+        return PRODUCT_STOCK
+    context.user_data['product_stock'] = n
+    return await _ask_category(update, context)
 
 
 async def seller_add_product_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4703,8 +7148,12 @@ async def seller_add_product_category(update: Update, context: ContextTypes.DEFA
     category_id = int(query.data.split("_")[1])
     context.user_data['product_category'] = category_id
 
-    await query.edit_message_text(T(update, context, 'add_product_desc_ask'))
-    return PRODUCT_DESC
+    # Eski kategoriya tugmalarini olib tashlaymiz, so'ng tavsif bosqichiga o'tamiz
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    return await _ask_desc(update, context)
 
 
 async def seller_add_product_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4717,10 +7166,7 @@ async def seller_add_product_desc(update: Update, context: ContextTypes.DEFAULT_
         return PRODUCT_DESC
 
     context.user_data['product_desc'] = desc
-
-    context.user_data.setdefault('product_photos', [])
-    await update.message.reply_text(t(lang, 'add_photo_ask'))
-    return PRODUCT_PHOTO
+    return await _ask_photo(update, context)
 
 
 async def seller_add_product_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4791,16 +7237,97 @@ async def seller_add_product_photo(update: Update, context: ContextTypes.DEFAULT
     return PRODUCT_PHOTO
 
 
-async def _proceed_after_photos(update, context):
-    """Rasm bosqichidan keyin: atributlar bo'lsa so'raydi, bo'lmasa mahsulotni saqlaydi."""
+def _classic_templates(context):
+    """Klassik (kategoriyaga bog'langan) statik shablonlar."""
     category_id = context.user_data.get('product_category')
-    templates = db.get_category_templates(category_id) if category_id else []
+    return db.get_category_templates(category_id) if category_id else []
+
+
+async def _start_attr_flow(update, context, templates, prefilled=None, prefilled_labels=None):
+    """Atribut bosqichini berilgan shablonlar bilan boshlaydi (yoki saqlaydi).
+    prefilled — AI aqlli rejimda tavsifdan oldindan to'ldirilgan {key: value}.
+    Yorliqlarni (key→label) saqlaymiz — AI savollari uchun shablon yo'q, shu sababli
+    saqlanmasa mahsulot kartasida xom kalit ('car_model') ko'rinib qoladi."""
+    context.user_data['product_attrs'] = dict(prefilled or {})
+    labels = {}
+    for tmpl in (templates or []):
+        if tmpl.get('attr_key') and tmpl.get('attr_label'):
+            labels[tmpl['attr_key']] = tmpl['attr_label']
+    for k, lbl in (prefilled_labels or {}).items():
+        if lbl:
+            labels[k] = lbl
+    context.user_data['attr_labels'] = labels
     if templates:
         context.user_data['attr_templates'] = templates
         context.user_data['attr_index'] = 0
-        context.user_data['product_attrs'] = {}
         return await _ask_next_attr(update, context)
+    # Savol yo'q — to'g'ridan-to'g'ri saqlaymiz
     return await _save_product(update, context)
+
+
+async def _proceed_after_photos(update, context):
+    """Rasm bosqichidan keyin atribut bosqichi. Tanlangan rejimga qarab:
+      • classic   — kategoriyaning statik savollari (eski xulq);
+      • ai_guided — AI mahsulotga mos savollar tuzadi;
+      • ai_smart  — AI tavsifdan ajratadi + qolgan savollarni so'raydi.
+    AI o'chiq/xato bo'lsa — har doim klassik shablonlarga qaytadi."""
+    mode = context.user_data.get('question_mode', 'classic')
+    lang = get_lang(update, context)
+    chat_id = update.effective_chat.id
+
+    if mode == 'classic' or not ai_assistant.is_enabled():
+        return await _start_attr_flow(update, context, _classic_templates(context))
+
+    # --- AI rejimlari ---
+    try:
+        await context.bot.send_message(chat_id=chat_id, text=t(lang, 'ai_questions_thinking'))
+    except Exception:
+        pass
+
+    cat_id = context.user_data.get('product_category')
+    cat_name = ''
+    if cat_id:
+        try:
+            for c in db.get_all_categories():
+                if c[0] == cat_id:
+                    cat_name = category_name(c[1], lang)
+                    break
+        except Exception:
+            cat_name = ''
+
+    result = None
+    try:
+        result = await ai_assistant.generate_product_questions(
+            name=context.user_data.get('product_name', ''),
+            category=cat_name,
+            description=context.user_data.get('product_desc') or '',
+            lang=lang,
+            smart=(mode == 'ai_smart'),
+        )
+    except Exception as e:
+        logging.warning(f"AI savollar olinmadi: {e}")
+        result = None
+
+    if not result:
+        # AI ishlamadi — klassikka qaytamiz, sotuvchi savolsiz qolmaydi
+        await context.bot.send_message(chat_id=chat_id, text=t(lang, 'ai_questions_failed'))
+        return await _start_attr_flow(update, context, _classic_templates(context))
+
+    known = result.get('known') or {}
+    templates = result.get('questions') or []
+    prefilled = {k: v['value'] for k, v in known.items()}
+    prefilled_labels = {k: v['label'] for k, v in known.items()}
+
+    # AI aqlli: tavsifdan aniqlanganlarni sotuvchiga ko'rsatamiz (shaffoflik uchun)
+    if mode == 'ai_smart' and known:
+        lines = "\n".join(f"• {v['label']}: {v['value']}" for v in known.values())
+        await context.bot.send_message(chat_id=chat_id,
+                                       text=t(lang, 'ai_smart_prefilled', lines=lines))
+        if not templates:
+            await context.bot.send_message(chat_id=chat_id, text=t(lang, 'ai_smart_no_questions'))
+
+    return await _start_attr_flow(update, context, templates,
+                                  prefilled=prefilled, prefilled_labels=prefilled_labels)
 
 
 async def add_photo_more(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4819,6 +7346,16 @@ async def add_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _proceed_after_photos(update, context)
 
 
+def _attr_nav_row(lang, is_required):
+    """Atribut bosqichi uchun navigatsiya qatori:
+      [⬅️ Orqaga]  — doim (oldingi atributga yoki rasm bosqichiga qaytadi);
+      [⏭ O'tkazish] — faqat ixtiyoriy atributda (yozmasdan keyingisiga o'tish)."""
+    row = [InlineKeyboardButton(t(lang, 'btn_back_step'), callback_data="attrnav_back")]
+    if not is_required:
+        row.append(InlineKeyboardButton(t(lang, 'btn_skip_step'), callback_data="attrnav_skip"))
+    return row
+
+
 async def _ask_next_attr(update, context):
     """Navbatdagi atributni so'raydi."""
     templates = context.user_data.get('attr_templates', [])
@@ -4833,12 +7370,16 @@ async def _ask_next_attr(update, context):
     hint = t(lang, 'attr_eg', hint=tmpl['hint']) if tmpl.get('hint') else ""
     skip_note = "" if tmpl['is_required'] else t(lang, 'attr_skip_note')
 
+    # Har bir atribut bosqichida navigatsiya tugmalari (barcha kategoriyalar uchun bir xil):
+    # sotuvchi xato kiritsa Orqaga qaytib tuzata oladi, ixtiyoriy maydonni esa yozmasdan
+    # O'tkazish tugmasi bilan o'tkazib yuboradi.
+    nav_row = _attr_nav_row(lang, tmpl['is_required'])
+
     if tmpl['attr_type'] == 'select' and tmpl.get('hint'):
         # Tanlov variantlarini tugma sifatida ko'rsatamiz
         options = [o.strip() for o in tmpl['hint'].split('/')]
         kb = [[InlineKeyboardButton(opt, callback_data=f"attr_{opt}")] for opt in options]
-        if not tmpl['is_required']:
-            kb.append([InlineKeyboardButton(t(lang, 'btn_attr_skip'), callback_data="attr_-")])
+        kb.append(nav_row)
         msg = f"📝 {tmpl['attr_label']}{required_mark}{hint}"
         if update.message:
             await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(kb))
@@ -4846,10 +7387,11 @@ async def _ask_next_attr(update, context):
             await update.callback_query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(kb))
     else:
         msg = f"📝 {tmpl['attr_label']}{required_mark}{hint}{skip_note}"
+        kb = InlineKeyboardMarkup([nav_row])
         if update.message:
-            await update.message.reply_text(msg)
+            await update.message.reply_text(msg, reply_markup=kb)
         else:
-            await update.callback_query.message.reply_text(msg)
+            await update.callback_query.message.reply_text(msg, reply_markup=kb)
 
     return PRODUCT_ATTRS
 
@@ -4891,9 +7433,45 @@ async def seller_add_product_attr_callback(update: Update, context: ContextTypes
     return await _ask_next_attr(update, context)
 
 
-async def _build_ad_caption(product):
+async def seller_add_product_attr_nav(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Atribut bosqichidagi navigatsiya: ⬅️ Orqaga / ⏭ O'tkazish.
+    callback: attrnav_back | attrnav_skip"""
+    query = update.callback_query
+    await query.answer()
+    action = query.data.split("_", 1)[1]  # 'back' yoki 'skip'
+    templates = context.user_data.get('attr_templates', [])
+    idx = context.user_data.get('attr_index', 0)
+
+    # Joriy xabardagi tugmalarni olib tashlaymiz (chalkashmaslik uchun)
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+
+    if action == 'skip':
+        # Ixtiyoriy atributni yozmasdan o'tkazamiz (qiymat saqlanmaydi)
+        context.user_data['attr_index'] = idx + 1
+        return await _ask_next_attr(update, context)
+
+    # action == 'back'
+    if idx <= 0:
+        # Birinchi atribut — orqaga rasm bosqichiga qaytamiz
+        return await _ask_photo(update, context)
+
+    # Oldingi atributga qaytamiz; uning saqlangan qiymatini tozalaymiz (qayta kiritilsin)
+    prev_idx = idx - 1
+    context.user_data['attr_index'] = prev_idx
+    if prev_idx < len(templates):
+        prev_key = templates[prev_idx].get('attr_key')
+        if prev_key:
+            context.user_data.get('product_attrs', {}).pop(prev_key, None)
+    return await _ask_next_attr(update, context)
+
+
+async def _build_ad_caption(product, length="long"):
     """Mahsulot uchun reklama matnini (caption) qaytaradi: (matn, parse_mode).
-    Avval AI takrorlanmas reklama yozishga urinadi; bo'lmasa — tuzilgan HTML matn."""
+    Avval AI takrorlanmas reklama yozishga urinadi; bo'lmasa — tuzilgan HTML matn.
+    length — 'long' (uzun) yoki 'short' (qisqa) — sotuvchi preview'da tanlaydi."""
     cat = product.get('category_name') or product.get('category')
     cat_emoji = product.get('category_emoji') or '📂'
     cat_line = f"\n{cat_emoji} {html.escape(str(cat))}" if cat else ""
@@ -4926,8 +7504,10 @@ async def _build_ad_caption(product):
             category=str(cat) if cat else '',
             description=(product.get('description') or ''),
             shop=str(shop_name) if shop_name else '',
-            location=(loc or region_lbl or ''),
+            region=region_lbl or '',
+            location=loc or '',
             lang=DEFAULT_LANG,
+            length=length,
         )
     except Exception as e:
         logging.warning(f"Reklama matni olinmadi: {e}")
@@ -4962,16 +7542,63 @@ async def _build_ad_design_bytes(context, product):
         return None
 
 
+def _is_permanent_channel_error(err) -> bool:
+    """Post xatosi DOIMIY (bot chiqarilgan / huquqsiz / kanal o'chgan) ekanini aniqlaydi.
+
+    Faqat shunday xatolarda kanal/guruh "yetim" deb o'chiriladi. Vaqtinchalik yoki
+    konfiguratsiya xatolari (forum topic yopiq, caption uzun, file_id, tarmoq/limit)
+    DOIMIY hisoblanmaydi — aks holda guruh keraksiz o'chib, post boshqa bormay qoladi."""
+    # Forbidden — deyarli har doim doimiy (bot kicked / yozish taqiqlangan / huquq yo'q)
+    if isinstance(err, Forbidden):
+        return True
+    msg = str(err).lower()
+    permanent_markers = (
+        "bot was kicked", "bot is not a member", "chat not found",
+        "user is deactivated", "chat_write_forbidden",
+        "not enough rights", "have no rights to send",
+        "need administrator rights", "chat_admin_required",
+        "peer_id_invalid", "the group chat was deleted",
+        "bot was blocked", "group chat was migrated",
+    )
+    return any(m in msg for m in permanent_markers)
+
+
+async def _notify_seller_sold_out(context, product_id):
+    """Mahsulot sotilib tugab, avtomatik zaxiraga o'tganda sotuvchini ogohlantiradi.
+    Xabarda darhol zaxira sonini yangilash tugmasi ham bo'ladi."""
+    try:
+        prod = db.get_product_by_id(product_id)
+        if not prod:
+            return
+        seller = db.get_user_by_id(prod.get('seller_id'))
+        if not seller or not seller.get('telegram_id'):
+            return
+        slang = get_user_lang(seller)
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(t(slang, 'btn_set_stock'), callback_data=f"set_stock_{product_id}")
+        ]])
+        await context.bot.send_message(
+            chat_id=seller['telegram_id'],
+            text=t(slang, 'stock_sold_out_notify', name=html.escape(prod.get('name') or '')),
+            parse_mode='HTML', reply_markup=kb,
+        )
+    except Exception as e:
+        logging.warning(f"Sold-out notify failed (product {product_id}): {e}")
+
+
 async def post_product_to_channel(context, product_id, *,
                                   caption_override=None, parse_mode_override=None,
-                                  image_override=None):
+                                  image_override=None, collect_sent=False):
     """Mahsulotni markaziy kanalga VA sotuvchining shaxsiy kanaliga post qiladi.
 
     caption_override / parse_mode_override — sotuvchi ko'rib tasdiqlagan AYNAN o'sha
     matnni joylash uchun (preview bilan 100% mos bo'lsin).
     image_override — allaqachon yuklangan (dizayn) rasm file_id si; berilsa qayta
     dizayn qilinmaydi va qayta yuklanmaydi.
+    collect_sent=True bo'lsa — yuborilgan xabarlar ro'yxatini qaytaradi
+    ([{'chat_id':.., 'message_id':..}]) — avto qayta-reklama eski postni o'chirishi uchun.
     Xato yuz bersa ham asosiy oqimga (saqlash/status) ta'sir qilmaydi."""
+    sent_refs = []
     try:
         product = db.get_product_by_id(product_id)
         if not product:
@@ -4990,19 +7617,22 @@ async def post_product_to_channel(context, product_id, *,
             InlineKeyboardButton("🛒 Sotib olish", url=deep_link)
         ]])
 
-        # Maqsad kanallar: (chat_id, owner_seller_id). Markaziy kanal — owner None.
+        # Maqsad kanallar: (chat_id, owner_seller_id, thread_id). Markaziy kanal — owner None.
+        # thread_id faqat forum (mavzuli) guruhlar uchun — post o'sha topic ichiga boradi.
         # Faqat FAOL sotuvchi kanallariga yuboramiz (yetimlari tashlab ketiladi).
         targets = []
         seen = set()
         if CHANNEL_ID:
-            targets.append((CHANNEL_ID, None))
+            targets.append((CHANNEL_ID, None, None))
             seen.add(str(CHANNEL_ID))
         seller_id = product.get('seller_id')
         if seller_id:
             for ch in db.get_active_seller_channels(seller_id):
                 cid = ch.get('channel_id')
                 if cid and str(cid) not in seen:
-                    targets.append((cid, seller_id))
+                    th = ch.get('thread_id')
+                    th = int(th) if th not in (None, '') else None
+                    targets.append((cid, seller_id, th))
                     seen.add(str(cid))
 
         photo = product.get('image_url')
@@ -5015,61 +7645,115 @@ async def post_product_to_channel(context, product_id, *,
         if reusable_id is None:
             designed_bytes = await _build_ad_design_bytes(context, product)
 
-        for chat_id, owner_id in targets:
-            try:
-                if reusable_id or designed_bytes or photo:
-                    if reusable_id:
-                        send_photo_arg = reusable_id
-                    elif designed_bytes is not None:
-                        send_photo_arg = io.BytesIO(designed_bytes)
-                    else:
-                        send_photo_arg = photo
+        # Forum topic bilan bog'liq (vaqtinchalik) xatolar — guruhni o'chirmaymiz, General ga qaytamiz
+        TOPIC_ERR_MARKERS = ("message thread not found", "topic_closed",
+                             "topic was closed", "topic_deleted", "thread not found")
+        # Telegram rasm captioni 1024 belgidan oshmasligi kerak — uzun bo'lsa ajratib yuboramiz
+        too_long = bool(caption) and len(caption) > 1024
+
+        async def _send_to(chat_id, thread_id):
+            """Bitta chatga (forum bo'lsa topic ichiga) reklamani yuboradi.
+            Caption 1024 belgidan uzun bo'lsa — rasm va to'liq matnni ajratib yuboradi."""
+            nonlocal reusable_id
+            if reusable_id:
+                send_photo_arg = reusable_id
+            elif designed_bytes is not None:
+                send_photo_arg = io.BytesIO(designed_bytes)
+            elif photo:
+                send_photo_arg = photo
+            else:
+                send_photo_arg = None
+
+            if send_photo_arg is not None:
+                if too_long:
+                    # Rasm captionsiz; to'liq matn (va "Sotib olish" tugmasi) alohida xabarda
+                    sent = await context.bot.send_photo(
+                        chat_id=chat_id, photo=send_photo_arg, message_thread_id=thread_id,
+                    )
+                    sent_refs.append({'chat_id': chat_id, 'message_id': sent.message_id})
+                    sent2 = await context.bot.send_message(
+                        chat_id=chat_id, text=caption, parse_mode=caption_parse_mode,
+                        reply_markup=keyboard, message_thread_id=thread_id,
+                    )
+                    sent_refs.append({'chat_id': chat_id, 'message_id': sent2.message_id})
+                else:
                     sent = await context.bot.send_photo(
                         chat_id=chat_id, photo=send_photo_arg,
-                        caption=caption, parse_mode=caption_parse_mode, reply_markup=keyboard,
+                        caption=caption, parse_mode=caption_parse_mode,
+                        reply_markup=keyboard, message_thread_id=thread_id,
                     )
-                    # Birinchi yuborilgan rasmni keyingi kanallar uchun eslab qolamiz
-                    if reusable_id is None:
-                        try:
-                            reusable_id = sent.photo[-1].file_id
-                        except Exception:
-                            reusable_id = None
-                else:
-                    await context.bot.send_message(
-                        chat_id=chat_id, text=caption,
-                        parse_mode=caption_parse_mode, reply_markup=keyboard,
-                    )
-            except (Forbidden, BadRequest) as e:
-                # Doimiy xato: bot kanaldan chiqarilgan / huquqi yo'q / kanal o'chgan.
-                # Sotuvchi kanali bo'lsa — yetim deb belgilaymiz va sotuvchini ogohlantiramiz.
-                logging.warning(f"Channel post permanent error (product {product_id}, chat {chat_id}): {e}")
-                if owner_id is not None and db.deactivate_seller_channel(owner_id, chat_id, str(e)):
+                    sent_refs.append({'chat_id': chat_id, 'message_id': sent.message_id})
+                # Birinchi yuborilgan rasmni keyingi chatlar uchun eslab qolamiz
+                if reusable_id is None:
                     try:
-                        seller = db.get_user_by_id(owner_id)
-                        seller_tg = seller.get('telegram_id') if seller else None
-                        if seller_tg:
-                            slang = get_user_lang(seller)
-                            await context.bot.send_message(
-                                chat_id=seller_tg,
-                                text=t(slang, 'channel_deactivated_notify'),
-                                parse_mode='HTML',
-                            )
-                    except Exception as notify_err:
-                        logging.warning(f"Channel deactivation notify failed (seller {owner_id}): {notify_err}")
+                        reusable_id = sent.photo[-1].file_id
+                    except Exception:
+                        pass
+            else:
+                sent3 = await context.bot.send_message(
+                    chat_id=chat_id, text=caption, parse_mode=caption_parse_mode,
+                    reply_markup=keyboard, message_thread_id=thread_id,
+                )
+                sent_refs.append({'chat_id': chat_id, 'message_id': sent3.message_id})
+
+        for chat_id, owner_id, thread_id in targets:
+            try:
+                try:
+                    await _send_to(chat_id, thread_id)
+                except BadRequest as e:
+                    # Forum topic yopiq/o'chgan — guruhni o'chirmasdan General ga qayta urinamiz
+                    if thread_id is not None and any(m in str(e).lower() for m in TOPIC_ERR_MARKERS):
+                        logging.warning(f"Forum topic muammosi (chat {chat_id}, thread {thread_id}): {e} — General ga yuboriladi")
+                        await _send_to(chat_id, None)
+                    else:
+                        raise
+            except (Forbidden, BadRequest) as e:
+                if _is_permanent_channel_error(e):
+                    # Doimiy xato: bot kanaldan chiqarilgan / huquqi yo'q / kanal o'chgan.
+                    # Sotuvchi kanali bo'lsa — yetim deb belgilaymiz va sotuvchini ogohlantiramiz.
+                    logging.warning(f"Channel post permanent error (product {product_id}, chat {chat_id}): {e}")
+                    if owner_id is not None and db.deactivate_seller_channel(owner_id, chat_id, str(e)):
+                        try:
+                            seller = db.get_user_by_id(owner_id)
+                            seller_tg = seller.get('telegram_id') if seller else None
+                            if seller_tg:
+                                slang = get_user_lang(seller)
+                                await context.bot.send_message(
+                                    chat_id=seller_tg,
+                                    text=t(slang, 'channel_deactivated_notify'),
+                                    parse_mode='HTML',
+                                )
+                        except Exception as notify_err:
+                            logging.warning(f"Channel deactivation notify failed (seller {owner_id}): {notify_err}")
+                else:
+                    # Vaqtinchalik/konfiguratsiya xatosi (caption, file_id, topic, limit) —
+                    # guruh/kanalni O'CHIRMAYMIZ, faqat loglaymiz. Keyingi postlar baribir boradi.
+                    logging.error(f"Channel post non-permanent error (product {product_id}, chat {chat_id}): {e}")
             except Exception as e:
                 # Vaqtinchalik xato (tarmoq/limit) — kanalni o'chirmaymiz, faqat loglaymiz.
                 logging.error(f"Channel post failed (product {product_id}, chat {chat_id}): {e}")
     except Exception as e:
         logging.error(f"post_product_to_channel failed (product {product_id}): {e}")
+    return sent_refs if collect_sent else None
 
 
 # ============================================================
 # REKLAMA KO'RINISHI (preview) — kanalga joylashdan oldin tasdiqlash
 # ============================================================
-def _ad_preview_control_kb(lang):
-    """Preview ostidagi boshqaruv tugmalari."""
+def _ad_preview_control_kb(lang, length="long"):
+    """Preview ostidagi boshqaruv tugmalari. length — joriy reklama uzunligi
+    ('long'/'short'); tanlangani ✅ bilan belgilanadi."""
     rows = [[InlineKeyboardButton(t(lang, 'ad_confirm_publish'), callback_data="adprev_publish")]]
+    rows.append([InlineKeyboardButton(t(lang, 'ad_schedule_btn'), callback_data="adprev_schedule")])
+    rows.append([InlineKeyboardButton(t(lang, 'autorep_btn'), callback_data="adprev_autorep")])
     if ai_assistant.is_enabled():
+        # Sotuvchi reklama matnini UZUN yoki QISQA qilib tanlaydi (AI qayta yozadi)
+        long_lbl = ("✅ " if length == 'long' else "") + t(lang, 'ad_len_long')
+        short_lbl = ("✅ " if length == 'short' else "") + t(lang, 'ad_len_short')
+        rows.append([
+            InlineKeyboardButton(long_lbl, callback_data="adprev_long"),
+            InlineKeyboardButton(short_lbl, callback_data="adprev_short"),
+        ])
         rows.append([InlineKeyboardButton(t(lang, 'ad_regen'), callback_data="adprev_regen")])
     rows.append([InlineKeyboardButton(t(lang, 'ad_edit_text'), callback_data="adprev_edit")])
     rows.append([InlineKeyboardButton(t(lang, 'ad_skip'), callback_data="adprev_skip")])
@@ -5098,7 +7782,7 @@ async def _render_ad_preview(context, chat_id, lang, prev):
         await context.bot.send_message(chat_id=chat_id, text=caption)
     # 2) Boshqaruv paneli
     await context.bot.send_message(chat_id=chat_id, text=t(lang, 'ad_preview_question'),
-                                   reply_markup=_ad_preview_control_kb(lang))
+                                   reply_markup=_ad_preview_control_kb(lang, prev.get('length', 'long')))
 
 
 async def show_ad_preview(update, context, product_id):
@@ -5144,13 +7828,13 @@ async def show_ad_preview(update, context, product_id):
 
     context.user_data['ad_preview'] = {
         'product_id': product_id, 'caption': caption, 'parse_mode': pm,
-        'image_id': image_id, 'deep_link': deep_link,
+        'image_id': image_id, 'deep_link': deep_link, 'length': 'long',
     }
     context.user_data.pop('ad_editing_caption', None)
 
     # 2) Boshqaruv paneli
     await context.bot.send_message(chat_id=chat_id, text=t(lang, 'ad_preview_question'),
-                                   reply_markup=_ad_preview_control_kb(lang))
+                                   reply_markup=_ad_preview_control_kb(lang, 'long'))
 
 
 async def ad_preview_publish(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5196,9 +7880,33 @@ async def ad_preview_regen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     product = db.get_product_by_id(prev['product_id'])
     if product:
-        caption, pm = await _build_ad_caption(product)
+        caption, pm = await _build_ad_caption(product, length=prev.get('length', 'long'))
         prev['caption'], prev['parse_mode'] = caption, pm
         context.user_data['ad_preview'] = prev
+    await _render_ad_preview(context, update.effective_chat.id, lang, prev)
+
+
+async def ad_preview_set_length(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«📏 Uzun matn» / «✂️ Qisqa matn» — AI reklamani tanlangan uzunlikda qayta yozadi.
+    Dizayn rasm o'zgarmaydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    prev = context.user_data.get('ad_preview')
+    if not prev:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    length = 'short' if query.data == 'adprev_short' else 'long'
+    await query.answer()
+    try:
+        await query.edit_message_text(t(lang, 'ad_preview_preparing'))
+    except Exception:
+        pass
+    prev['length'] = length
+    product = db.get_product_by_id(prev['product_id'])
+    if product:
+        caption, pm = await _build_ad_caption(product, length=length)
+        prev['caption'], prev['parse_mode'] = caption, pm
+    context.user_data['ad_preview'] = prev
     await _render_ad_preview(context, update.effective_chat.id, lang, prev)
 
 
@@ -5249,6 +7957,638 @@ async def ad_preview_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                        text=t(lang, 'ad_skipped'), reply_markup=kb)
 
 
+# ============================================================
+# REJALASHTIRILGAN POST — sotuvchi/xodim mahsulotni belgilangan sana va soatda
+# avtomatik sotuvga qo'yadi (botda faollashadi + kanal/guruhlarga reklama chiqadi).
+# Belgilangan vaqtgacha mahsulot 'scheduled' holatda — botda ko'rinmaydi.
+# ============================================================
+def _sched_date_label(lang, off, d):
+    """Sana tugmasi yorlig'i: Bugun / Ertaga / DD.MM."""
+    if off == 0:
+        return t(lang, 'sched_today')
+    if off == 1:
+        return t(lang, 'sched_tomorrow')
+    return f"{d.day:02d}.{d.month:02d}"
+
+
+def _sched_date_kb(lang):
+    from datetime import datetime, timedelta
+    now = datetime.now(TZ_TASHKENT)
+    rows, row = [], []
+    for off in range(7):
+        d = now + timedelta(days=off)
+        row.append(InlineKeyboardButton(_sched_date_label(lang, off, d),
+                                        callback_data=f"schd_date_{off}"))
+        if len(row) == 2:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(t(lang, 'sched_abort_btn'), callback_data="schd_abort")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _sched_hour_kb(lang, off):
+    """Soat tugmalari (00..23). Bugun bo'lsa — o'tib ketgan soatlar chiqarilmaydi."""
+    from datetime import datetime
+    now = datetime.now(TZ_TASHKENT)
+    start = now.hour if off == 0 else 0
+    rows, row = [], []
+    for h in range(start, 24):
+        row.append(InlineKeyboardButton(f"{h:02d}", callback_data=f"schd_hour_{h}"))
+        if len(row) == 6:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    if not rows:  # bugun barcha soatlar o'tib ketgan
+        return None
+    rows.append([InlineKeyboardButton(t(lang, 'sched_abort_btn'), callback_data="schd_abort")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _sched_minute_kb(lang, off, hour):
+    """Daqiqa tugmalari (00/15/30/45). Bugun va shu soat bo'lsa — o'tgan daqiqalar yo'q."""
+    from datetime import datetime
+    now = datetime.now(TZ_TASHKENT)
+    mins = [0, 15, 30, 45]
+    if off == 0 and hour == now.hour:
+        mins = [m for m in mins if m > now.minute]
+    if not mins:
+        return None
+    row = [InlineKeyboardButton(f":{m:02d}", callback_data=f"schd_min_{m}") for m in mins]
+    rows = [row, [InlineKeyboardButton(t(lang, 'sched_abort_btn'), callback_data="schd_abort")]]
+    return InlineKeyboardMarkup(rows)
+
+
+async def ad_preview_schedule_start(update, context):
+    """«⏰ Rejalashtirish» — preview'dagi reklamani saqlab, sana tanlashni so'raydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    prev = context.user_data.get('ad_preview')
+    if not prev:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    await query.answer()
+    context.user_data['sched'] = {
+        'product_id': prev['product_id'],
+        'caption': prev['caption'],
+        'parse_mode': prev.get('parse_mode'),
+        'image_id': prev.get('image_id'),
+    }
+    try:
+        await query.edit_message_text(t(lang, 'sched_pick_date'),
+                                      reply_markup=_sched_date_kb(lang), parse_mode='HTML')
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=t(lang, 'sched_pick_date'),
+                                       reply_markup=_sched_date_kb(lang), parse_mode='HTML')
+
+
+async def sched_pick_date(update, context):
+    """schd_date_{off} — sana tanlandi, soat tanlashni so'raydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sd = context.user_data.get('sched')
+    if not sd:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    off = int(query.data.split('_')[-1])
+    sd['date_offset'] = off
+    await query.answer()
+    kb = _sched_hour_kb(lang, off)
+    if kb is None:
+        await query.answer(t(lang, 'sched_in_past'), show_alert=True)
+        await query.edit_message_text(t(lang, 'sched_pick_date'),
+                                      reply_markup=_sched_date_kb(lang), parse_mode='HTML')
+        return
+    await query.edit_message_text(t(lang, 'sched_pick_hour'), reply_markup=kb, parse_mode='HTML')
+
+
+async def sched_pick_hour(update, context):
+    """schd_hour_{HH} — soat tanlandi, daqiqa tanlashni so'raydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sd = context.user_data.get('sched')
+    if not sd:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    hour = int(query.data.split('_')[-1])
+    sd['hour'] = hour
+    await query.answer()
+    kb = _sched_minute_kb(lang, sd.get('date_offset', 0), hour)
+    if kb is None:
+        await query.answer(t(lang, 'sched_in_past'), show_alert=True)
+        await query.edit_message_text(t(lang, 'sched_pick_hour'),
+                                      reply_markup=_sched_hour_kb(lang, sd.get('date_offset', 0)),
+                                      parse_mode='HTML')
+        return
+    await query.edit_message_text(t(lang, 'sched_pick_minute', hour=f"{hour:02d}"),
+                                  reply_markup=kb, parse_mode='HTML')
+
+
+async def sched_pick_minute(update, context):
+    """schd_min_{MM} — daqiqa tanlandi: rejani yaratadi, mahsulotni yashiradi, job qo'yadi."""
+    from datetime import datetime, timedelta, timezone
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sd = context.user_data.get('sched')
+    if not sd:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    minute = int(query.data.split('_')[-1])
+    off = sd.get('date_offset', 0)
+    hour = sd.get('hour', 0)
+
+    now_local = datetime.now(TZ_TASHKENT)
+    target_local = (now_local + timedelta(days=off)).replace(
+        hour=hour, minute=minute, second=0, microsecond=0)
+    if target_local <= now_local:
+        await query.answer(t(lang, 'sched_in_past'), show_alert=True)
+        return
+    await query.answer()
+    target_utc = target_local.astimezone(timezone.utc)
+
+    product_id = sd['product_id']
+    product = db.get_product_by_id(product_id)
+    if not product:
+        await query.edit_message_text(t(lang, 'ad_preview_expired'))
+        context.user_data.pop('sched', None)
+        return
+    owner_id = product.get('seller_id')
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    created_by = user['id'] if user else owner_id
+
+    sched_id = db.create_scheduled_post(
+        product_id, owner_id, target_utc.strftime("%Y-%m-%d %H:%M:%S"),
+        created_by=created_by, caption=sd.get('caption'),
+        parse_mode=sd.get('parse_mode'), image_id=sd.get('image_id'))
+
+    # Mahsulotni yashiramiz — belgilangan vaqtgacha botda ko'rinmaydi/sotib olib bo'lmaydi
+    db.set_product_status(product_id, 'scheduled')
+
+    # Job qo'yamiz (xotirada; restartda _reschedule_scheduled_posts tiklaydi)
+    when = max(1, (target_utc - datetime.now(timezone.utc)).total_seconds())
+    context.application.job_queue.run_once(
+        scheduled_post_job, when=when,
+        data={'sched_id': sched_id}, name=f"sched_post_{sched_id}")
+
+    context.user_data.pop('sched', None)
+    context.user_data.pop('ad_preview', None)
+    when_str = target_local.strftime("%d.%m.%Y %H:%M")
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'btn_home'), callback_data="seller_panel")]])
+    await query.edit_message_text(
+        t(lang, 'sched_confirmed', name=html.escape(product.get('name') or ''), when=when_str),
+        reply_markup=kb, parse_mode='HTML')
+
+
+async def sched_abort_flow(update, context):
+    """«Bekor qilish» — rejalashtirish ustasidan chiqadi (mahsulot sotuvda qoladi)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    context.user_data.pop('sched', None)
+    await query.answer()
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'btn_home'), callback_data="seller_panel")]])
+    try:
+        await query.edit_message_text(t(lang, 'sched_aborted'), reply_markup=kb)
+    except Exception:
+        pass
+
+
+async def scheduled_post_job(context: ContextTypes.DEFAULT_TYPE):
+    """Belgilangan vaqt kelganda: mahsulotni faollashtiradi + kanal/guruhlarga reklama
+    joylaydi va sotuvchini xabardor qiladi."""
+    from datetime import datetime as _dt, timezone as _tz
+    sched_id = context.job.data.get('sched_id')
+    sp = db.get_scheduled_post(sched_id)
+    if not sp or sp.get('status') != 'pending':
+        return  # bekor qilingan yoki allaqachon bajarilgan
+    product_id = sp['product_id']
+    product = db.get_product_by_id(product_id)
+    if not product or product.get('status') in ('deleted', 'purged'):
+        db.mark_scheduled_post(sched_id, 'failed')
+        return
+
+    # 1) Mahsulotni sotuvga qo'yamiz (botda faollashadi)
+    db.set_product_status(product_id, 'active')
+
+    # 2) Kanal va barcha ulangan guruh/kanallarga reklama (preview'dagi AYNAN matn/rasm)
+    try:
+        await post_product_to_channel(
+            context, product_id,
+            caption_override=sp.get('caption'),
+            parse_mode_override=sp.get('parse_mode'),
+            image_override=sp.get('image_id'))
+    except Exception as e:
+        logging.error(f"Rejalashtirilgan post joylashda xato (sched {sched_id}): {e}")
+
+    db.mark_scheduled_post(sched_id, 'posted', posted_at=_dt.now(_tz.utc))
+
+    # 3) Sotuvchi (ega) va rejani tuzgan xodimni xabardor qilamiz
+    notified = set()
+    for uid in (sp.get('seller_id'), sp.get('created_by')):
+        if not uid or uid in notified:
+            continue
+        notified.add(uid)
+        try:
+            u = db.get_user_by_id(uid)
+            if u and u.get('telegram_id'):
+                ulang = get_user_lang(u)
+                await context.bot.send_message(
+                    chat_id=u['telegram_id'],
+                    text=t(ulang, 'sched_job_done', name=html.escape(product.get('name') or '')),
+                    parse_mode='HTML')
+        except Exception as e:
+            logging.warning(f"Rejalashtirilgan post bildirishnomasi ketmadi (user {uid}): {e}")
+
+
+async def seller_scheduled_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """«⏰ Rejalashtirilgan postlar» — kutilayotgan rejalar ro'yxati + bekor qilish."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    posts = db.get_seller_scheduled_posts(owner_id)
+
+    if not posts:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")]])
+        text = t(lang, 'scheduled_list_empty')
+        if query:
+            await query.answer()
+            await query.edit_message_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+        return
+
+    lines = [t(lang, 'scheduled_list_title')]
+    keyboard = []
+    for sp in posts:
+        when_str = fmt_datetime(sp.get('scheduled_at'))
+        lines.append(t(lang, 'scheduled_list_item',
+                       name=html.escape(sp.get('product_name') or ''), when=when_str))
+        keyboard.append([InlineKeyboardButton(
+            t(lang, 'scheduled_cancel_btn', name=(sp.get('product_name') or '')[:20]),
+            callback_data=f"schd_cancel_{sp['id']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+    text = "\n".join(lines)
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def sched_cancel_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """schd_cancel_{id} — rejani bekor qiladi: jobni o'chiradi, mahsulotni zaxiraga oladi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sched_id = int(query.data.split('_')[-1])
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    sp = db.cancel_scheduled_post(sched_id, seller_id=owner_id)
+    if not sp:
+        await query.answer(t(lang, 'scheduled_cancel_failed'), show_alert=True)
+        await seller_scheduled_posts(update, context)
+        return
+    # Jobni o'chiramiz
+    try:
+        for job in context.application.job_queue.get_jobs_by_name(f"sched_post_{sched_id}"):
+            job.schedule_removal()
+    except Exception as e:
+        logging.warning(f"Reja jobini o'chirishda xato (sched {sched_id}): {e}")
+    # Mahsulotni zaxiraga olamiz (sotuvchi keyin qo'lda faollashtira oladi)
+    try:
+        db.set_product_status(sp['product_id'], 'reserve')
+    except Exception:
+        pass
+    await query.answer(t(lang, 'scheduled_cancelled'), show_alert=True)
+    await seller_scheduled_posts(update, context)
+
+
+# ============================================================
+# AVTO QAYTA-REKLAMA (kuniga bir marta avtomatik qayta chiqarish)
+# ============================================================
+AUTOREPOST_MAX_DAYS = 30   # avto-to'xtash: shu kundan keyin o'zi to'xtaydi
+
+
+def _autorep_hour_kb(lang):
+    """Soat tugmalari (00..23) — kuniga qaysi soatda qayta chiqsin (Toshkent vaqti)."""
+    rows, row = [], []
+    for h in range(24):
+        row.append(InlineKeyboardButton(f"{h:02d}", callback_data=f"arep_hour_{h}"))
+        if len(row) == 6:
+            rows.append(row); row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton(t(lang, 'sched_abort_btn'), callback_data="arep_abort")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def ad_preview_autorepost_start(update, context):
+    """«🔁 Avto qayta-reklama» — preview'dagi reklamani saqlab, kunlik soatni so'raydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    prev = context.user_data.get('ad_preview')
+    if not prev:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    await query.answer()
+    context.user_data['autorep'] = {
+        'product_id': prev['product_id'],
+        'caption': prev['caption'],
+        'parse_mode': prev.get('parse_mode'),
+        'image_id': prev.get('image_id'),
+    }
+    try:
+        await query.edit_message_text(t(lang, 'autorep_pick_hour'),
+                                      reply_markup=_autorep_hour_kb(lang), parse_mode='HTML')
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=t(lang, 'autorep_pick_hour'),
+                                       reply_markup=_autorep_hour_kb(lang), parse_mode='HTML')
+
+
+def _schedule_autorepost_job(job_queue, repost_id, hour):
+    """Kunlik (har kuni shu soatda, Toshkent vaqti) job qo'yadi.
+    Avval shu nomli eski jobni o'chiradi (qayta yoqishda ikkilanmasin)."""
+    from datetime import time as _time
+    name = f"autorep_{repost_id}"
+    try:
+        for j in job_queue.get_jobs_by_name(name):
+            j.schedule_removal()
+    except Exception:
+        pass
+    job_queue.run_daily(
+        auto_repost_job, time=_time(hour=hour, minute=0, tzinfo=TZ_TASHKENT),
+        data={'repost_id': repost_id}, name=name)
+
+
+async def autorep_pick_hour(update, context):
+    """arep_hour_{HH} — soat tanlandi: mahsulotni HOZIR joylaydi + kunlik avto-reklamani yoqadi."""
+    from datetime import datetime, timezone, timedelta
+    query = update.callback_query
+    lang = get_lang(update, context)
+    ar = context.user_data.get('autorep')
+    if not ar:
+        await query.answer(t(lang, 'ad_preview_expired'), show_alert=True)
+        return
+    hour = int(query.data.split('_')[-1])
+    await query.answer()
+
+    product_id = ar['product_id']
+    product = db.get_product_by_id(product_id)
+    if not product:
+        await query.edit_message_text(t(lang, 'ad_preview_expired'))
+        context.user_data.pop('autorep', None)
+        return
+    owner_id = product.get('seller_id')
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    created_by = user['id'] if user else owner_id
+
+    # Mahsulot sotuvda bo'lsin (botda ko'rinsin)
+    if product.get('status') != 'active':
+        db.set_product_status(product_id, 'active')
+
+    expires = datetime.now(timezone.utc) + timedelta(days=AUTOREPOST_MAX_DAYS)
+    repost_id = db.upsert_auto_repost(
+        product_id, owner_id, hour, created_by=created_by,
+        caption=ar.get('caption'), parse_mode=ar.get('parse_mode'),
+        image_id=ar.get('image_id'), expires_at=expires)
+
+    # HOZIR birinchi marta joylaymiz va xabar id larini eslab qolamiz (keyin o'chirish uchun)
+    refs = []
+    try:
+        refs = await post_product_to_channel(
+            context, product_id, caption_override=ar.get('caption'),
+            parse_mode_override=ar.get('parse_mode'), image_override=ar.get('image_id'),
+            collect_sent=True) or []
+    except Exception as e:
+        logging.error(f"Avto qayta-reklama birinchi joylashda xato (repost {repost_id}): {e}")
+    db.update_auto_repost_run(repost_id, json.dumps(refs), last_run_at=datetime.now(timezone.utc))
+
+    # Kunlik jobni qo'yamiz (restartda _reschedule_auto_reposts tiklaydi)
+    if context.application.job_queue:
+        _schedule_autorepost_job(context.application.job_queue, repost_id, hour)
+
+    context.user_data.pop('autorep', None)
+    context.user_data.pop('ad_preview', None)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'btn_home'), callback_data="seller_panel")]])
+    await query.edit_message_text(
+        t(lang, 'autorep_confirmed', name=html.escape(product.get('name') or ''),
+          hour=f"{hour:02d}", days=AUTOREPOST_MAX_DAYS),
+        reply_markup=kb, parse_mode='HTML')
+
+
+async def autorep_abort_flow(update, context):
+    """«Bekor qilish» — avto-reklama ustasidan chiqadi (mahsulot holati o'zgarmaydi)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    context.user_data.pop('autorep', None)
+    await query.answer()
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'btn_home'), callback_data="seller_panel")]])
+    try:
+        await query.edit_message_text(t(lang, 'sched_aborted'), reply_markup=kb)
+    except Exception:
+        pass
+
+
+async def _delete_old_repost_messages(context, refs):
+    """Oldingi avto-reklama xabarlarini o'chiradi (kanal toza qolsin). Xato — e'tiborsiz."""
+    for ref in (refs or []):
+        try:
+            await context.bot.delete_message(chat_id=ref.get('chat_id'),
+                                             message_id=ref.get('message_id'))
+        except Exception:
+            pass   # 48 soatdan o'tgan / huquq yo'q — muhim emas, yangisi baribir chiqadi
+
+
+async def _notify_autorepost_stopped(context, ar, *, reason):
+    """Avto-reklama avtomatik to'xtaganda sotuvchi (va yoqgan xodim)ni xabardor qiladi."""
+    product = db.get_product_by_id(ar.get('product_id'))
+    name = (product.get('name') if product else '') or ''
+    notified = set()
+    for uid in (ar.get('seller_id'), ar.get('created_by')):
+        if not uid or uid in notified:
+            continue
+        notified.add(uid)
+        try:
+            u = db.get_user_by_id(uid)
+            if u and u.get('telegram_id'):
+                ulang = get_user_lang(u)
+                await context.bot.send_message(
+                    chat_id=u['telegram_id'],
+                    text=t(ulang, 'autorep_stopped_notify', name=html.escape(name)),
+                    parse_mode='HTML')
+        except Exception as e:
+            logging.warning(f"Avto-reklama to'xtash bildirishnomasi ketmadi (user {uid}): {e}")
+
+
+async def auto_repost_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har kuni belgilangan soatda: eski reklamani o'chirib, yangisini chiqaradi.
+    Mahsulot sotilgan/o'chirilgan/zaxira 0 yoki muddat tugagan bo'lsa — avto-to'xtaydi."""
+    from datetime import datetime, timezone
+    repost_id = context.job.data.get('repost_id')
+    ar = db.get_auto_repost(repost_id)
+    if not ar or not ar.get('is_active'):
+        context.job.schedule_removal()
+        return
+
+    # Muddat tugadimi?
+    exp = ar.get('expires_at')
+    if exp:
+        try:
+            exp_dt = datetime.strptime(str(exp)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) >= exp_dt:
+                db.deactivate_auto_repost(repost_id)
+                context.job.schedule_removal()
+                await _notify_autorepost_stopped(context, ar, reason='expired')
+                return
+        except Exception:
+            pass
+
+    product = db.get_product_by_id(ar['product_id'])
+    # Avto-to'xtash sharti: mahsulot yo'q/o'chirilgan/sotuvda emas/zaxira 0
+    sc = product.get('stock_count') if product else None
+    sold_out = (sc is not None and sc <= 0)
+    if (not product or product.get('status') != 'active' or sold_out):
+        db.deactivate_auto_repost(repost_id)
+        context.job.schedule_removal()
+        await _notify_autorepost_stopped(context, ar, reason='unavailable')
+        return
+
+    # Eskisini o'chir, yangisini chiqar (kanal toza qolsin, yangi a'zolar tepada ko'radi)
+    try:
+        old_refs = json.loads(ar.get('last_message_ids') or "[]")
+    except Exception:
+        old_refs = []
+    await _delete_old_repost_messages(context, old_refs)
+
+    refs = []
+    try:
+        refs = await post_product_to_channel(
+            context, ar['product_id'], caption_override=ar.get('caption'),
+            parse_mode_override=ar.get('parse_mode'), image_override=ar.get('image_id'),
+            collect_sent=True) or []
+    except Exception as e:
+        logging.error(f"Avto qayta-reklama joylashda xato (repost {repost_id}): {e}")
+    db.update_auto_repost_run(repost_id, json.dumps(refs), last_run_at=datetime.now(timezone.utc))
+
+
+async def seller_auto_reposts(update, context):
+    """«🔁 Avto qayta-reklamalar» — faol avto-reklamalar ro'yxati + o'chirish."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    rows = db.get_seller_auto_reposts(owner_id)
+    if not rows:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")]])
+        text = t(lang, 'autorep_list_empty')
+        if query:
+            await query.answer()
+            await query.edit_message_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+        return
+    lines = [t(lang, 'autorep_list_title')]
+    keyboard = []
+    for ar in rows:
+        lines.append(t(lang, 'autorep_list_item',
+                       name=html.escape(ar.get('product_name') or ''), hour=f"{ar.get('hour'):02d}"))
+        keyboard.append([InlineKeyboardButton(
+            t(lang, 'autorep_cancel_btn', name=(ar.get('product_name') or '')[:20]),
+            callback_data=f"arep_cancel_{ar['id']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+    text = "\n".join(lines)
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def autorep_cancel(update, context):
+    """arep_cancel_{id} — avto-reklamani o'chiradi: jobni ham olib tashlaydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    repost_id = int(query.data.split('_')[-1])
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    ar = db.cancel_auto_repost(repost_id, seller_id=owner_id)
+    if not ar:
+        await query.answer(t(lang, 'scheduled_cancel_failed'), show_alert=True)
+        await seller_auto_reposts(update, context)
+        return
+    try:
+        for job in context.application.job_queue.get_jobs_by_name(f"autorep_{repost_id}"):
+            job.schedule_removal()
+    except Exception as e:
+        logging.warning(f"Avto-reklama jobini o'chirishda xato (repost {repost_id}): {e}")
+    await query.answer(t(lang, 'autorep_cancelled'), show_alert=True)
+    await seller_auto_reposts(update, context)
+
+
+async def product_autorepost_start(update, context):
+    """arep_start_{pid} — MAVJUD (eski yoki yangi) mahsulotga avto qayta-reklama yoqish.
+    Reklama matni har safar yangidan tuziladi (override yo'q) — har chiqishda yangicha."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    pid = int(query.data.split("_")[-1])
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id']) if user else None
+    product = db.get_product_by_id(pid)
+    if not product or product.get('seller_id') != owner_id:
+        await query.answer(t(lang, 'product_not_found'), show_alert=True)
+        return
+    await query.answer()
+    # caption=None → auto_repost_job har safar post_product_to_channel'da yangi reklama tuzadi
+    context.user_data['autorep'] = {
+        'product_id': pid, 'caption': None, 'parse_mode': None, 'image_id': None,
+    }
+    try:
+        await query.edit_message_text(t(lang, 'autorep_pick_hour'),
+                                      reply_markup=_autorep_hour_kb(lang), parse_mode='HTML')
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=t(lang, 'autorep_pick_hour'),
+                                       reply_markup=_autorep_hour_kb(lang), parse_mode='HTML')
+
+
+async def product_autorepost_stop(update, context):
+    """arep_off_{pid} — mahsulot menyusidan avto qayta-reklamani o'chiradi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    pid = int(query.data.split("_")[-1])
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id']) if user else None
+    ar = db.get_auto_repost_by_product(pid)
+    if ar and ar.get('seller_id') == owner_id:
+        db.cancel_auto_repost(ar['id'], seller_id=owner_id)
+        try:
+            for job in context.application.job_queue.get_jobs_by_name(f"autorep_{ar['id']}"):
+                job.schedule_removal()
+        except Exception as e:
+            logging.warning(f"Avto-reklama jobini o'chirishda xato (repost {ar['id']}): {e}")
+        await query.answer(t(lang, 'autorep_cancelled'), show_alert=True)
+    else:
+        await query.answer()
+    await seller_product_menu(update, context, product_id=pid)
+
+
+def _reschedule_auto_reposts(job_queue):
+    """Restart/deploy'dan keyin faol avto qayta-reklamalar uchun kunlik joblarni tiklaydi."""
+    try:
+        rows = db.get_active_auto_reposts()
+        n = 0
+        for ar in rows:
+            try:
+                _schedule_autorepost_job(job_queue, ar['id'], int(ar['hour']))
+                n += 1
+            except Exception:
+                continue
+        logging.info(f"Restart: {n} ta avto qayta-reklama qayta tiklandi.")
+    except Exception as e:
+        logging.error(f"Avto qayta-reklamalarni qayta tiklash xatosi: {e}")
+
+
 async def _maybe_preview_on_reactivation(update, context, product_id, was_active):
     """Mahsulot zahiradan (reserve) sotuvga (active) qaytgan bo'lsa — reklama
     ko'rinishini ko'rsatadi. True qaytaradi (preview ko'rsatildi)."""
@@ -5264,37 +8604,103 @@ async def _maybe_preview_on_reactivation(update, context, product_id, was_active
 async def _save_product(update, context):
     """Mahsulotni DB ga saqlaydi."""
     user = db.get_user_by_telegram_id(update.effective_user.id)
+    lang = get_lang(update, context)
     photos = [p for p in context.user_data.get('product_photos', []) if p][:db.MAX_PRODUCT_IMAGES]
+    stock_count = context.user_data.get('product_stock')  # None = cheksiz
+
+    # ===== MULTI-SOTUVCHI: mahsulot do'kon EGASIga tegishli, lekin xodimga attribute qilinadi =====
+    staff = db.get_staff_by_user(user['id'])
+    is_staff = bool(staff and staff.get('staff_role') != 'owner')
+    owner_id = db.resolve_owner_id(user['id'])
+    shop = db.get_shop_for_user(user['id'])
+
+    # Nofaol (tasdiqlanmagan) xodim mahsulot joylay olmaydi
+    if is_staff and not staff.get('is_active', 1):
+        _reply = update.message.reply_text if update.message else update.callback_query.message.reply_text
+        await _reply(t(lang, 'staff_inactive_block'))
+        for k in ('product_name', 'product_price', 'product_stock', 'product_category',
+                  'product_desc', 'product_photo', 'product_photos', 'attr_templates',
+                  'attr_index', 'adding_product', 'question_mode', 'product_attrs',
+                  'attr_labels'):
+            context.user_data.pop(k, None)
+        return ConversationHandler.END
+
+    # Ruxsat tekshiruvi — xodim mahsulot qo'sha olmasa
+    if is_staff and not staff.get('perm_add_product', 1):
+        _reply = update.message.reply_text if update.message else update.callback_query.message.reply_text
+        await _reply(t(lang, 'staff_no_perm_add'))
+        for k in ('product_name', 'product_price', 'product_stock', 'product_category',
+                  'product_desc', 'product_photo', 'product_photos', 'attr_templates',
+                  'attr_index', 'adding_product', 'question_mode', 'product_attrs',
+                  'attr_labels'):
+            context.user_data.pop(k, None)
+        return ConversationHandler.END
+
+    # Moderatsiya: ega tasdig'i talab qilinsa — pending_owner holatida saqlanadi
+    needs_owner_approval = bool(is_staff and shop and shop.get('moderation') == 'owner_approve')
+
     product_id = db.create_product(
-        seller_id=user['id'],
+        seller_id=owner_id,
         name=context.user_data['product_name'],
         price=context.user_data['product_price'],
         category_id=context.user_data.get('product_category'),
         description=context.user_data.get('product_desc'),
         image_url=(photos[0] if photos else None),
+        stock_count=stock_count,
+        created_by=user['id'],
+        status=('pending_owner' if needs_owner_approval else None),
     )
 
     # Barcha rasmlarni saqlaymiz (image_url ham birinchi rasmga sinxronlanadi)
     if photos and product_id:
         db.set_product_images(product_id, photos)
 
-    # Atributlarni saqlash
+    # Atributlarni saqlash (AI yorliqlari bilan — xom kalit ko'rinmasin)
     attrs = context.user_data.pop('product_attrs', {})
+    attr_labels = context.user_data.pop('attr_labels', {})
     if attrs and product_id:
-        db.save_product_attributes(product_id, attrs)
+        db.save_product_attributes(product_id, attrs, labels=attr_labels)
 
     # State tozalash
-    for k in ('product_name', 'product_price', 'product_category',
+    for k in ('product_name', 'product_price', 'product_stock', 'product_category',
               'product_desc', 'product_photo', 'product_photos', 'attr_templates',
-              'attr_index', 'adding_product'):
+              'attr_index', 'adding_product', 'question_mode', 'attr_labels'):
         context.user_data.pop(k, None)
 
-    lang = get_lang(update, context)
+    # Moderatsiya: ega tasdig'i kerak bo'lsa — xodimga xabar, egaga tasdiq so'rovi
+    if needs_owner_approval and product_id:
+        _reply = update.message.reply_text if update.message else update.callback_query.message.reply_text
+        await _reply(t(lang, 'product_sent_for_approval'))
+        try:
+            owner = db.get_user_by_id(owner_id)
+            if owner and owner.get('telegram_id'):
+                olang = get_user_lang(owner)
+                await context.bot.send_message(
+                    chat_id=owner['telegram_id'],
+                    text=t(olang, 'owner_product_review',
+                           staff=html.escape(user.get('name') or ''),
+                           pname=html.escape(context.user_data.get('product_name') or ''),
+                           price=fmt_price(context.user_data.get('product_price') or 0)),
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(t(olang, 'btn_approve'), callback_data=f"ownappr_{product_id}")],
+                        [InlineKeyboardButton(t(olang, 'btn_reject'), callback_data=f"ownrej_{product_id}")],
+                    ])
+                )
+        except Exception as e:
+            logging.error(f"Egaga mahsulot tasdig'i xabari ketmadi: {e}")
+        return ConversationHandler.END
+
     msg = t(lang, 'product_saved')
     if photos:
         msg += t(lang, 'frag_photos_saved', n=len(photos))
     if attrs:
         msg += t(lang, 'frag_attrs_saved', n=len(attrs))
+    # Zaxira holatini ham ko'rsatamiz
+    if stock_count is None:
+        msg += t(lang, 'frag_stock_unlim')
+    else:
+        msg += t(lang, 'frag_stock_saved', n=stock_count)
 
     if update.message:
         await update.message.reply_text(msg)
@@ -5306,6 +8712,57 @@ async def _save_product(update, context):
         await show_ad_preview(update, context, product_id)
 
     return ConversationHandler.END
+
+
+async def owner_review_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Do'kon egasi xodim joylagan mahsulotni tasdiqlaydi (ownappr_) yoki rad etadi (ownrej_).
+    Faqat shu do'kon egasi amal qila oladi."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    approve = data.startswith("ownappr_")
+    product_id = int(data.split("_")[1])
+    lang = get_lang(update, context)
+    actor = db.get_user_by_telegram_id(update.effective_user.id)
+    product = db.get_product_by_id(product_id)
+    if not product:
+        await query.edit_message_text(t(lang, 'product_not_found'))
+        return
+    # Egalik tekshiruvi: actor shu mahsulot do'koni egasi (yoki admin) bo'lishi shart
+    owner_id = db.resolve_owner_id(product['seller_id'])
+    is_admin = actor and (actor.get('role') == 'admin' or update.effective_user.id == ADMIN_ID)
+    if not (actor and (actor['id'] == owner_id or actor['id'] == product['seller_id'] or is_admin)):
+        await query.edit_message_text(t(lang, 'not_your_order_plain'))
+        return
+    if product.get('status') != 'pending_owner':
+        await query.edit_message_text(t(lang, 'owner_review_already'))
+        return
+
+    staff_user = db.get_user_by_id(product.get('created_by')) if product.get('created_by') else None
+    if approve:
+        db.set_product_status(product_id, 'active')
+        await query.edit_message_text(t(lang, 'owner_approved_done', pname=html.escape(product['name'] or '')))
+        if staff_user and staff_user.get('telegram_id'):
+            try:
+                slang = get_user_lang(staff_user)
+                await context.bot.send_message(
+                    chat_id=staff_user['telegram_id'],
+                    text=t(slang, 'staff_product_approved', pname=html.escape(product['name'] or '')),
+                    parse_mode='HTML')
+            except Exception as e:
+                logging.error(f"Xodimga tasdiq xabari ketmadi: {e}")
+    else:
+        db.set_product_status(product_id, 'deleted')
+        await query.edit_message_text(t(lang, 'owner_rejected_done', pname=html.escape(product['name'] or '')))
+        if staff_user and staff_user.get('telegram_id'):
+            try:
+                slang = get_user_lang(staff_user)
+                await context.bot.send_message(
+                    chat_id=staff_user['telegram_id'],
+                    text=t(slang, 'staff_product_rejected', pname=html.escape(product['name'] or '')),
+                    parse_mode='HTML')
+            except Exception as e:
+                logging.error(f"Xodimga rad xabari ketmadi: {e}")
 
 
 async def seller_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5464,13 +8921,26 @@ async def seller_product_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
     keyboard = [[InlineKeyboardButton(t(lang, 'btn_edit'), callback_data=f"edit_start_{product_id}")]]
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_share_link'), callback_data=f"share_link_{product_id}")])
 
+    # Avto qayta-reklama tugmasi (faol/zaxiradagi mahsulot uchun) — holatga qarab
+    # yoqish yoki o'chirish. Eski (oldin joylangan) mahsulotlarga ham qo'yish mumkin.
+    def _autorep_row():
+        ar = db.get_auto_repost_by_product(product_id)
+        if ar:
+            return [InlineKeyboardButton(
+                t(lang, 'btn_autorep_off', hour=f"{ar.get('hour'):02d}"),
+                callback_data=f"arep_off_{product_id}")]
+        return [InlineKeyboardButton(t(lang, 'autorep_btn'),
+                                     callback_data=f"arep_start_{product_id}")]
+
     if status == 'active':
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_to_reserve'), callback_data=f"pstatus_reserve_{product_id}")])
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_set_stock'), callback_data=f"set_stock_{product_id}")])
+        keyboard.append(_autorep_row())
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_remove_from_sale'), callback_data=f"pstatus_deleted_{product_id}")])
     elif status == 'reserve':
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_return_to_sale'), callback_data=f"pstatus_active_{product_id}")])
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_set_stock'), callback_data=f"set_stock_{product_id}")])
+        keyboard.append(_autorep_row())
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_remove_from_sale'), callback_data=f"pstatus_deleted_{product_id}")])
     else:  # deleted
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_repost_sale'), callback_data=f"pstatus_active_{product_id}")])
@@ -5559,14 +9029,53 @@ async def toggle_product_stock(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def set_stock_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Sotuvchi zahira sonini belgilamoqchi."""
+    """Zaxira belgilash — avval tugma: '♾ Cheksiz' yoki '🔢 Aniq miqdor'."""
     query = update.callback_query
     await query.answer()
 
     product_id = int(query.data.split("_")[2])
-    context.user_data['setting_stock_for'] = product_id
+    lang = get_lang(update, context)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'btn_stock_unlimited'), callback_data=f"setstock_unlim_{product_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_stock_limited'), callback_data=f"setstock_num_{product_id}")],
+    ])
+    try:
+        await query.edit_message_text(t(lang, 'set_stock_choose'), reply_markup=kb)
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id,
+                                       text=t(lang, 'set_stock_choose'), reply_markup=kb)
 
-    await query.edit_message_text(T(update, context, 'set_stock_ask'))
+
+async def set_stock_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """'♾ Cheksiz' yoki '🔢 Aniq miqdor' tanlovini qayta ishlaydi.
+    callback: setstock_unlim_{id} / setstock_num_{id}"""
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split("_")  # setstock, unlim|num, id
+    mode = parts[1]
+    product_id = int(parts[2])
+    lang = get_lang(update, context)
+
+    if mode == "num":
+        # Aniq son — text orqali kiritiladi (text_handler -> set_stock_submit)
+        context.user_data['setting_stock_for'] = product_id
+        try:
+            await query.edit_message_text(t(lang, 'set_stock_ask'))
+        except Exception:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=t(lang, 'set_stock_ask'))
+        return
+
+    # unlim — darhol cheksiz qilib belgilaymiz
+    before = db.get_product_by_id(product_id)
+    was_active = bool(before and before.get('status') == 'active')
+    db.set_product_stock_count(product_id, None)
+    try:
+        await query.edit_message_text(t(lang, 'stock_set_unlimited'))
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=t(lang, 'stock_set_unlimited'))
+    # Zaxiradan sotuvga qaytgan bo'lsa — reklama ko'rinishini ko'rsatamiz
+    if not await _maybe_preview_on_reactivation(update, context, product_id, was_active):
+        await seller_panel(update, context)
 
 
 async def set_stock_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5625,7 +9134,12 @@ async def delete_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     product_id = int(data.split("_")[2])
-    hard_deleted = db.delete_product(product_id)
+    actor = db.get_user_by_telegram_id(update.effective_user.id)
+    hard_deleted = db.delete_product(
+        product_id,
+        deleted_by=actor['id'] if actor else None,
+        deleted_by_role=(actor.get('role') if actor else None),
+    )
 
     msg = t(lang, 'product_deleted') if hard_deleted else t(lang, 'product_deleted_kept_history')
     await query.edit_message_text(
@@ -6002,21 +9516,30 @@ async def seller_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
             seen_groups.add(gid)
             g = group_agg[gid]
+            prog = t(lang, 'row_progress_tag') if g['status'] in ('pending', 'confirmed') else ''
             keyboard.append([InlineKeyboardButton(
                 t(lang, 'seller_order_group_row', emoji=status_emoji.get(g['status'], '❓'),
-                  buyer=g['buyer'], count=g['count'], sum=fmt_price(g['sum'])),
+                  buyer=g['buyer'], count=g['count'], sum=fmt_price(g['sum']), prog=prog),
                 callback_data=f"seller_gorder_{gid}"
             )])
         else:
+            prog = t(lang, 'row_progress_tag') if order['status'] in ('pending', 'confirmed') else ''
             keyboard.append([InlineKeyboardButton(
                 t(lang, 'seller_order_row', emoji=status_emoji.get(order['status'], '❓'),
-                  buyer=order['buyer_name'], total=fmt_price(order['total_price'])),
+                  buyer=order['buyer_name'], pname=(order.get('product_name') or '—')[:22],
+                  qty=order['quantity'], total=fmt_price(order['total_price']), prog=prog),
                 callback_data=f"seller_order_{order['id']}"
             )])
         shown += 1
     keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
 
-    await _show(t(lang, 'orders_title'), reply_markup=InlineKeyboardMarkup(keyboard))
+    # Jarayondagi (yakunlanmagan) buyurtmalar sonini sarlavhada ko'rsatamiz
+    in_progress = sum(1 for o in orders if o['status'] in ('pending', 'confirmed'))
+    title = t(lang, 'orders_title')
+    if in_progress:
+        title += t(lang, 'orders_title_inprogress', n=in_progress)
+
+    await _show(title, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
 
 
 async def seller_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6391,7 +9914,7 @@ async def edit_seller_field_start(update: Update, context: ContextTypes.DEFAULT_
     if field == 'shop_address':
         await query.edit_message_text(t(lang, 'edit_field_ask_addr', label=label))
         await query.message.reply_text(
-            t(lang, 'send_location_or_text'),
+            t(lang, 'shop_location_ask'),
             reply_markup=ReplyKeyboardMarkup(
                 [[KeyboardButton(t(lang, 'send_location_button'), request_location=True)]],
                 resize_keyboard=True, one_time_keyboard=True
@@ -6415,25 +9938,49 @@ async def edit_seller_field_submit(update: Update, context: ContextTypes.DEFAULT
     field = context.user_data.get('editing_field')
     user = db.get_user_by_telegram_id(update.effective_user.id)
 
-    if field == 'shop_address' and update.message.location:
-        lat = update.message.location.latitude
-        lon = update.message.location.longitude
-        addr_text = await resolve_shop_address(lat, lon)
-        db.update_user(user['id'], shop_address=addr_text, shop_lat=lat, shop_lon=lon)
-        if addr_text:
-            await update.message.reply_text(T(update, context, 'address_detected', address=addr_text))
-    else:
-        value = update.message.text.strip()
-        field_map = {
-            'shop_name': 'shop_name',
-            'shop_address': 'shop_address',
-            'shop_landmark': 'shop_landmark',
-            'working_days': 'working_days',
-            'working_hours': 'working_hours',
-            'telegram': 'telegram_username',
-        }
-        if field in field_map:
-            db.update_user(user['id'], **{field_map[field]: value})
+    # shop_address — ikki bosqichli: 1/2 lokatsiya (xarita), 2/2 matn
+    if field == 'shop_address':
+        if update.message.location:
+            lat = update.message.location.latitude
+            lon = update.message.location.longitude
+            addr_text = await resolve_shop_address(lat, lon)
+            db.update_user(user['id'], shop_lat=lat, shop_lon=lon, shop_address=addr_text)
+            if addr_text:
+                await update.message.reply_text(T(update, context, 'address_detected', address=addr_text))
+        else:
+            # "-" yoki boshqa matn — lokatsiyani tozalaymiz
+            db.update_user(user['id'], shop_lat=None, shop_lon=None)
+        await update.message.reply_text(
+            T(update, context, 'shop_address_text_ask'),
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return EDIT_SHOP_ADDRESS_TEXT
+
+    value = update.message.text.strip()
+    field_map = {
+        'shop_name': 'shop_name',
+        'shop_landmark': 'shop_landmark',
+        'working_days': 'working_days',
+        'working_hours': 'working_hours',
+        'telegram': 'telegram_username',
+    }
+    if field in field_map:
+        db.update_user(user['id'], **{field_map[field]: value})
+
+    await update.message.reply_text(T(update, context, 'info_updated'), reply_markup=ReplyKeyboardRemove())
+    await seller_panel(update, context)
+    return ConversationHandler.END
+
+
+async def edit_shop_address_text_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manzilni tahrirlashning 2/2-bosqichi: matn. "-" bo'lsa geocode manzil saqlanadi."""
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    text = update.message.text.strip()
+    if text != '-':
+        if len(text) < 5 or len(text) > 200:
+            await update.message.reply_text(T(update, context, 'address_invalid'))
+            return EDIT_SHOP_ADDRESS_TEXT
+        db.update_user(user['id'], shop_address=text)
 
     await update.message.reply_text(T(update, context, 'info_updated'), reply_markup=ReplyKeyboardRemove())
     await seller_panel(update, context)
@@ -6547,6 +10094,18 @@ async def seller_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.edit_message_text(t(lang, 'order_not_found'))
         return
 
+    # XAVFSIZLIK: bu kartada xaridor telefoni/manzili (PII) bor — faqat egasi (sotuvchi),
+    # mahsulotni joylagan xodim yoki admin ko'rsin
+    actor = db.get_user_by_telegram_id(update.effective_user.id) if update.effective_user else None
+    is_admin_id = update.effective_user and update.effective_user.id == ADMIN_ID
+    if not (_order_actor_role(actor, order) or is_admin_id):
+        logging.warning(
+            f"Ruxsatsiz buyurtma ko'rishga urinish: user_tg={getattr(update.effective_user, 'id', None)} "
+            f"order_id={order_id} (egasi seller_id={order.get('seller_id')})"
+        )
+        await query.edit_message_text(t(lang, 'not_your_order_plain'))
+        return
+
     dlv = order.get('delivery_type', 'delivery')
     keyboard = []
     if order['status'] == 'pending':
@@ -6562,6 +10121,18 @@ async def seller_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
             keyboard.append([InlineKeyboardButton(
                 t(lang, 'btn_buyer_received'), callback_data=f"deliver_order_{order_id}"
             )])
+        # Tasdiqlangan shartnomani bekor qilish oqimi (sotuvchi tomoni)
+        cstate = order.get('cancel_state') or ''
+        if not cstate:
+            keyboard.append([InlineKeyboardButton(
+                t(lang, 'btn_request_cancel'), callback_data=f"ccl_req_{order_id}"
+            )])
+        elif cstate == 'requested' and order.get('cancel_by') == 'buyer':
+            # Xaridor bekor qilishni so'ragan — sotuvchi javob beradi
+            keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel_agree'), callback_data=f"cclagree_{order_id}")])
+            keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel_deny'), callback_data=f"ccldeny_{order_id}")])
+        elif cstate == 'disputed':
+            keyboard.append([InlineKeyboardButton(t(lang, 'btn_dispute_pending'), callback_data="noop")])
     # Kuryerga uzatish — yetkazib berish buyurtmasi hali yopilmagan bo'lsa
     if dlv == 'delivery' and order['status'] in ('pending', 'confirmed'):
         keyboard.append([InlineKeyboardButton(
@@ -6573,14 +10144,16 @@ async def seller_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
     pay_method = order.get('payment_method') or 'cash'
     pay_lbl = pay_label(pay_method, lang)
 
-    # P2P bo'lsa — sotuvchiga karta raqamini eslatamiz
+    # P2P bo'lsa — sotuvchiga karta raqamini eslatamiz (do'kon payment_mode bo'yicha)
     pay_note = ""
     if pay_method == 'p2p':
-        seller_user = db.get_user_by_telegram_id(update.effective_user.id)
-        if seller_user and seller_user.get('card_number'):
-            cnum = seller_user['card_number']
+        _prod = db.get_product_basic(order.get('product_id')) if order.get('product_id') else None
+        card = resolve_payment_card(order.get('seller_id'),
+                                    _prod.get('created_by') if _prod else None)
+        if card and card.get('card_number'):
+            cnum = card['card_number']
             masked = f"{cnum[:4]} **** **** {cnum[-4:]}"
-            ctype = CARD_TYPE_LABELS.get(seller_user.get('card_type', ''), '💳')
+            ctype = CARD_TYPE_LABELS.get(card.get('card_type', ''), '💳')
             pay_note = t(lang, 'p2p_your_card', ctype=ctype, masked=masked)
         else:
             pay_note = t(lang, 'p2p_no_card')
@@ -6609,15 +10182,32 @@ async def seller_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE
             parts.append(t(lang, 'addr_not_shown'))
         delivery_block = "".join(parts)
 
-    await query.edit_message_text(
-        t(lang, 'seller_order_body',
+    status_disp = status_label(order['status'], lang)
+    if order['status'] == 'cancelled' and order.get('cancel_reason'):
+        status_disp += t(lang, 'cancel_note_reason',
+                         reason=cancel_reason_display(order.get('cancel_reason'), lang))
+
+    body = t(lang, 'seller_order_body',
           oid=fmt_order_id(order['id']), pname=html.escape(order.get('product_name') or ''),
           qty=order['quantity'], total=fmt_price(order['total_price']),
-          status=status_label(order['status'], lang), dlv=dlv_type,
+          status=status_disp, dlv=dlv_type,
           pay=pay_lbl, paynote=pay_note,
           buyer=html.escape(order.get('buyer_name') or ''),
           phone=fmt_phone(order.get('buyer_phone')),
-          delivery=delivery_block, date=fmt_datetime(order.get('created_at'))),
+          delivery=delivery_block, date=fmt_datetime(order.get('created_at')))
+    _pb = _progress_badge(lang, order)
+    if _pb:
+        body += "\n" + _pb
+    # Pending — sotuvchi buyurtmani Buyurtmalar orqali ochsa ham jonli teskari sanoq ko'rinsin
+    if order['status'] == 'pending':
+        _cd = _countdown_line(lang, _order_deadline(order))
+        if _cd:
+            body += t(lang, 'countdown_sep') + _cd
+    _sb = _settlement_badge(lang, order)
+    if _sb:
+        body += "\n" + _sb
+    await query.edit_message_text(
+        body,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
     )
@@ -6705,6 +10295,452 @@ async def seller_forward_courier(update: Update, context: ContextTypes.DEFAULT_T
     )
 
 
+def _order_actor_role(actor, order):
+    """Buyurtma bo'yicha actor kim ekanini aniqlaydi.
+    Qaytaradi: ('owner'|'admin'|'staff'|None). 'staff' — mahsulotni joylagan xodim
+    (buyurtma tasdiqlash ruxsati va faol holatda)."""
+    if not actor or not order:
+        return None
+    if actor.get('role') == 'admin':
+        return 'admin'
+    if actor.get('id') == order.get('seller_id'):
+        return 'owner'
+    prod = db.get_product_basic(order.get('product_id')) if order.get('product_id') else None
+    if prod and prod.get('created_by') == actor.get('id'):
+        staff_rec = db.get_staff_by_user(actor['id'])
+        if staff_rec and staff_rec.get('perm_confirm_orders', 1) and staff_rec.get('is_active', 1):
+            return 'staff'
+    return None
+
+
+async def _ensure_order_seller(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id):
+    """Joriy foydalanuvchi shu buyurtmaning sotuvchisi (yoki admin) ekanligini tasdiqlaydi.
+    To'g'ri bo'lsa True; aks holda foydalanuvchini ogohlantirib False qaytaradi.
+    Buyurtma bo'yicha amallar va xaridor PII'sini begonalardan himoyalaydi."""
+    lang = get_lang(update, context)
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    order = db.get_order_by_id(order_id)
+    if not order:
+        if chat_id:
+            await context.bot.send_message(chat_id, t(lang, 'order_not_found'))
+        return False
+    actor = db.get_user_by_telegram_id(update.effective_user.id) if update.effective_user else None
+    is_admin_id = update.effective_user and update.effective_user.id == ADMIN_ID
+    role = _order_actor_role(actor, order)
+    if not (role or is_admin_id):
+        logging.warning(
+            f"Ruxsatsiz buyurtma amaliga urinish: user_tg={getattr(update.effective_user, 'id', None)} "
+            f"order_id={order_id} (egasi seller_id={order.get('seller_id')})"
+        )
+        if chat_id:
+            await context.bot.send_message(chat_id, t(lang, 'not_your_order_plain'))
+        return False
+    return True
+
+
+# ============================================================
+# TO'LOV HOLATI (settlement) — berishda: To'liq to'landi / Qarzga / Bo'lib + qarz daftari
+# ============================================================
+def _settlement_menu_kb(lang, scope, key):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'setl_paid_btn'), callback_data=f"setl_paid_{scope}_{key}")],
+        [InlineKeyboardButton(t(lang, 'setl_debt_btn'), callback_data=f"setl_debt_{scope}_{key}")],
+        [InlineKeyboardButton(t(lang, 'setl_inst_btn'), callback_data=f"setl_inst_{scope}_{key}")],
+    ])
+
+
+def _settle_amount_kb(lang):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'setl_amt_zero'), callback_data="setlamt_zero")],
+        [InlineKeyboardButton(t(lang, 'setl_amt_half'), callback_data="setlamt_half")],
+        [InlineKeyboardButton(t(lang, 'setl_amt_custom'), callback_data="setlamt_custom")],
+    ])
+
+
+async def _ask_settlement(update, context, scope, key, total):
+    """«Berildi» bosilganda — to'lov holatini so'raydi (delivered hali qo'yilmaydi)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    context.user_data['settle'] = {'scope': scope, 'key': str(key), 'total': float(total or 0)}
+    context.user_data.pop('awaiting_settle_amount', None)
+    txt = t(lang, 'setl_ask', total=fmt_price(total or 0))
+    try:
+        await query.edit_message_text(txt, reply_markup=_settlement_menu_kb(lang, scope, key), parse_mode='HTML')
+    except Exception:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=txt,
+                                       reply_markup=_settlement_menu_kb(lang, scope, key), parse_mode='HTML')
+
+
+async def settle_choice(update, context):
+    """setl_paid_/setl_debt_/setl_inst_ — to'lov holati tanlovi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sd = context.user_data.get('settle')
+    if not sd:
+        await query.answer(t(lang, 'setl_expired'), show_alert=True)
+        return
+    kind = query.data.split('_')[1]  # paid / debt / inst
+    await query.answer()
+    if kind == 'paid':
+        await _finalize_settlement(update, context, settlement_type='paid', paid=sd['total'])
+        return
+    sd['type'] = 'debt' if kind == 'debt' else 'installment'
+    context.user_data['settle'] = sd
+    await query.edit_message_text(
+        t(lang, 'setl_amount_ask', total=fmt_price(sd['total'])),
+        reply_markup=_settle_amount_kb(lang), parse_mode='HTML')
+
+
+async def settle_amount_choice(update, context):
+    """setlamt_zero/half/custom — qarz/bo'lib uchun hozir to'langan summa."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    sd = context.user_data.get('settle')
+    if not sd:
+        await query.answer(t(lang, 'setl_expired'), show_alert=True)
+        return
+    choice = query.data.replace('setlamt_', '')
+    if choice == 'custom':
+        await query.answer()
+        context.user_data['awaiting_settle_amount'] = True
+        await query.edit_message_text(t(lang, 'setl_custom_ask', total=fmt_price(sd['total'])), parse_mode='HTML')
+        return
+    await query.answer()
+    paid = 0.0 if choice == 'zero' else round(sd['total'] / 2.0)
+    await _finalize_settlement(update, context, settlement_type=sd.get('type', 'debt'), paid=paid)
+
+
+async def settle_custom_amount_input(update, context):
+    """Sotuvchi qo'lda to'langan summani yozdi (custom)."""
+    lang = get_lang(update, context)
+    sd = context.user_data.get('settle')
+    context.user_data.pop('awaiting_settle_amount', None)
+    if not sd:
+        await update.message.reply_text(t(lang, 'setl_expired'))
+        return
+    raw = (update.message.text or '').strip().replace(' ', '').replace(' ', '')
+    try:
+        paid = float(raw)
+    except ValueError:
+        context.user_data['awaiting_settle_amount'] = True
+        await update.message.reply_text(t(lang, 'setl_amount_invalid'))
+        return
+    await _finalize_settlement(update, context, settlement_type=sd.get('type', 'debt'),
+                               paid=paid, via_message=True)
+
+
+async def _finalize_settlement(update, context, settlement_type, paid, via_message=False):
+    """Berishni yakunlaydi: delivered + settlement saqlash + xaridorga bildirishnoma."""
+    lang = get_lang(update, context)
+    sd = context.user_data.get('settle') or {}
+    scope = sd.get('scope', 'o')
+    key = sd.get('key')
+    total = float(sd.get('total') or 0)
+    paid = max(0.0, min(float(paid or 0), total))
+    due = round(total - paid, 2)
+    eff_type = 'paid' if due <= 0 else settlement_type
+    chat_id = update.effective_chat.id
+
+    if scope == 'g':
+        orders = db.get_orders_in_group(key)
+        for o in orders:
+            db.update_order_status(o['id'], 'delivered')
+        db.set_group_settlement(key, eff_type, paid, due)
+        rep = orders[0] if orders else None
+        if rep:
+            buyer_tg = rep.get('buyer_tg')
+            buyer = db.get_user_by_id(rep['buyer_id'])
+            seller = db.get_user_by_id(rep['seller_id'])
+            disp = fmt_order_id(int(key))
+            is_pickup = rep.get('delivery_type') == 'pickup'
+            if buyer_tg:
+                blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+                txt = t(blang, 'grp_delivered_pickup' if is_pickup else 'grp_delivered_delivery',
+                        oid=disp, n=len(orders))
+                if due > 0:
+                    txt += t(blang, 'buyer_debt_notify',
+                             shop=html.escape((seller.get('shop_name') or seller.get('name') or '') if seller else ''),
+                             due=fmt_price(due))
+                kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                    t(blang, 'btn_leave_rating'), callback_data=f"order_rate_{rep['id']}")]])
+                try:
+                    await context.bot.send_message(chat_id=buyer_tg, text=txt, reply_markup=kb, parse_mode='HTML')
+                except Exception:
+                    pass
+    else:
+        order = db.get_order_by_id(key)
+        if not order:
+            context.user_data.pop('settle', None)
+            return
+        db.update_order_status(int(key), 'delivered')
+        db.set_order_settlement(int(key), eff_type, paid, due)
+        buyer_tg = order.get('buyer_tg')
+        buyer = db.get_user_by_id(order['buyer_id'])
+        seller = db.get_user_by_id(order['seller_id'])
+        disp = fmt_order_id(int(key))
+        pname = html.escape(order.get('product_name') or '')
+        is_pickup = order.get('delivery_type') == 'pickup'
+        if buyer_tg:
+            blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+            txt = t(blang, 'order_delivered_pickup' if is_pickup else 'order_delivered_delivery',
+                    oid=disp, pname=pname)
+            if due > 0:
+                txt += t(blang, 'buyer_debt_notify',
+                         shop=html.escape((seller.get('shop_name') or seller.get('name') or '') if seller else ''),
+                         due=fmt_price(due))
+            kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(blang, 'btn_leave_rating'), callback_data=f"order_rate_{key}")]])
+            try:
+                await context.bot.send_message(chat_id=buyer_tg, text=txt, reply_markup=kb, parse_mode='HTML')
+            except Exception:
+                pass
+
+    context.user_data.pop('settle', None)
+    if eff_type == 'paid':
+        conf = t(lang, 'setl_done_paid')
+    else:
+        conf = t(lang, 'setl_done_debt', paid=fmt_price(paid), due=fmt_price(due))
+    back_cb = f"seller_gorder_{key}" if scope == 'g' else f"seller_order_{key}"
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=back_cb)]])
+    if via_message:
+        await update.message.reply_text(conf, reply_markup=kb, parse_mode='HTML')
+    else:
+        try:
+            await update.callback_query.edit_message_text(conf, reply_markup=kb, parse_mode='HTML')
+        except Exception:
+            await context.bot.send_message(chat_id=chat_id, text=conf, reply_markup=kb, parse_mode='HTML')
+
+
+def _progress_badge(lang, order):
+    """Yakunlanmagan (jarayondagi) buyurtma uchun belgi. delivered/cancelled da bo'sh
+    qaytadi — jarayon tugagach belgi yo'qoladi. Xaridor «oldim» bosgan bo'lsa, sotuvchiga
+    to'lovni yakunlash kerakligini alohida ta'kidlaymiz."""
+    status = order.get('status')
+    if status not in ('pending', 'confirmed'):
+        return ""
+    if status == 'confirmed' and order.get('buyer_received'):
+        return t(lang, 'badge_awaiting_settlement')
+    return t(lang, 'badge_in_progress')
+
+
+def _settlement_badge(lang, order):
+    """Order detalida ko'rsatiladigan to'lov holati satri (delivered buyurtmalar uchun)."""
+    st = order.get('settlement_type')
+    if not st:
+        return ""
+    due = float(order.get('amount_due') or 0)
+    paid = float(order.get('amount_paid') or 0)
+    if st == 'paid' or due <= 0:
+        return t(lang, 'badge_paid')
+    label = t(lang, 'badge_debt') if st == 'debt' else t(lang, 'badge_installment')
+    return t(lang, 'badge_due', label=label, due=fmt_price(due), paid=fmt_price(paid))
+
+
+# ===== QARZ DAFTARI EKRANI (sotuvchi + xaridor) =====
+async def seller_debts(update, context):
+    """Sotuvchi panelidagi «Qarzlar» — kim qancha qarzdor (jamlangan)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    debts = db.get_seller_open_debts(owner_id)
+    total = db.get_seller_debt_total(owner_id)
+    if not debts:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")]])
+        text = t(lang, 'debts_empty')
+        if query:
+            await query.answer(); await query.edit_message_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+        return
+    lines = [t(lang, 'debts_title', total=fmt_price(total))]
+    keyboard = []
+    for d in debts:
+        lines.append(t(lang, 'debts_buyer_line',
+                       name=html.escape(d.get('buyer_name') or '—'),
+                       due=fmt_price(d['total_due']), cnt=d['cnt']))
+        keyboard.append([InlineKeyboardButton(
+            t(lang, 'debts_buyer_btn', name=(d.get('buyer_name') or '—')[:18], due=fmt_price(d['total_due'])),
+            callback_data=f"debtbuyer_{d['buyer_id']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+    text = "\n".join(lines)
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def debt_buyer_detail(update, context, buyer_id=None):
+    """debtbuyer_{buyer_id} — bir xaridorning qarzli buyurtmalari + to'lov tugmalari."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    if query and buyer_id is None:
+        await query.answer()
+        buyer_id = int(query.data.split('_')[1])
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id'])
+    orders = db.get_seller_debt_orders(owner_id, buyer_id)
+    buyer = db.get_user_by_id(buyer_id)
+    bname = html.escape((buyer.get('name') if buyer else '') or '—')
+    if not orders:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="seller_debts")]])
+        txt = t(lang, 'debts_buyer_clear', name=bname)
+        if query:
+            await query.edit_message_text(txt, reply_markup=kb, parse_mode='HTML')
+        else:
+            await update.message.reply_text(txt, reply_markup=kb, parse_mode='HTML')
+        return
+    total_due = sum(float(o['amount_due']) for o in orders)
+    bphone = (buyer.get('phone_number') if buyer else '') or '—'
+    lines = [t(lang, 'debts_buyer_header', name=bname, total=fmt_price(total_due),
+               phone=fmt_phone(bphone), cnt=len(orders))]
+    keyboard = []
+    for o in orders:
+        disp = fmt_order_id(int(o.get('order_group_id') or o['id']))
+        kind = t(lang, 'badge_installment') if o.get('settlement_type') == 'installment' else t(lang, 'badge_debt')
+        lines.append(t(lang, 'debts_order_row', oid=disp,
+                       pname=html.escape(o.get('product_name') or '—'),
+                       kind=kind,
+                       total=fmt_price(o.get('total_price') or 0),
+                       paid=fmt_price(o.get('amount_paid') or 0),
+                       due=fmt_price(o['amount_due']),
+                       date=fmt_datetime(o.get('created_at'))))
+        keyboard.append([
+            InlineKeyboardButton(t(lang, 'debt_pay_full_btn'), callback_data=f"debtpayfull_{o['id']}"),
+            InlineKeyboardButton(t(lang, 'debt_pay_part_btn'), callback_data=f"debtpaypart_{o['id']}"),
+        ])
+    # Xaridor bilan bog'lanish (Telegram) — qarzni eslatish uchun
+    if buyer and buyer.get('telegram_username'):
+        keyboard.append([InlineKeyboardButton(
+            t(lang, 'btn_tg_at', u=buyer['telegram_username']),
+            url=f"https://t.me/{buyer['telegram_username']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_debts")])
+    text = "\n".join(lines)
+    if query:
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def _debt_order_guard(update, order_id):
+    """Buyurtma shu sotuvchiникими — tekshiradi. order (dict) yoki None qaytaradi."""
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    owner_id = db.resolve_owner_id(user['id']) if user else None
+    order = db.get_order_by_id(order_id)
+    if not order or owner_id is None or order.get('seller_id') != owner_id:
+        return None
+    return order
+
+
+async def debt_pay_full(update, context):
+    """debtpayfull_{order_id} — qarzni to'liq yopadi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    order_id = int(query.data.split('_')[1])
+    order = await _debt_order_guard(update, order_id)
+    if not order:
+        await query.answer(t(lang, 'not_your_order_toast'), show_alert=True)
+        return
+    due = float(order.get('amount_due') or 0)
+    db.record_debt_payment(order_id, due)
+    await query.answer(t(lang, 'debt_settled_toast'), show_alert=True)
+    await _notify_buyer_debt_paid(context, order, due, remaining=0)
+    await debt_buyer_detail(update, context, buyer_id=order['buyer_id'])
+
+
+async def debt_pay_part_start(update, context):
+    """debtpaypart_{order_id} — qisman to'lov summasini so'raydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    order_id = int(query.data.split('_')[1])
+    order = await _debt_order_guard(update, order_id)
+    if not order:
+        await query.answer(t(lang, 'not_your_order_toast'), show_alert=True)
+        return
+    await query.answer()
+    context.user_data['awaiting_debt_payment'] = {
+        'order_id': order_id, 'buyer_id': order['buyer_id'], 'due': float(order.get('amount_due') or 0)}
+    await query.edit_message_text(t(lang, 'debt_part_ask', due=fmt_price(order.get('amount_due') or 0)),
+                                  parse_mode='HTML')
+
+
+async def debt_payment_input(update, context):
+    """Qisman to'lov summasi (matn) — qarzga qo'shadi."""
+    lang = get_lang(update, context)
+    info = context.user_data.get('awaiting_debt_payment')
+    context.user_data.pop('awaiting_debt_payment', None)
+    if not info:
+        return
+    raw = (update.message.text or '').strip().replace(' ', '').replace(' ', '')
+    try:
+        pay = float(raw)
+    except ValueError:
+        context.user_data['awaiting_debt_payment'] = info
+        await update.message.reply_text(t(lang, 'setl_amount_invalid'))
+        return
+    order = db.get_order_by_id(info['order_id'])
+    if not order:
+        return
+    pay = max(0.0, min(pay, float(order.get('amount_due') or 0)))
+    remaining = db.record_debt_payment(info['order_id'], pay)
+    await _notify_buyer_debt_paid(context, order, pay, remaining=remaining or 0)
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'),
+                              callback_data=f"debtbuyer_{info['buyer_id']}")]])
+    if (remaining or 0) <= 0:
+        await update.message.reply_text(t(lang, 'debt_settled_msg'), reply_markup=kb, parse_mode='HTML')
+    else:
+        await update.message.reply_text(
+            t(lang, 'debt_part_done', paid=fmt_price(pay), due=fmt_price(remaining)),
+            reply_markup=kb, parse_mode='HTML')
+
+
+async def _notify_buyer_debt_paid(context, order, amount, remaining):
+    """Xaridorga qarz to'lovi qayd etilgani haqida xabar."""
+    try:
+        buyer = db.get_user_by_id(order['buyer_id'])
+        if not buyer or not buyer.get('telegram_id'):
+            return
+        seller = db.get_user_by_id(order['seller_id'])
+        blang = get_user_lang(buyer)
+        shop = html.escape((seller.get('shop_name') or seller.get('name') or '') if seller else '')
+        if (remaining or 0) <= 0:
+            txt = t(blang, 'buyer_debt_cleared', shop=shop)
+        else:
+            txt = t(blang, 'buyer_debt_partial', shop=shop, paid=fmt_price(amount), due=fmt_price(remaining))
+        await context.bot.send_message(chat_id=buyer['telegram_id'], text=txt, parse_mode='HTML')
+    except Exception as e:
+        logging.warning(f"Xaridorga qarz to'lovi xabari ketmadi: {e}")
+
+
+async def buyer_debts(update, context):
+    """Xaridor paneli — «Mening qarzlarim» (kimga qancha qarzdorman)."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    debts = db.get_buyer_open_debts(user['id'])
+    if not debts:
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")]])
+        text = t(lang, 'my_debts_empty')
+        if query:
+            await query.answer(); await query.edit_message_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+        return
+    total = sum(float(d['total_due']) for d in debts)
+    lines = [t(lang, 'my_debts_title', total=fmt_price(total))]
+    for d in debts:
+        shop = html.escape(d.get('shop_name') or d.get('seller_name') or '—')
+        lines.append(t(lang, 'my_debts_row', shop=shop, due=fmt_price(d['total_due'])))
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="buyer_panel")]])
+    text = "\n".join(lines)
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, reply_markup=kb, parse_mode='HTML')
+    else:
+        await update.message.reply_text(text, reply_markup=kb, parse_mode='HTML')
+
+
 async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -6715,27 +10751,41 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     order_id = int(parts[2])
     action = parts[0]  # confirm / cancel / deliver
 
+    # XAVFSIZLIK: faqat shu buyurtmaning sotuvchisi (yoki admin) holatini o'zgartira oladi.
+    # Telegram callback'lari soxtalashtirilmasa-da, egalikni server tomonda tasdiqlaymiz —
+    # begona buyurtmani tasdiqlash/bekor qilish va xaridor ma'lumotlarini ko'rish oldi olinadi.
+    if not await _ensure_order_seller(update, context, order_id):
+        return
+
+    # BERISH: to'g'ridan-to'g'ri 'delivered' qilmaymiz — avval to'lov holatini so'raymiz
+    # (to'liq to'landi / qarzga / bo'lib to'lashga). Yakuniy holatni settlement oqimi qo'yadi.
+    if action == 'deliver':
+        order = db.get_order_by_id(order_id)
+        if order:
+            await _ask_settlement(update, context, scope='o', key=order_id,
+                                  total=float(order.get('total_price') or 0))
+        return
+
     status_map = {'confirm': 'confirmed', 'cancel': 'cancelled', 'deliver': 'delivered'}
     new_status = status_map.get(action)
     if new_status:
-        # Avtomatik bekor qilish taymerini va eslatmani o'chiramiz
+        # Jonli sanoq + avtomatik bekor taymerini o'chiramiz
         if new_status in ('confirmed', 'cancelled') and context.application.job_queue:
-            jobs = context.application.job_queue.get_jobs_by_name(f"auto_cancel_{order_id}")
-            for job in jobs:
-                job.schedule_removal()
-            jobs = context.application.job_queue.get_jobs_by_name(f"reminder_{order_id}")
-            for job in jobs:
-                job.schedule_removal()
+            for jn in (f"countdown_order_{order_id}", f"auto_cancel_{order_id}", f"reminder_{order_id}"):
+                for job in context.application.job_queue.get_jobs_by_name(jn):
+                    job.schedule_removal()
 
         # Stock kamaytirish — faqat tasdiqlanganda
         if new_status == 'confirmed':
             try:
                 order_for_stock = db.get_order_by_id(order_id)
                 if order_for_stock:
-                    db.decrement_stock_on_confirm(
+                    left = db.decrement_stock_on_confirm(
                         order_for_stock['product_id'],
                         order_for_stock['quantity']
                     )
+                    if left == 0:
+                        await _notify_seller_sold_out(context, order_for_stock['product_id'])
             except Exception as e:
                 logging.error(f"Stock kamaytirish xatosi: {e}")
 
@@ -7061,19 +11111,19 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     total_users = len(db.get_all_users())
-    total_products = len(db.get_all_products())
+    total_products = len(db.get_all_products(include_hidden=False))
     total_orders = len(db.get_all_orders())
     pending_requests = len(db.get_pending_seller_requests())
+    dispute_count = len(db.get_disputed_orders())
 
+    # Tugmalar bo'limlarga guruhlangan. Harakat talab qiladigan «Sotuvchi so'rovlari»
+    # va «Nizolar» (sonli) — tepada, ko'rinib turishi uchun.
     keyboard = [
         [InlineKeyboardButton(t(lang, 'btn_seller_requests_n', n=pending_requests), callback_data="admin_seller_requests")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_users'), callback_data="admin_users")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_products'), callback_data="admin_products")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_orders'), callback_data="admin_orders")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_channels'), callback_data="admin_channels")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_stats'), callback_data="admin_stats")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_broadcast'), callback_data="admin_broadcast")],
-        [InlineKeyboardButton(t(lang, 'btn_admin_settings'), callback_data="admin_settings")],
+        [InlineKeyboardButton(t(lang, 'btn_disputes_n', n=dispute_count), callback_data="admin_disputes")],
+        [InlineKeyboardButton(t(lang, 'agrp_people'), callback_data="admingrp_people")],
+        [InlineKeyboardButton(t(lang, 'agrp_catalog'), callback_data="admingrp_catalog")],
+        [InlineKeyboardButton(t(lang, 'agrp_manage'), callback_data="admingrp_manage")],
         [InlineKeyboardButton(t(lang, 'btn_ai_assistant'), callback_data="ai_assistant")],
     ]
 
@@ -7093,6 +11143,154 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+# ============================================================
+# ADMIN PANELI — BO'LIM (guruh) MENYULARI
+# ============================================================
+async def _show_admin_group(update, context, title, kb):
+    """Admin bo'lim ekranini ko'rsatadi (Orqaga — admin panelga)."""
+    kb = kb + [[InlineKeyboardButton(t(get_lang(update, context), 'back'), callback_data="admin_panel")]]
+    query = update.callback_query
+    markup = InlineKeyboardMarkup(kb)
+    if query:
+        await query.answer()
+        try:
+            await query.edit_message_text(title, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=title,
+                                           reply_markup=markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(title, reply_markup=markup, parse_mode='HTML')
+
+
+async def admin_group_people(update, context):
+    """👥 Odamlar — foydalanuvchilar, do'konlar, kanallar."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_admin_users'), callback_data="admin_users")],
+        [InlineKeyboardButton(t(lang, 'btn_admin_shops'), callback_data="admin_shops")],
+        [InlineKeyboardButton(t(lang, 'btn_admin_channels'), callback_data="admin_channels")],
+    ]
+    await _show_admin_group(update, context, t(lang, 'agrp_people_title'), kb)
+
+
+async def admin_group_catalog(update, context):
+    """📦 Katalog — mahsulotlar, o'chirilganlar, buyurtmalar."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_admin_products'), callback_data="admin_products")],
+        [InlineKeyboardButton(t(lang, 'btn_deleted_products'), callback_data="admin_deleted_products")],
+        [InlineKeyboardButton(t(lang, 'btn_admin_orders'), callback_data="admin_orders")],
+    ]
+    await _show_admin_group(update, context, t(lang, 'agrp_catalog_title'), kb)
+
+
+async def admin_group_manage(update, context):
+    """🛠 Boshqaruv — statistika, ommaviy xabar, sozlamalar."""
+    lang = get_lang(update, context)
+    kb = [
+        [InlineKeyboardButton(t(lang, 'btn_admin_stats'), callback_data="admin_stats")],
+        [InlineKeyboardButton(t(lang, 'btn_admin_broadcast'), callback_data="admin_broadcast")],
+        [InlineKeyboardButton(t(lang, 'btn_admin_settings'), callback_data="admin_settings")],
+    ]
+    await _show_admin_group(update, context, t(lang, 'agrp_manage_title'), kb)
+
+
+async def admin_shops(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — barcha do'konlar ro'yxati."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    shops = db.get_all_shops()
+    if not shops:
+        await query.edit_message_text(
+            t(lang, 'admin_shops_empty'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")]]))
+        return
+    kb = []
+    for s in shops[:30]:
+        nm = s.get('name') or s.get('owner_name') or '—'
+        kb.append([InlineKeyboardButton(f"🏪 {nm[:30]} · 👥{s.get('staff_count', 0)}",
+                                        callback_data=f"admin_shop_{s['id']}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")])
+    await query.edit_message_text(t(lang, 'admin_shops_header', n=len(shops)),
+                                  reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def admin_shop_detail(update: Update, context: ContextTypes.DEFAULT_TYPE, shop_id=None):
+    """Admin — bitta do'kon: xodimlar daraxti, moderatsiya, faollashtirish."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    if shop_id is None:
+        shop_id = int(query.data.split("_")[2])
+    shop = db.get_shop_by_id(shop_id)
+    if not shop:
+        await query.answer(t(lang, 'shop_not_found'), show_alert=True)
+        return
+    owner = db.get_user_by_id(shop['owner_user_id'])
+    staff_all = db.get_shop_staff(shop_id)
+    perf = {r['user_id']: r for r in db.get_shop_staff_performance(shop_id)}
+    lines = [t(lang, 'admin_shop_title', name=html.escape(shop.get('name') or '—'),
+               owner=html.escape((owner.get('name') if owner else '') or '—'),
+               mod=t(lang, 'mod_owner' if shop.get('moderation') == 'owner_approve' else 'mod_direct'),
+               paymode=t(lang, 'paymode_shop' if (shop.get('payment_mode') or 'shop') == 'shop' else 'paymode_staff'))]
+    for s in staff_all:
+        mark = "👑" if s.get('staff_role') == 'owner' else ("✅" if s.get('is_active') else "⏳")
+        pr = perf.get(s['user_id'], {})
+        lines.append(t(lang, 'admin_shop_staff_row',
+                       mark=mark, name=html.escape(s.get('name') or '—'),
+                       dept=html.escape(s.get('department') or '—'),
+                       revenue=fmt_price(pr.get('revenue', 0))))
+    kb = [[InlineKeyboardButton(t(lang, 'btn_admin_toggle_mod'), callback_data=f"admin_shopmod_{shop_id}")]]
+    # Nofaol xodimlarni tezkor faollashtirish
+    for s in staff_all:
+        if s.get('staff_role') != 'owner' and not s.get('is_active'):
+            kb.append([InlineKeyboardButton(t(lang, 'btn_admin_activate_staff', name=(s.get('name') or '—')[:20]),
+                                            callback_data=f"admin_stafftog_{s['id']}_{shop_id}")])
+    kb.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_shops")])
+    await query.edit_message_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def admin_shop_toggle_mod(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — do'kon moderatsiya siyosatini almashtiradi (direct ↔ owner_approve)."""
+    query = update.callback_query
+    await query.answer()
+    shop_id = int(query.data.split("_")[2])
+    shop = db.get_shop_by_id(shop_id)
+    if not shop:
+        return
+    new_mod = 'owner_approve' if (shop.get('moderation') or 'direct') == 'direct' else 'direct'
+    db.update_shop(shop_id, moderation=new_mod)
+    # Detalni qayta ko'rsatamiz
+    await admin_shop_detail(update, context, shop_id=shop_id)
+
+
+async def admin_staff_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — xodimni faollashtiradi/muzlatadi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    parts = query.data.split("_")
+    staff_id = int(parts[2])
+    shop_id = int(parts[3])
+    target = next((s for s in db.get_shop_staff(shop_id, include_owner=False) if s['id'] == staff_id), None)
+    if not target:
+        await query.answer(t(lang, 'staff_not_found'), show_alert=True)
+        return
+    new_active = 0 if target.get('is_active') else 1
+    db.set_staff_active(staff_id, new_active)
+    try:
+        su = db.get_user_by_id(target['user_id'])
+        if su and su.get('telegram_id'):
+            slang = get_user_lang(su)
+            await context.bot.send_message(
+                chat_id=su['telegram_id'],
+                text=t(slang, 'staff_you_activated' if new_active else 'staff_you_frozen'))
+    except Exception as e:
+        logging.error(f"Admin: xodimga holat xabari ketmadi: {e}")
+    await admin_shop_detail(update, context, shop_id=shop_id)
 
 
 async def admin_seller_requests(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -7189,6 +11387,27 @@ async def approve_seller(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Foydalanuvchini tasdiqlash
     db.update_user(user_id, is_approved=1, role='seller')
+
+    # MULTI-SOTUVCHI: tasdiqlangan sotuvchida do'kon bo'lishini kafolatlaymiz (idempotent).
+    # Bu xodim sifatida boshqa do'konga biriktirilmaganlar uchun — o'z do'konini yaratadi.
+    try:
+        if not db.get_staff_by_user(user_id):
+            db.create_shop(
+                user_id,
+                name=user.get('shop_name'),
+                address=user.get('shop_address'),
+                landmark=user.get('shop_landmark'),
+                lat=user.get('shop_lat'),
+                lon=user.get('shop_lon'),
+                working_days=user.get('working_days'),
+                working_hours=user.get('working_hours'),
+                region_id=user.get('region_id'),
+                card_number=user.get('card_number'),
+                card_owner=user.get('card_owner'),
+                card_type=user.get('card_type'),
+            )
+    except Exception as e:
+        logging.error(f"approve_seller: do'kon yaratilmadi: {e}")
 
     # seller_requests jadvalini yangilash
     req = db.get_seller_request_by_user(user_id)
@@ -7371,6 +11590,40 @@ async def admin_user_search_result(update: Update, context: ContextTypes.DEFAULT
     )
 
 
+def _profile_missing_fields(user, lang):
+    """Foydalanuvchi profilidagi to'ldirilmagan muhim maydonlar ro'yxati (til bo'yicha label).
+    Sotuvchi uchun do'kon maydonlari ham tekshiriladi."""
+    ru = (lang == 'ru')
+    def empty(v):
+        return v is None or (isinstance(v, str) and not v.strip())
+    missing = []
+    # --- Umumiy ---
+    if empty(user.get('name')):
+        missing.append("Имя" if ru else "Ism")
+    if empty(user.get('telegram_username')):
+        missing.append("Username (@...)" if ru else "Username (@...)")
+    if empty(user.get('phone_number')):
+        missing.append("Номер телефона" if ru else "Telefon raqami")
+    if user.get('region_id') is None:
+        missing.append("Регион (область/район)" if ru else "Hudud (viloyat/tuman)")
+    # --- Sotuvchi (do'koni bor) ---
+    is_seller = bool(user.get('shop_name')) or user.get('role') == 'seller'
+    if is_seller:
+        if empty(user.get('shop_name')):
+            missing.append("Название магазина" if ru else "Do'kon nomi")
+        if empty(user.get('shop_address')):
+            missing.append("Адрес магазина" if ru else "Do'kon manzili")
+        if empty(user.get('shop_landmark')):
+            missing.append("Ориентир" if ru else "Mo'ljal (orientir)")
+        if empty(user.get('working_hours')):
+            missing.append("Часы работы" if ru else "Ish vaqti")
+        if empty(user.get('working_days')):
+            missing.append("Рабочие дни" if ru else "Ish kunlari")
+        if empty(user.get('card_number')):
+            missing.append("Карта для оплаты" if ru else "To'lov kartasi")
+    return missing
+
+
 async def admin_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int = None):
     query = update.callback_query
     if user_id is None:
@@ -7411,6 +11664,14 @@ async def admin_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE,
                 t(lang, 'btn_verify_seller'),
                 callback_data=f"admin_verify_{user_id}"
             )])
+
+    # Profilda kamchilik bo'lsa — AI orqali to'ldirishni so'rash tugmasi
+    _user_lang = user.get('language') or DEFAULT_LANG
+    if _profile_missing_fields(user, _user_lang) and ai_assistant.is_enabled():
+        keyboard.append([InlineKeyboardButton(
+            t(lang, 'btn_request_fill'),
+            callback_data=f"admin_askfill_{user_id}"
+        )])
 
     keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_users")])
 
@@ -7566,6 +11827,81 @@ async def admin_verify_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await admin_user_details(update, context, user_id=user_id)
 
 
+async def admin_request_fill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin: profildagi kamchiliklarni AI tahlil qilib, foydalanuvchiga yuboriladigan
+    xabarni TAKLIF qiladi (hali yubormaydi). "Qayta yaratish" shu handlerni qayta chaqiradi."""
+    query = update.callback_query
+    user_id = int(query.data.split("_")[2])
+    lang = get_lang(update, context)
+    user = db.get_user_by_id(user_id)
+    if not user:
+        await query.answer(t(lang, 'user_not_found'), show_alert=True)
+        return
+    if not ai_assistant.is_enabled():
+        await query.answer(t(lang, 'fill_ai_off'), show_alert=True)
+        return
+
+    user_lang = user.get('language') or DEFAULT_LANG
+    missing = _profile_missing_fields(user, user_lang)
+    if not missing:
+        await query.answer(t(lang, 'fill_none_missing'), show_alert=True)
+        return
+
+    await query.answer(t(lang, 'fill_generating'))
+    is_seller = bool(user.get('shop_name')) or user.get('role') == 'seller'
+    msg = await ai_assistant.generate_profile_completion_message(
+        name=user.get('name') or '', missing_fields=missing,
+        is_seller=is_seller, lang=user_lang
+    )
+    if not msg:
+        await query.answer(t(lang, 'fill_ai_error'), show_alert=True)
+        return
+
+    # Aynan shu matn yuborilishi uchun saqlab qo'yamiz (admin chatiga bog'liq)
+    context.user_data[f'_fill_msg_{user_id}'] = msg
+
+    missing_list = "\n".join(f"• {m}" for m in missing)
+    preview = t(lang, 'fill_preview',
+                name=html.escape(user.get('name') or '—'),
+                missing=html.escape(missing_list),
+                msg=html.escape(msg))
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'btn_fill_send'), callback_data=f"admin_sendfill_{user_id}")],
+        [InlineKeyboardButton(t(lang, 'btn_fill_regen'), callback_data=f"admin_askfill_{user_id}")],
+        [InlineKeyboardButton(t(lang, 'back'), callback_data=f"admin_user_{user_id}")],
+    ])
+    await query.edit_message_text(preview, reply_markup=kb,
+                                  parse_mode='HTML', disable_web_page_preview=True)
+
+
+async def admin_send_fill(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin tasdiqladi — AI taklif qilgan xabarni foydalanuvchiga yuboradi."""
+    query = update.callback_query
+    user_id = int(query.data.split("_")[2])
+    lang = get_lang(update, context)
+    user = db.get_user_by_id(user_id)
+    if not user:
+        await query.answer(t(lang, 'user_not_found'), show_alert=True)
+        return
+
+    msg = context.user_data.get(f'_fill_msg_{user_id}')
+    if not msg:
+        await query.answer(t(lang, 'fill_expired'), show_alert=True)
+        return
+
+    sent_ok = False
+    try:
+        await context.bot.send_message(chat_id=user['telegram_id'], text=msg)
+        sent_ok = True
+    except Exception as e:
+        logging.error(f"Profil to'ldirish xabari foydalanuvchiga ({user_id}) ketmadi: {e}")
+
+    context.user_data.pop(f'_fill_msg_{user_id}', None)
+    await query.answer(t(lang, 'fill_sent_ok') if sent_ok else t(lang, 'fill_send_failed'),
+                       show_alert=True)
+    await admin_user_details(update, context, user_id=user_id)
+
+
 ADMIN_PRODUCTS_PAGE_SIZE = 10
 _PROD_STATUS_EMOJI = {'active': '✅', 'reserve': '📦', 'deleted': '🗑'}
 
@@ -7581,7 +11917,30 @@ def _admin_product_rows(products):
     return rows
 
 
+async def _admin_guard(update, context) -> bool:
+    """Chaqiruvchi admin bo'lsa True qaytaradi. Aks holda ogohlantirib False qaytaradi.
+
+    XAVFSIZLIK: Pastdagi admin_product_* handler'lari ALOHIDA CallbackQueryHandler
+    sifatida ro'yxatdan o'tgan (12568+ qatorlar) — ya'ni umumiy `button_handler`
+    ichidagi admin-gate'ni CHETLAB o'tadi. Shu sababli admin tekshiruvini har bir
+    shunday handler ICHIDA bajaramiz, aks holda istalgan foydalanuvchi callback
+    yuborib mahsulot o'chirishi/ko'rishi mumkin edi."""
+    uid = update.effective_user.id if update.effective_user else None
+    u = db.get_user_by_telegram_id(uid) if uid else None
+    if u and (u.get('role') == 'admin' or uid == ADMIN_ID):
+        return True
+    q = update.callback_query
+    if q:
+        try:
+            await q.answer(T(update, context, 'admin_only_action'), show_alert=True)
+        except Exception:
+            pass
+    return False
+
+
 async def admin_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     await query.answer()
     lang = get_lang(update, context)
@@ -7594,7 +11953,7 @@ async def admin_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except ValueError:
             page = 0
 
-    products = db.get_all_products()
+    products = db.get_all_products(include_hidden=False)
     total = len(products)
     if not products:
         await query.edit_message_text(
@@ -7626,6 +11985,8 @@ async def admin_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def admin_product_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     await query.answer()
     lang = get_lang(update, context)
@@ -7666,6 +12027,62 @@ async def admin_product_search_result(update: Update, context: ContextTypes.DEFA
         t(lang, 'admin_product_search_results', q=html.escape(search_text), n=len(results)),
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
+
+
+async def admin_deleted_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin — o'chirilgan mahsulotlar jurnali (audit)."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    entries = db.get_product_audit(limit=50)
+    if not entries:
+        await query.edit_message_text(
+            t(lang, 'no_deleted_products'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")]]))
+        return
+    keyboard = []
+    for e in entries[:20]:
+        icon = "🗑" if e.get('action') == 'deleted' else "📦"
+        label = f"{icon} {(e.get('name') or '—')} — {(e.get('shop_name') or '')}"[:45]
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"admin_audit_{e['id']}")])
+    keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_panel")])
+    await query.edit_message_text(
+        t(lang, 'deleted_products_header', n=len(entries)),
+        reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
+
+
+async def admin_audit_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Bitta o'chirilgan mahsulot yozuvining to'liq ma'lumoti."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    audit_id = int(query.data.split("_")[2])
+    e = db.get_product_audit_entry(audit_id)
+    if not e:
+        await query.edit_message_text(
+            t(lang, 'audit_not_found'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_deleted_products")]]))
+        return
+    action_lbl = t(lang, 'audit_action_purged' if e.get('action') == 'purged' else 'audit_action_deleted')
+    by_role = e.get('deleted_by_role')
+    by_lbl = (t(lang, 'party_seller') if by_role == 'seller'
+              else (t(lang, 'role_admin_word') if by_role == 'admin' else '—'))
+    stock = e.get('stock_count')
+    text = t(lang, 'audit_detail_body',
+             name=html.escape(e.get('name') or '—'),
+             price=fmt_price(e.get('price') or 0),
+             cat=html.escape(category_name(e.get('category_name'), lang) or '—'),
+             shop=html.escape(e.get('shop_name') or e.get('seller_name') or '—'),
+             stock=(stock if stock is not None else '∞'),
+             orders=e.get('order_count') or 0,
+             action=action_lbl, by=by_lbl,
+             byname=html.escape(e.get('deleted_by_name') or '—'),
+             created=fmt_datetime(e.get('product_created_at')),
+             deleted=fmt_datetime(e.get('deleted_at')))
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data="admin_deleted_products")]]),
+        parse_mode='HTML')
 
 
 async def _admin_render_product(update: Update, context: ContextTypes.DEFAULT_TYPE, product_id: int):
@@ -7718,6 +12135,8 @@ async def _admin_render_product(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def admin_product_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     await query.answer()
     product_id = int(query.data.rsplit("_", 1)[1])
@@ -7725,6 +12144,8 @@ async def admin_product_detail(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def admin_product_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     product_id = int(query.data.rsplit("_", 1)[1])
     db.set_product_status(product_id, 'deleted')
@@ -7733,6 +12154,8 @@ async def admin_product_remove(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def admin_product_restore(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     product_id = int(query.data.rsplit("_", 1)[1])
     db.set_product_status(product_id, 'active')
@@ -7741,6 +12164,8 @@ async def admin_product_restore(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def admin_product_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await _admin_guard(update, context):
+        return
     query = update.callback_query
     product_id = int(query.data.rsplit("_", 1)[1])
     product = db.get_product_by_id(product_id)
@@ -7828,6 +12253,9 @@ async def admin_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_send_message'), callback_data=f"order_msg_{order_id}")])
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_correspondence'), callback_data=f"msgs_{order_id}")])
+    # Nizo yozishmalari bo'lsa — audit ko'rinishi (nizo hal bo'lgandan keyin ham)
+    if db.count_dispute_messages(order_id) > 0:
+        keyboard.append([InlineKeyboardButton(t(lang, 'btn_dispute_messages'), callback_data=f"admin_dispmsgs_{order_id}")])
     keyboard.append([InlineKeyboardButton(t(lang, 'back'), callback_data="admin_orders")])
 
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
@@ -8126,7 +12554,7 @@ async def admin_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     users = db.get_all_users()
-    products = db.get_all_products()
+    products = db.get_all_products(include_hidden=False)
     orders = db.get_all_orders()
 
     lang = get_lang(update, context)
@@ -8255,13 +12683,18 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif export_type == "orders":
             ws.title = "Заказы" if ru else "Buyurtmalar"
             headers = (["ID", "Покупатель", "Продавец", "Товар", "Цена",
-                        "Кол-во", "Итого", "Статус", "Оплата", "Доставка", "Дата"]
+                        "Кол-во", "Итого", "Статус", "Оплата", "Доставка", "Дата",
+                        "Статус оплаты", "Оплачено", "Остаток долга"]
                        if ru else
                        ["ID", "Xaridor", "Sotuvchi", "Mahsulot", "Narx",
-                        "Miqdor", "Jami", "Holat", "To'lov", "Yetkazish", "Sana"])
+                        "Miqdor", "Jami", "Holat", "To'lov", "Yetkazish", "Sana",
+                        "To'lov holati", "To'langan", "Qolgan qarz"])
             ws.append(headers)
             style_header(ws[1])
 
+            settlement_lbl_map = ({'paid': 'Оплачено', 'debt': 'Долг', 'installment': 'Рассрочка'}
+                                  if ru else
+                                  {'paid': "To'langan", 'debt': 'Qarz', 'installment': "Bo'lib to'lash"})
             orders = db.get_all_orders()
             for o in orders:
                 if ru:
@@ -8270,6 +12703,7 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 else:
                     status_lbl = {'pending': 'Kutilmoqda', 'confirmed': 'Tasdiqlangan',
                                   'delivered': 'Yetkazildi', 'cancelled': 'Bekor'}.get(o.get('status') or '', o.get('status') or '')
+                stt = o.get('settlement_type') or ''
                 ws.append([
                     o['id'],
                     o.get('buyer_name') or '', o.get('seller_name') or '',
@@ -8277,7 +12711,10 @@ async def admin_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE)
                     o.get('quantity') or 0, o.get('total_price') or 0,
                     status_lbl,
                     o.get('payment_method') or '', o.get('delivery_type') or '',
-                    str(o.get('created_at') or '')[:10]
+                    str(o.get('created_at') or '')[:10],
+                    settlement_lbl_map.get(stt, '—' if not stt else stt),
+                    o.get('amount_paid') if o.get('amount_paid') is not None else '',
+                    o.get('amount_due') if o.get('amount_due') is not None else '',
                 ])
             filename = f"tezbozor_orders_{dt.datetime.now().strftime('%Y%m%d')}.xlsx"
             caption = (f"🛒 Список заказов\n{len(orders)} · {ts}" if ru
@@ -8509,6 +12946,8 @@ async def ai_assistant_exit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('ai_draft', None)
     context.user_data.pop('ai_awaiting_photos', None)
     context.user_data.pop('ai_product_photos', None)
+    context.user_data.pop('ai_shop_filter', None)
+    context.user_data.pop('ai_shop_name', None)
     ai_assistant.reset_history(context.user_data)
 
     if update.callback_query:
@@ -8546,15 +12985,22 @@ async def ai_handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
+    # Do'kon ichida AI qidiruv — natijalar faqat shu do'kon bilan cheklanadi
+    shop_filter = context.user_data.get('ai_shop_filter')
+    shop_name = context.user_data.get('ai_shop_name') or ''
+
     result = await ai_assistant.ask(
         db, lang=lang, role=role, user_text=update.message.text,
         user_data=context.user_data, seller_id=seller_id, user_name=user_name,
+        shop_filter=shop_filter, shop_name=shop_name,
     )
 
     text = (result.get('text') or '').strip() if isinstance(result, dict) else str(result)
     products = result.get('products') if isinstance(result, dict) else None
     draft = result.get('draft') if isinstance(result, dict) else None
     reactivated_id = result.get('reactivated_id') if isinstance(result, dict) else None
+    order_actions = result.get('order_actions') if isinstance(result, dict) else None
+    review_replies = result.get('review_replies') if isinstance(result, dict) else None
 
     # 1) Asosiy javob matni
     if text:
@@ -8571,6 +13017,143 @@ async def ai_handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 4) AI mahsulotni zahiradan sotuvga qaytardi — reklama ko'rinishini ko'rsatamiz
     if reactivated_id:
         await show_ad_preview(update, context, reactivated_id)
+
+    # 5) Sotuvchi buyurtma amali — tasdiq tugmasi (mavjud confirm/cancel/deliver oqimini ishlatadi)
+    if order_actions:
+        for act in order_actions:
+            await _ai_send_order_action(update, context, lang, act)
+
+    # 6) AI tuzgan sharh javobi — e'lon qilish tugmasi bilan
+    if review_replies:
+        for rr in review_replies:
+            await _ai_send_review_reply(update, context, lang, rr)
+
+
+async def _ai_send_order_action(update, context, lang, act):
+    """AI buyurtma amali uchun tasdiq kartasini ko'rsatadi. Tugma mavjud
+    confirm_order_/cancel_order_/deliver_order_ oqimini ishga tushiradi —
+    stok kamaytirish, xaridorga xabar va taymerlar shu yerda hal bo'ladi."""
+    oid = act.get('order_id')
+    action = act.get('action')
+    if not oid or action not in ('confirm', 'deliver', 'cancel'):
+        return
+    btn_key = {'confirm': 'ai_order_btn_confirm',
+               'deliver': 'ai_order_btn_deliver',
+               'cancel': 'ai_order_btn_cancel'}[action]
+    cb = f"{action}_order_{oid}"
+    text = t(lang, 'ai_order_action_card',
+             oid=fmt_order_id(oid),
+             product=html.escape(act.get('product') or '—'),
+             qty=act.get('qty') or 1,
+             buyer=html.escape(act.get('buyer') or '—'),
+             price=act.get('price_som') or '—')
+    kb = [
+        [InlineKeyboardButton(t(lang, btn_key), callback_data=cb)],
+        [InlineKeyboardButton(t(lang, 'ai_exit'), callback_data="ai_exit")],
+    ]
+    await update.message.reply_text(
+        text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML'
+    )
+
+
+async def _ai_send_review_reply(update, context, lang, rr):
+    """AI tuzgan sharh javobini tasdiq kartasi bilan ko'rsatadi. Matn user_data'da
+    saqlanadi; «e'lon qilish» tugmasi bosilganda set_review_reply orqali yoziladi."""
+    rid = rr.get('review_id')
+    reply = (rr.get('reply') or '').strip()
+    if not rid or not reply:
+        return
+    store = context.user_data.setdefault('ai_review_replies', {})
+    store[str(rid)] = reply
+    text = t(lang, 'ai_review_reply_card',
+             product=html.escape(rr.get('product') or '—'),
+             comment=html.escape(rr.get('comment') or ''),
+             reply=html.escape(reply))
+    kb = [
+        [InlineKeyboardButton(t(lang, 'ai_review_publish_btn'), callback_data=f"airvpub_{rid}")],
+        [InlineKeyboardButton(t(lang, 'ai_exit'), callback_data="ai_exit")],
+    ]
+    await update.message.reply_text(
+        text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML'
+    )
+
+
+async def ai_review_reply_publish(update, context):
+    """AI tuzgan sharh javobini e'lon qiladi (callback: airvpub_{review_id})."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    try:
+        review_id = int(query.data.split("_")[1])
+    except (ValueError, IndexError):
+        return
+    store = context.user_data.get('ai_review_replies') or {}
+    reply = store.get(str(review_id))
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    if not reply or not user:
+        try:
+            await query.edit_message_text(t(lang, 'ai_review_reply_expired'))
+        except Exception:
+            pass
+        return
+    # set_review_reply egalikni SQL'da tekshiradi (seller_id mos kelmasa yozmaydi)
+    ok = db.set_review_reply(review_id, user['id'], reply)
+    store.pop(str(review_id), None)
+    if ok:
+        await _notify_buyer_of_reply(context, review_id)
+    msg = t(lang, 'review_reply_saved') if ok else t(lang, 'review_reply_not_yours')
+    try:
+        await query.edit_message_text(msg)
+    except Exception:
+        await context.bot.send_message(update.effective_chat.id, msg)
+
+
+async def ai_review_reply_generate(update, context):
+    """Sharhga AI javobini tuzadi va e'lon / boshqa variant tugmalari bilan ko'rsatadi
+    (callback: airvgen_{review_id}). Qo'lda javob oynasidagi «🤖 AI yozib bersin» tugmasi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    chat_id = update.effective_chat.id
+    try:
+        review_id = int(query.data.split("_")[1])
+    except (ValueError, IndexError):
+        return
+
+    # XAVFSIZLIK: faqat shu sharhning sotuvchisi
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    review = db.get_review_by_id(review_id)
+    if not review or not user or review.get('seller_id') != user['id']:
+        await context.bot.send_message(chat_id, t(lang, 'review_reply_not_yours'))
+        return
+
+    try:
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    except Exception:
+        pass
+
+    reply = await ai_assistant.generate_review_reply(
+        product=review.get('product_name') or '',
+        comment=review.get('comment') or '',
+        shop_rating=review.get('rating'),
+        product_rating=review.get('product_rating'),
+        buyer=review.get('buyer_name') or '',
+        lang=lang,
+    )
+    if not reply:
+        await context.bot.send_message(chat_id, t(lang, 'ai_review_gen_failed'))
+        return
+
+    # Matnni saqlaymiz — «e'lon qilish» tugmasi (airvpub_) shu yerdan oladi
+    store = context.user_data.setdefault('ai_review_replies', {})
+    store[str(review_id)] = reply
+    text = t(lang, 'ai_review_reply_card',
+             product=html.escape(review.get('product_name') or '—'),
+             comment=html.escape(review.get('comment') or ''),
+             reply=html.escape(reply))
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton(t(lang, 'ai_review_publish_btn'), callback_data=f"airvpub_{review_id}")],
+        [InlineKeyboardButton(t(lang, 'ai_review_regen_btn'), callback_data=f"airvgen_{review_id}")],
+    ])
+    await context.bot.send_message(chat_id, text, reply_markup=kb, parse_mode='HTML')
 
 
 async def _ai_send_products(update, context, lang, products):
@@ -8793,6 +13376,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # hech narsani o'zgartirmaydi, faqat admin bo'lmaganlarni to'xtatadi.
     ADMIN_CB_PREFIXES = (
         "admin_", "approve_seller_", "reject_seller_", "seller_req_", "excel_",
+        "adisp_",
     )
     if data and data.startswith(ADMIN_CB_PREFIXES):
         _admin_user = db.get_user_by_telegram_id(uid) if uid else None
@@ -8821,7 +13405,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "seller_orders": seller_orders,
         "seller_profile": seller_profile,
         "admin_panel": admin_panel,
+        "admingrp_people": admin_group_people,
+        "admingrp_catalog": admin_group_catalog,
+        "admingrp_manage": admin_group_manage,
         "admin_users": admin_users,
+        "admin_shops": admin_shops,
         "admin_products": admin_products,
         "admin_orders": admin_orders,
         "admin_stats": admin_stats,
@@ -8829,6 +13417,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "admin_revenue": admin_revenue,
         "admin_broadcast": admin_broadcast_start,
         "admin_seller_requests": admin_seller_requests,
+        "admin_disputes": admin_disputes,
+        "admin_deleted_products": admin_deleted_products,
         "admin_analytics": admin_analytics,
         "edit_seller_region": edit_seller_region,
         "contact_admin": contact_admin_start,
@@ -8862,8 +13452,30 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ai_photos_done": ai_photos_done,
         "adprev_publish": ad_preview_publish,
         "adprev_regen": ad_preview_regen,
+        "adprev_long": ad_preview_set_length,
+        "adprev_short": ad_preview_set_length,
         "adprev_edit": ad_preview_edit,
         "adprev_skip": ad_preview_skip,
+        "adprev_schedule": ad_preview_schedule_start,
+        "adprev_autorep": ad_preview_autorepost_start,
+        "seller_scheduled": seller_scheduled_posts,
+        "seller_autoreposts": seller_auto_reposts,
+        "sellergrp_products": seller_group_products,
+        "sellergrp_sales": seller_group_sales,
+        "sellergrp_customers": seller_group_customers,
+        "sellergrp_settings": seller_group_settings,
+        "schd_abort": sched_abort_flow,
+        "arep_abort": autorep_abort_flow,
+        # MULTI-SOTUVCHI: ega paneli (exact-match — shop_ prefiks ziddiyatidan qochish uchun)
+        "staff_panel": staff_panel,
+        "staff_list": staff_list,
+        "staff_add": staff_add,
+        "staff_add_nodept": staff_add_nodept,
+        "staff_invites": staff_invites,
+        "staff_stats": staff_stats,
+        "shop_paymode": shop_paymode_toggle,
+        "shop_pending": shop_pending_products,
+        "join_with_code": join_with_code_start,
     }
 
     if data in handlers:
@@ -8899,9 +13511,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await buyer_pickup_group(update, context)
     elif data.startswith("shop_products_"):
         await buyer_shop_products(update, context)
+    elif data.startswith("shop_ai_"):
+        await buyer_shop_ai_start(update, context)
     elif data.startswith("shop_list_"):
         await buyer_shop_list(update, context)
-    elif data.startswith("shop_") and not data.startswith("shop_products_") and not data.startswith("shop_list_"):
+    elif data.startswith("shop_") and not data.startswith("shop_products_") \
+            and not data.startswith("shop_list_") and not data.startswith("shop_ai_"):
         await buyer_shop_detail(update, context)
     elif data.startswith("cat_"):
         # cat_ID yoki cat_ID_pg_N
@@ -8916,14 +13531,58 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await change_product_status(update, context)
     elif data == "sp_search":
         await seller_product_search_start(update, context)
+    elif data.startswith(("ownappr_", "ownrej_")):
+        await owner_review_product(update, context)
+    elif data.startswith("staff_detail_"):
+        await staff_detail(update, context)
+    elif data.startswith("staff_dept_"):
+        await staff_set_dept_prompt(update, context)
+    elif data.startswith("staff_role_"):
+        await staff_role_toggle(update, context)
+    elif data.startswith("staff_reject_"):
+        await staff_reject(update, context)
+    elif data.startswith("inv_cancel_"):
+        await invite_cancel(update, context)
+    elif data.startswith("staff_toggle_"):
+        await staff_toggle(update, context)
+    elif data.startswith("staff_pset_"):
+        await staff_perm_menu(update, context)
+    elif data.startswith("staff_perm_"):
+        await staff_perm_menu(update, context)
+    elif data.startswith("staff_rm_"):
+        await staff_remove(update, context)
     elif data == "noop":
         pass
     elif data.startswith("prod_"):
         await buyer_product_details(update, context)
     elif data.startswith("pcomm_"):
         await product_reviews_view(update, context)
+    elif data.startswith("rvreply_"):
+        await review_reply_start(update, context)
+    elif data.startswith("airvpub_"):
+        await ai_review_reply_publish(update, context)
+    elif data.startswith("airvgen_"):
+        await ai_review_reply_generate(update, context)
+    elif data.startswith("schd_date_"):
+        await sched_pick_date(update, context)
+    elif data.startswith("schd_hour_"):
+        await sched_pick_hour(update, context)
+    elif data.startswith("schd_min_"):
+        await sched_pick_minute(update, context)
+    elif data.startswith("schd_cancel_"):
+        await sched_cancel_post(update, context)
+    elif data.startswith("arep_hour_"):
+        await autorep_pick_hour(update, context)
+    elif data.startswith("arep_cancel_"):
+        await autorep_cancel(update, context)
+    elif data.startswith("arep_start_"):
+        await product_autorepost_start(update, context)
+    elif data.startswith("arep_off_"):
+        await product_autorepost_stop(update, context)
     elif data.startswith("toggle_stock_"):
         await toggle_product_stock(update, context)
+    elif data.startswith("setstock_"):
+        await set_stock_choice(update, context)
     elif data.startswith("set_stock_"):
         await set_stock_prompt(update, context)
     elif data.startswith("msgs_"):
@@ -8947,14 +13606,42 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await seller_order_detail(update, context)
     elif data.startswith(("confirm_order_", "cancel_order_", "deliver_order_")):
         await update_order_status(update, context)
+    elif data.startswith(("setl_paid_", "setl_debt_", "setl_inst_")):
+        await settle_choice(update, context)
+    elif data.startswith("setlamt_"):
+        await settle_amount_choice(update, context)
+    elif data == "seller_debts":
+        await seller_debts(update, context)
+    elif data == "buyer_debts":
+        await buyer_debts(update, context)
+    elif data.startswith("debtbuyer_"):
+        await debt_buyer_detail(update, context)
+    elif data.startswith("debtpayfull_"):
+        await debt_pay_full(update, context)
+    elif data.startswith("debtpaypart_"):
+        await debt_pay_part_start(update, context)
     elif data.startswith("crfwd_"):
         await seller_forward_courier(update, context)
+    elif data.startswith(("cclagree_", "ccldeny_")):
+        await cancel_respond(update, context)
+    elif data.startswith("admin_dispmsgs_"):
+        await admin_dispute_messages(update, context)
+    elif data.startswith("admin_disp_"):
+        await admin_dispute_detail(update, context)
+    elif data.startswith("adisp_"):
+        await admin_resolve_dispute(update, context)
+    elif data.startswith("admin_audit_"):
+        await admin_audit_detail(update, context)
     elif data.startswith("admin_user_"):
         await admin_user_details(update, context)
     elif data.startswith("admin_block_"):
         await admin_block_user(update, context)
     elif data.startswith("admin_verify_"):
         await admin_verify_user(update, context)
+    elif data.startswith("admin_askfill_"):
+        await admin_request_fill(update, context)
+    elif data.startswith("admin_sendfill_"):
+        await admin_send_fill(update, context)
     elif data.startswith("excel_"):
         await admin_export_excel(update, context)
     elif data == "admin_clean_cancelled":
@@ -8982,6 +13669,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await admin_users(update, context)
     elif data.startswith("admin_channels_pg_"):
         await admin_channels(update, context)
+    elif data.startswith("admin_shopmod_"):
+        await admin_shop_toggle_mod(update, context)
+    elif data.startswith("admin_stafftog_"):
+        await admin_staff_toggle(update, context)
+    elif data.startswith("admin_shop_"):
+        await admin_shop_detail(update, context)
     elif data.startswith("admin_order_"):
         await admin_order_detail(update, context)
     elif data.startswith("admin_force_cancel_"):
@@ -9029,6 +13722,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('ai_product_photos', None)
         context.user_data.pop('ad_preview', None)
         context.user_data.pop('ad_editing_caption', None)
+        context.user_data.pop('awaiting_review_reply', None)
         ai_assistant.reset_history(context.user_data)
 
         # role o'rniga active_mode — bitta foydalanuvchi ikkala rejimda ishlashi mumkin
@@ -9069,9 +13763,50 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await fn(update, context)
         return
 
+    # Sotuvchi sharhga javob yozmoqda — kiritilgan matnni javob sifatida qabul qilamiz
+    if context.user_data.get('awaiting_review_reply'):
+        await review_reply_submit(update, context)
+        return
+
     # Reklama matnini sotuvchi tahrirlamoqda — kiritilgan matnni qabul qilamiz
     if context.user_data.get('ad_editing_caption'):
         await ad_preview_caption_input(update, context)
+        return
+
+    # To'lov holati: sotuvchi qo'lda to'langan summani yozdi (qarz/bo'lib)
+    if context.user_data.get('awaiting_settle_amount'):
+        await settle_custom_amount_input(update, context)
+        return
+
+    # Qarz: qisman to'lov summasi kiritildi
+    if context.user_data.get('awaiting_debt_payment'):
+        await debt_payment_input(update, context)
+        return
+
+    # MULTI-SOTUVCHI: taklif uchun bo'lim nomi kiritildi
+    if context.user_data.get('staff_invite_dept'):
+        shop_id = context.user_data.pop('staff_invite_dept')
+        shop = db.get_shop_by_id(shop_id)
+        if shop and user:
+            dept = (text.strip()[:60] or None)
+            await _send_invite_link(update, context, shop, dept, user['id'])
+        return
+
+    # MULTI-SOTUVCHI: mavjud xodimga bo'lim biriktirish
+    if context.user_data.get('staff_set_dept_for'):
+        staff_id = context.user_data.pop('staff_set_dept_for')
+        lang = get_lang(update, context)
+        db.update_staff(staff_id, department=(text.strip()[:60] or None))
+        await update.message.reply_text(
+            t(lang, 'staff_dept_saved'),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(lang, 'back'), callback_data=f"staff_detail_{staff_id}")]]))
+        return
+
+    # MULTI-SOTUVCHI: taklif kodi bilan do'konga qo'shilish
+    if context.user_data.get('joining_with_code'):
+        context.user_data.pop('joining_with_code', None)
+        await _handle_staff_deeplink(update, context, text.strip().upper(), user)
         return
 
     # AI yordamchi rejimi — erkin matn DeepSeek'ga uzatiladi
@@ -9280,15 +14015,59 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Kutilmagan istisno bo'lsa — log'ga yozadi va foydalanuvchini xabardor qiladi."""
-    logging.error("Exception while handling update:", exc_info=context.error)
+# Eski/yaroqsiz tugma bosilganda Telegram qaytaradigan xabarlar — bular xato emas,
+# kutilgan holat (xabar o'chirilgan, eskirgan yoki sanoq o'zgarmagan).
+_STALE_CALLBACK_HINTS = (
+    "message is not modified",
+    "message to edit not found",
+    "message can't be edited",
+    "query is too old",
+    "message to delete not found",
+    "message identifier is not specified",
+)
 
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Kutilmagan istisno bo'lsa — log'ga yozadi va foydalanuvchini xabardor qiladi.
+    Eski xabardagi tugma bosilishi (stale callback) esa xato emas — jim yoki yumshoq
+    ogohlantirish bilan o'tkazib yuboriladi."""
+    err = context.error
+    err_text = str(err or "").lower()
+
+    # 1) Eski/yaroqsiz tugma (stale callback) — foydalanuvchiga yumshoq toast
+    if isinstance(err, BadRequest) and any(h in err_text for h in _STALE_CALLBACK_HINTS):
+        if "not modified" not in err_text:   # 'not modified' odatiy — jim o'tkazamiz
+            logging.info(f"Stale callback o'tkazib yuborildi: {err}")
+        try:
+            if isinstance(update, Update) and update.callback_query:
+                await update.callback_query.answer(
+                    T(update, context, 'callback_stale'), show_alert=True)
+        except Exception:
+            pass
+        return
+
+    logging.error("Exception while handling update:", exc_info=err)
+
+    # Sentry yoqilgan bo'lsa — xatoni o'sha yerga ham yuboramiz (tez ogohlantirish uchun)
+    if _SENTRY_ENABLED:
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_exception(err)
+        except Exception:
+            pass
+
+    # 2) Boshqa kutilmagan xatolar — foydalanuvchini xabardor qilamiz
     try:
-        if isinstance(update, Update) and update.effective_message:
-            await update.effective_message.reply_text(
-                T(update, context, 'error_unexpected')
-            )
+        if isinstance(update, Update):
+            if update.callback_query:
+                try:
+                    await update.callback_query.answer(
+                        T(update, context, 'error_unexpected'), show_alert=True)
+                except Exception:
+                    pass
+            elif update.effective_message:
+                await update.effective_message.reply_text(
+                    T(update, context, 'error_unexpected'))
     except Exception:
         pass
 
@@ -9313,16 +14092,17 @@ async def reminder_order_job(context: ContextTypes.DEFAULT_TYPE):
         seller = db.get_user_by_id(order['seller_id'])
         slang = get_user_lang(seller) if seller else DEFAULT_LANG
 
-        await context.bot.send_message(
-            chat_id=seller_tg,
-            text=t(slang, 'job_reminder_seller',
-                   pname=product_name, buyer=buyer_name, total=fmt_price(total)),
-            parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"confirm_order_{order_id}")],
-                [InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"cancel_order_{order_id}")],
-            ])
-        )
+        rtext = t(slang, 'job_reminder_seller',
+                  pname=product_name, buyer=buyer_name, total=fmt_price(total))
+        rkb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(t(slang, 'btn_confirm'), callback_data=f"confirm_order_{order_id}")],
+            [InlineKeyboardButton(t(slang, 'btn_reject'), callback_data=f"cancel_order_{order_id}")],
+        ])
+        await context.bot.send_message(chat_id=seller_tg, text=rtext, parse_mode='HTML', reply_markup=rkb)
+        # MULTI-SOTUVCHI: eslatma mahsulotni joylagan xodimga ham boradi
+        product = db.get_product_basic(order.get('product_id')) if order.get('product_id') else None
+        if product:
+            await _fanout_order_to_staff(context, product, rtext, rkb, owner_tg=seller_tg)
         logging.info(f"Reminder: buyurtma {order_id} uchun sotuvchiga eslatma yuborildi.")
     except Exception as e:
         logging.error(f"reminder_order_job xatosi: {e}")
@@ -9376,6 +14156,13 @@ async def auto_backup_job(context: ContextTypes.DEFAULT_TYPE):
     """Har kuni avtomatik DB backup — adminga fayl sifatida yuboradi."""
     try:
         import datetime as dt
+
+        # Kuniga FAQAT BIR MARTA — job ikki marta ishga tushsa yoki bot ikki instansda
+        # ishlayotgan bo'lsa ham, backup adminga ikki marta ketmasligi uchun atomik qulf.
+        today = dt.datetime.now(TZ_TASHKENT).strftime("%Y-%m-%d")
+        if not db.claim_daily_once('last_auto_backup', today):
+            logging.info("Avtomatik backup bugun allaqachon yuborilgan — takror o'tkazib yuborildi.")
+            return
 
         ts = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = f"marketplace_backup_{ts}.db"
@@ -9473,14 +14260,116 @@ async def testpost(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
+# RESTART: ochiq buyurtma taymerlarini qayta rejalashtirish
+# ============================================================
+
+def _reschedule_pending_order_timers(job_queue):
+    """Bot restart/deploy'idan keyin 'pending' buyurtmalar uchun jonli teskari sanoq +
+    avto-bekor jobini qayta tiklaydi. Joblar xotirada saqlangani uchun restartda yo'qoladi —
+    bu ularni bazadan tiklaydi. Avto-bekor muddati (auto_cancel_at) DB'da saqlangani uchun
+    teskari sanoq real (o'zgarmas) qoladi; muddati o'tib ketganlar darrov bekor qilinadi."""
+    try:
+        pend = db.get_pending_orders_for_reschedule()
+        groups_done = set()
+        resched = 0
+        for o in pend:
+            gid = o.get('order_group_id')
+            if gid:
+                if gid in groups_done:
+                    continue
+                groups_done.add(gid)
+                _schedule_order_countdown(job_queue, group_id=gid, first=5)
+            else:
+                _schedule_order_countdown(job_queue, order_id=o['id'], first=5)
+            resched += 1
+        logging.info(f"Restart: {resched} ta ochiq buyurtma sanoq/taymeri qayta tiklandi.")
+    except Exception as e:
+        logging.error(f"Pending buyurtma taymerlarini qayta rejalashtirish xatosi: {e}")
+
+
+def _reschedule_scheduled_posts(job_queue):
+    """Bot restart/deploy'idan keyin kutilayotgan ('pending') rejalashtirilgan postlar
+    joblarini qayta tiklaydi. Joblar xotirada saqlangani uchun restartda yo'qoladi —
+    bu ularni bazadan tiklaydi. Vaqti o'tib ketganlar (downtime davrida) tez orada
+    (5 soniya) joylanadi, shunda hech bir reja yo'qolmaydi."""
+    try:
+        from datetime import datetime, timezone
+        pend = db.get_pending_scheduled_posts()
+        now = datetime.now(timezone.utc)
+        resched = 0
+        for sp in pend:
+            sa = sp.get('scheduled_at')
+            if not sa:
+                continue
+            try:
+                target = datetime.strptime(str(sa)[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            when = (target - now).total_seconds()
+            if when < 0:
+                when = 5  # downtime davrida o'tib ketgan — tez orada joylanadi
+            job_queue.run_once(
+                scheduled_post_job, when=when,
+                data={'sched_id': sp['id']}, name=f"sched_post_{sp['id']}")
+            resched += 1
+        logging.info(f"Restart: {resched} ta rejalashtirilgan post qayta tiklandi.")
+    except Exception as e:
+        logging.error(f"Rejalashtirilgan postlarni qayta tiklash xatosi: {e}")
+
+
+# ============================================================
 # MAIN — HANDLER REGISTRATION (BUG FIX ASOSIY QISMI)
 # ============================================================
 
+def _validate_env():
+    """Ishga tushishda muhit o'zgaruvchilarining holatini qisqacha log qiladi.
+    Majburiylar yetishmasa ogohlantiradi (BOT_TOKEN allaqachon yuqorida tekshirilgan)."""
+    logging.info("🔧 Muhit sozlamalari:")
+    logging.info("   BOT_TOKEN: %s", "✅ bor" if TOKEN else "❌ yo'q")
+    logging.info("   ADMIN_ID:  %s", f"✅ {ADMIN_ID}" if ADMIN_ID else "⚠️ o'rnatilmagan")
+    logging.info("   CHANNEL_ID: %s", f"✅ {CHANNEL_ID}" if CHANNEL_ID else "⚠️ o'rnatilmagan")
+    logging.info("   SENTRY_DSN: %s", "✅ yoqilgan" if os.getenv("SENTRY_DSN") else "— o'chiq")
+    if not ADMIN_ID:
+        logging.warning("⚠️ ADMIN_ID o'rnatilmagan — admin paneli hech kimga ochilmaydi. "
+                        ".env faylida ADMIN_ID=... ni belgilang (.env.example'ga qarang).")
+
+
 def main():
+    _validate_env()
     # Persistence — bot qayta ishga tushganda foydalanuvchi sessiyalari saqlanadi
     # (yarim qolgan ro'yxatdan o'tish, qidiruv state, va h.k.)
     persistence = PicklePersistence(filepath="tezbozor_state.pickle")
     app = Application.builder().token(TOKEN).persistence(persistence).build()
+
+    # ============================================================
+    # GURUH/KANAL HIMOYASI — bot FAQAT shaxsiy (private) chatda javob beradi
+    # ------------------------------------------------------------
+    # Muammo: bot sotuvchining kanali/guruhiga ADMIN sifatida qo'shilgach, u
+    # yerdagi HAR QANDAY xabarni qabul qiladi (admin bo'lgani uchun Telegram
+    # privacy rejimi ishlamaydi). Natijada eng oxirdagi global text_handler har
+    # bir guruh xabariga "Buyruqni tanlang" (unknown_command) menyusi bilan javob
+    # berib, guruhni spam qilardi — sotuvchilar shundan norozi edi.
+    #
+    # Yechim: guruh / superguruh / kanaldan kelgan xabar, buyruq va inline tugma
+    # bosishlarini ENG BOSHIDA (eng past guruh = eng yuqori ustuvorlik) to'xtatamiz.
+    # Bot bu chatlarga UMUMAN javob bermaydi. Bot kanal/guruhda faqat o'zi mahsulot
+    # POST qiladi (chiquvchi xabar — bu filtrga tushmaydi) va "🛒 Sotib olish"
+    # tugmasi (deeplink URL) orqali xaridorni shaxsiy chatga olib kiradi.
+    #
+    # MUSTASNO: my_chat_member / chat_member (bot guruhga qo'shilishi/chiqarilishi)
+    # — guruhni ulash mexanizmi shunga bog'liq, shuning uchun ularni TO'XTATMAYMIZ;
+    # ular pastdagi ChatMemberHandler orqali ishlanaveradi.
+    async def _guard_private_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # A'zolik yangilanishlari — o'tkazib yuboramiz (ChatMemberHandler ushlaydi)
+        if update.my_chat_member is not None or update.chat_member is not None:
+            return
+        chat = update.effective_chat
+        # Shaxsiy chatdan boshqa har qanday joydan kelgan update'ni to'xtatamiz
+        if chat is not None and chat.type != Chat.PRIVATE:
+            raise ApplicationHandlerStop
+
+    # group=-100 — qolgan barcha handler'lardan oldin ishlaydi
+    app.add_handler(TypeHandler(Update, _guard_private_only), group=-100)
 
     # BUG FIX #5: global_fallbacks — jarayon ichida /start, /cancel yoki pastki menyu bosilsa to'xtatadi
     async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -9531,6 +14420,7 @@ def main():
             SHOP_NAME:         [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_name)],
             SHOP_LANDMARK:     [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_landmark)],
             SHOP_ADDRESS:      [MessageHandler(filters.LOCATION | filters.TEXT & ~filters.COMMAND, registration_shop_address)],
+            SHOP_ADDRESS_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_address_text)],
             WORKING_DAYS:      [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_working_days)],
             WORKING_HOURS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_working_hours)],
             TELEGRAM_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_telegram_username)],
@@ -9548,16 +14438,38 @@ def main():
             MessageHandler(filters.Regex(_add_product_btn_re), seller_add_product_start),
         ],
         states={
-            PRODUCT_NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_name)],
-            PRODUCT_PRICE:    [MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_price)],
-            PRODUCT_CATEGORY: [CallbackQueryHandler(seller_add_product_category, pattern="^prodcat_")],
-            PRODUCT_DESC:     [MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_desc)],
+            PRODUCT_MODE:     [
+                CallbackQueryHandler(seller_add_product_mode, pattern="^pmode_(classic|ai_guided|ai_smart)$"),
+            ],
+            PRODUCT_NAME:     [
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_name),
+            ],
+            PRODUCT_PRICE:    [
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_price),
+            ],
+            PRODUCT_STOCK:    [
+                CallbackQueryHandler(seller_add_product_stock_choice, pattern="^apstock_(unlim|num)$"),
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_stock_text),
+            ],
+            PRODUCT_CATEGORY: [
+                CallbackQueryHandler(seller_add_product_category, pattern="^prodcat_"),
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
+            ],
+            PRODUCT_DESC:     [
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_desc),
+            ],
             PRODUCT_PHOTO:    [
                 MessageHandler(filters.PHOTO | filters.Document.IMAGE | filters.Sticker.ALL | (filters.TEXT & ~filters.COMMAND), seller_add_product_photo),
                 CallbackQueryHandler(add_photo_more, pattern="^addphoto_more$"),
                 CallbackQueryHandler(add_photo_done, pattern="^addphoto_done$"),
+                CallbackQueryHandler(add_product_nav, pattern="^addnav_"),
             ],
             PRODUCT_ATTRS:    [
+                CallbackQueryHandler(seller_add_product_attr_nav, pattern="^attrnav_(back|skip)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND & ~cancel_filter, seller_add_product_attr_text),
                 CallbackQueryHandler(seller_add_product_attr_callback, pattern="^attr_"),
             ],
@@ -9615,6 +14527,7 @@ def main():
         states={
             EDIT_SHOP_NAME:         [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_seller_field_submit)],
             EDIT_SHOP_ADDRESS:      [MessageHandler(filters.LOCATION | filters.TEXT & ~filters.COMMAND, edit_seller_field_submit)],
+            EDIT_SHOP_ADDRESS_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_shop_address_text_submit)],
             EDIT_SHOP_LANDMARK:     [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_seller_field_submit)],
             EDIT_WORKING_DAYS:      [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_seller_field_submit)],
             EDIT_WORKING_HOURS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_seller_field_submit)],
@@ -9657,6 +14570,7 @@ def main():
             SHOP_NAME:         [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_name)],
             SHOP_LANDMARK:     [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_landmark)],
             SHOP_ADDRESS:      [MessageHandler(filters.LOCATION | filters.TEXT & ~filters.COMMAND, registration_shop_address)],
+            SHOP_ADDRESS_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_address_text)],
             WORKING_DAYS:      [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_working_days)],
             WORKING_HOURS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_working_hours)],
             TELEGRAM_USERNAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, become_seller_finish)],
@@ -9687,6 +14601,39 @@ def main():
     app.add_handler(seller_profile_edit_conv)
     app.add_handler(message_conv)
     app.add_handler(rating_conv)
+
+    # --- Shartnomani bekor qilish (sabab tanlash oqimi) ---
+    cancel_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(cancel_request_start, pattern=r"^ccl_req_\d+$")],
+        states={
+            CANCEL_PICK_REASON: [CallbackQueryHandler(cancel_reason_pick, pattern=r"^ccl_rsn_|^ccl_abort$")],
+            CANCEL_REASON_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_reason_text)],
+        },
+        fallbacks=global_fallbacks,
+    )
+    app.add_handler(cancel_conv)
+
+    # --- Admin nizo bo'yicha tomonga (bot orqali) xabar yozishi ---
+    admin_dm_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(admin_dispute_msg_start, pattern=r"^admindm_(buyer|seller)_\d+$")],
+        states={
+            ADMIN_DISPUTE_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_dispute_msg_send)],
+        },
+        fallbacks=global_fallbacks,
+        conversation_timeout=120,
+    )
+    app.add_handler(admin_dm_conv)
+
+    # --- Xaridor/sotuvchi admin xabariga javob berishi ---
+    dispute_reply_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(dispute_reply_start, pattern=r"^dmreply_\d+$")],
+        states={
+            DMREPLY_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, dispute_reply_send)],
+        },
+        fallbacks=global_fallbacks,
+        conversation_timeout=300,
+    )
+    app.add_handler(dispute_reply_conv)
 
     # --- Karta ma'lumotlari tahrirlash ---
     card_conv = ConversationHandler(
@@ -9725,7 +14672,14 @@ def main():
 
     # Sotuvchi kanallari menyusi + kanalni o'chirish
     app.add_handler(CallbackQueryHandler(seller_channels_menu, pattern="^seller_channels_menu$"))
+    app.add_handler(CallbackQueryHandler(seller_channels_recheck, pattern="^seller_channels_recheck$"))
     app.add_handler(CallbackQueryHandler(seller_channel_remove, pattern="^chremove_"))
+
+    # --- Sotuvchi guruhini ulash ---
+    # Guruh ID si forward orqali ko'rinmaydi, shuning uchun "Guruh qo'shish" faqat
+    # ko'rsatma beradi; haqiqiy bog'lanish bot guruhga qo'shilganda (my_chat_member) sodir bo'ladi.
+    app.add_handler(CallbackQueryHandler(seller_link_group_start, pattern="^seller_link_group$"))
+    app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
     # Admin mahsulot moderatsiyasi (detal, qidiruv, sotuvdan olib tashlash, rasm)
     app.add_handler(CallbackQueryHandler(admin_products, pattern=r"^admin_products(_pg_\d+)?$"))
@@ -9789,8 +14743,18 @@ def main():
         )
         logging.info("Avtomatik backup job rejalashtirildi (har kuni 11:00 Toshkent)")
 
+        # RESTART: ochiq buyurtmalar uchun eslatma/avto-bekor taymerlarini tiklaymiz
+        _reschedule_pending_order_timers(app.job_queue)
+        # RESTART: rejalashtirilgan postlarni qayta tiklaymiz
+        _reschedule_scheduled_posts(app.job_queue)
+        # RESTART: avto qayta-reklamalarni qayta tiklaymiz
+        _reschedule_auto_reposts(app.job_queue)
+
     print("🚀 TezBozor Bot ishlamoqda...")
-    app.run_polling()
+    # MUHIM: allowed_updates'ni ANIQ ko'rsatamiz — aks holda Telegram a'zolik
+    # yangilanishlarini (my_chat_member) yubormaydi va bot guruhga qo'shilganini sezmaydi.
+    # Update.ALL_TYPES barcha turdagi yangilanishlarni (jumladan my_chat_member) yoqadi.
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
