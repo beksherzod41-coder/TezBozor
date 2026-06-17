@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TezBozor</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1a1a1a);
+    --hint: var(--tg-theme-hint-color, #8a8a8e);
+    --card: var(--tg-theme-secondary-bg-color, #f3f3f5);
+    --accent: var(--tg-theme-button-color, #2ea6ff);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       background:var(--bg); color:var(--text); padding-bottom:24px;}
+  .topbar{position:sticky; top:0; z-index:10; background:var(--bg); padding:10px 12px 6px;}
+  .search{width:100%; padding:11px 14px; border:none; border-radius:12px; font-size:15px;
+          background:var(--card); color:var(--text); outline:none;}
+  .chips{display:flex; gap:8px; overflow-x:auto; padding:10px 12px 6px; scrollbar-width:none;}
+  .chips::-webkit-scrollbar{display:none;}
+  .chip{flex:0 0 auto; padding:7px 14px; border-radius:18px; background:var(--card);
+        font-size:13px; white-space:nowrap; cursor:pointer; border:1px solid transparent;}
+  .chip.active{background:var(--accent); color:var(--accent-text);}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:8px 12px;}
+  .card{background:var(--card); border-radius:14px; overflow:hidden; cursor:pointer;
+        display:flex; flex-direction:column;}
+  .card .imgwrap{width:100%; aspect-ratio:1/1; background:#dadade; position:relative;}
+  .card img{width:100%; height:100%; object-fit:cover; display:block;}
+  .card .ph{display:flex; align-items:center; justify-content:center; height:100%;
+            font-size:34px; color:#aaa;}
+  .card .body{padding:8px 9px 10px;}
+  .card .name{font-size:13px; line-height:1.25; height:2.5em; overflow:hidden;}
+  .card .price{font-size:15px; font-weight:700; margin-top:5px;}
+  .card .meta{font-size:11px; color:var(--hint); margin-top:3px; display:flex; gap:6px;}
+  .empty,.loading{text-align:center; color:var(--hint); padding:40px 20px; font-size:14px;}
+  /* DETAIL */
+  .detail{position:fixed; inset:0; background:var(--bg); z-index:50; overflow-y:auto;
+          transform:translateX(100%); transition:transform .22s ease;}
+  .detail.open{transform:translateX(0);}
+  .detail .back{position:sticky; top:0; background:var(--bg); padding:12px 14px;
+                font-size:15px; cursor:pointer; color:var(--accent);}
+  .gallery{display:flex; overflow-x:auto; scroll-snap-type:x mandatory; scrollbar-width:none;}
+  .gallery::-webkit-scrollbar{display:none;}
+  .gallery img{flex:0 0 100%; aspect-ratio:1/1; object-fit:cover; scroll-snap-align:center;}
+  .dbody{padding:14px 16px;}
+  .dname{font-size:18px; font-weight:700;}
+  .dprice{font-size:22px; font-weight:800; margin:8px 0;}
+  .dshop{font-size:13px; color:var(--hint); margin-bottom:10px;}
+  .ddesc{font-size:14px; line-height:1.5; white-space:pre-wrap;}
+  .buy{position:sticky; bottom:0; padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+       background:var(--bg);}
+  .buy button{width:100%; padding:14px; border:none; border-radius:12px; font-size:16px;
+              font-weight:600; background:var(--accent); color:var(--accent-text); cursor:pointer;}
+  .badge{display:inline-block; padding:2px 7px; border-radius:8px; background:rgba(0,0,0,.06);}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <input class="search" id="search" placeholder="🔍 Mahsulot qidirish...">
+  </div>
+  <div class="chips" id="chips"></div>
+  <div id="content"><div class="loading">Yuklanmoqda...</div></div>
+
+  <div class="detail" id="detail">
+    <div class="back" id="backBtn">‹ Orqaga</div>
+    <div id="detailBody"></div>
+  </div>
+
+<script>
+const tg = window.Telegram.WebApp;
+tg.ready(); tg.expand();
+
+const AUTH = "tma " + (tg.initData || "");
+let activeCat = null, searchTimer = null, botUsername = null;
+
+async function api(path){
+  const r = await fetch(path, {headers:{Authorization: AUTH}});
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+function money(v){ return Math.round(v).toLocaleString('ru-RU').replace(/,/g,' ') + " so'm"; }
+function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
+function rating(p){ return (p.prod_avg_rating || p.avg_rating || 0); }
+
+function cardHtml(p){
+  const r = rating(p);
+  const img = p.image_url
+    ? `<img src="${imgUrl(p.image_url)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>🖼️</div>'">`
+    : `<div class="ph">🖼️</div>`;
+  const stars = r ? `⭐ ${r.toFixed(1)}` : '';
+  return `<div class="card" data-id="${p.id}">
+      <div class="imgwrap">${img}</div>
+      <div class="body">
+        <div class="name">${esc(p.name||'')}</div>
+        <div class="price">${money(p.price)}</div>
+        <div class="meta"><span>${stars}</span><span>${esc(p.shop_name||'')}</span></div>
+      </div>
+    </div>`;
+}
+function esc(s){ return String(s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function loadCategories(){
+  try{
+    const cats = await api('/api/categories');
+    const chips = document.getElementById('chips');
+    chips.innerHTML = `<div class="chip active" data-cat="">Hammasi</div>` +
+      cats.map(c=>`<div class="chip" data-cat="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('');
+    chips.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
+      chips.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
+      ch.classList.add('active');
+      activeCat = ch.dataset.cat || null;
+      loadProducts();
+    });
+  }catch(e){ /* kategoriya bo'lmasa ham katalog ishlaydi */ }
+}
+
+async function loadProducts(){
+  const content = document.getElementById('content');
+  content.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+  const q = document.getElementById('search').value.trim();
+  let url = '/api/products?sort=rating';
+  if(q) url += '&q=' + encodeURIComponent(q);
+  if(activeCat) url += '&category_id=' + activeCat;
+  try{
+    const items = await api(url);
+    if(!items.length){ content.innerHTML = `<div class="empty">Hech narsa topilmadi 🤷</div>`; return; }
+    content.innerHTML = `<div class="grid">${items.map(cardHtml).join('')}</div>`;
+    content.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+  }catch(e){
+    content.innerHTML = `<div class="empty">Xatolik: ${e.message}<br><small>Mini App'ni Telegram orqali oching.</small></div>`;
+  }
+}
+
+async function openDetail(id){
+  const detail = document.getElementById('detail');
+  const body = document.getElementById('detailBody');
+  body.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+  detail.classList.add('open');
+  try{
+    const p = await api('/api/products/'+id);
+    const imgs = (p.images && p.images.length) ? p.images : (p.image_url?[p.image_url]:[]);
+    const gallery = imgs.length
+      ? `<div class="gallery">${imgs.map(f=>`<img src="${imgUrl(f)}" onerror="this.style.display='none'">`).join('')}</div>`
+      : `<div class="ph" style="height:240px;font-size:60px">🖼️</div>`;
+    const r = rating(p);
+    body.innerHTML = `${gallery}
+      <div class="dbody">
+        <div class="dname">${esc(p.name||'')}</div>
+        <div class="dprice">${money(p.price)}</div>
+        <div class="dshop">🏪 ${esc(p.shop_name||'')} ${r?`· ⭐ ${r.toFixed(1)} (${p.prod_review_count||0})`:''}</div>
+        ${p.stock_count!=null?`<div class="badge">Mavjud: ${p.stock_count} dona</div>`:''}
+        <div class="ddesc" style="margin-top:10px">${esc(p.description||'')}</div>
+      </div>
+      <div class="buy"><button id="buyBtn">🛒 Buyurtma berish</button></div>`;
+    document.getElementById('buyBtn').onclick = ()=>orderInBot(p.id);
+  }catch(e){
+    body.innerHTML = `<div class="empty">Xatolik: ${e.message}</div>`;
+  }
+}
+
+async function orderInBot(productId){
+  // Buyurtmani bot ichida davom ettiramiz (deep-link)
+  if(!botUsername){
+    try{ botUsername = (await api('/api/config')).bot_username; }catch(e){}
+  }
+  if(botUsername){
+    tg.openTelegramLink(`https://t.me/${botUsername}?start=order_${productId}`);
+    tg.close();
+  }else{
+    tg.showAlert("Buyurtma uchun botga qayting va mahsulotni tanlang.");
+  }
+}
+
+document.getElementById('backBtn').onclick = ()=>document.getElementById('detail').classList.remove('open');
+document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(loadProducts,350); };
+
+loadCategories();
+loadProducts();
+</script>
+</body>
+</html>
