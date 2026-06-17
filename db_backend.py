@@ -84,6 +84,21 @@ _DDL_TYPE_SUBS = [
 
 _RE_STRFTIME_H = re.compile(r"strftime\(\s*'%H'\s*,\s*([^)]+?)\s*\)", re.I)
 _RE_STRFTIME_W = re.compile(r"strftime\(\s*'%w'\s*,\s*([^)]+?)\s*\)", re.I)
+# SQLite datetime('now', '-7 days') -> PG to_char(now()...-interval, 'YYYY-MM-DD HH24:MI:SS')
+# (created_at TEXT bilan string-solishtirish uchun aynan shu format).
+_RE_DATETIME_NOW = re.compile(
+    r"datetime\(\s*'now'\s*(?:,\s*'\s*([+-]?)\s*(\d+)\s+(\w+)\s*'\s*)?\)", re.I
+)
+
+
+def _datetime_now_repl(m):
+    sign, num, unit = m.group(1), m.group(2), m.group(3)
+    if num is None:
+        expr = "(now() AT TIME ZONE 'UTC')"
+    else:
+        op = "-" if sign == "-" else "+"
+        expr = f"(now() AT TIME ZONE 'UTC' {op} interval '{num} {unit}')"
+    return f"to_char({expr}, 'YYYY-MM-DD HH24:MI:SS')"
 _RE_CURRENT_TS = re.compile(r"\bCURRENT_TIMESTAMP\b", re.I)
 _RE_INSERT_IGNORE = re.compile(r"^\s*INSERT\s+OR\s+IGNORE\s+INTO\b", re.I)
 _RE_INSERT_REPLACE = re.compile(r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\b", re.I)
@@ -96,6 +111,8 @@ def translate_sql(sql: str) -> str:
     # 1) strftime (SQL ichidagi literal % ni ham olib tashlaydi)
     sql = _RE_STRFTIME_H.sub(r"CAST(EXTRACT(HOUR FROM (\1)::timestamp) AS INTEGER)", sql)
     sql = _RE_STRFTIME_W.sub(r"CAST(EXTRACT(DOW FROM (\1)::timestamp) AS INTEGER)", sql)
+    # 1b) datetime('now', '-N days')
+    sql = _RE_DATETIME_NOW.sub(_datetime_now_repl, sql)
 
     # 2) DDL tip almashtirishlari
     if _RE_IS_DDL.match(sql):
