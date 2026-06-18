@@ -278,6 +278,21 @@
   .crm{color:var(--sale); font-size:18px; cursor:pointer; padding:2px 4px; line-height:1;}
   .cartempty{text-align:center; color:var(--hint); padding:60px 24px; font-size:14.5px;}
   .cartempty .big{font-size:48px; display:block; margin-bottom:10px;}
+  /* ---------- CHAT ---------- */
+  #chatview{overflow:hidden;}
+  .chatwrap{flex:1; overflow-y:auto; padding:14px 14px 10px; display:flex; flex-direction:column; gap:8px;}
+  .cbub{max-width:80%; padding:9px 12px; border-radius:15px; font-size:14px; line-height:1.35; word-wrap:break-word; white-space:pre-wrap;}
+  .cbub.me{align-self:flex-end; background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; border-bottom-right-radius:5px;}
+  .cbub.them{align-self:flex-start; background:var(--card); color:var(--text); box-shadow:var(--shadow); border-bottom-left-radius:5px;}
+  .cbub .tm{font-size:10px; opacity:.6; margin-top:3px; text-align:right;}
+  .chatbar{display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+           background:rgba(255,255,255,.96); box-shadow:0 -1px 0 var(--line);}
+  .chatbar input{flex:1; border:1.5px solid var(--line); border-radius:20px; padding:11px 15px;
+                 font-size:14.5px; outline:none; font-family:inherit;}
+  .chatbar input:focus{border-color:var(--accent);}
+  .chatbar button{width:44px; height:44px; border-radius:50%; border:none; cursor:pointer; flex:0 0 auto;
+                  background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; font-size:18px;}
+  .chatempty{text-align:center; color:var(--hint); padding:50px 24px; font-size:14px; line-height:1.6;}
 </style>
 </head>
 <body>
@@ -328,6 +343,12 @@
   <div class="checkout" id="cartview">
     <div class="cohead"><span>🛒 Savat</span><span class="x" id="cartClose">✕</span></div>
     <div id="cartBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="chatview">
+    <div class="cohead"><span id="chatTitle">💬 Xabarlar</span><span class="x" id="chatClose">✕</span></div>
+    <div class="chatwrap" id="chatWrap"></div>
+    <div class="chatbar"><input id="chatInp" placeholder="Xabar yozing..." maxlength="2000"><button id="chatSend">➤</button></div>
   </div>
 
 <script>
@@ -703,6 +724,47 @@ document.getElementById('cartFab').onclick = openCart;
 document.getElementById('cartClose').onclick = closeCart;
 updateCartFab();
 
+// ---------- CHAT (buyurtma bo'yicha xaridor↔sotuvchi) ----------
+let chatOrderId=null, chatMe=null, chatPoll=null;
+async function openChat(orderId){
+  chatOrderId=orderId; chatMe=null;
+  document.getElementById('chatWrap').innerHTML=`<div class="chatempty">Yuklanmoqda...</div>`;
+  document.getElementById('chatview').classList.add('open');
+  await loadChat();
+  try{ document.getElementById('chatInp').focus(); }catch(e){}
+  clearInterval(chatPoll); chatPoll=setInterval(loadChat, 5000);
+}
+async function loadChat(){
+  if(!chatOrderId) return;
+  try{
+    const d=await api('/api/order/'+chatOrderId+'/messages');
+    chatMe=d.me;
+    document.getElementById('chatTitle').textContent='💬 '+(d.counterparty||'Xabarlar');
+    const wrap=document.getElementById('chatWrap');
+    if(!d.messages.length){ wrap.innerHTML=`<div class="chatempty">Hali xabar yo'q.<br>Birinchi bo'lib yozing 👇</div>`; return; }
+    wrap.innerHTML=d.messages.map(m=>{
+      const me=m.sender_id===chatMe;
+      const tm=fmtDate(m.created_at); const hm=tm.length>=5?tm.slice(-5):tm;
+      return `<div class="cbub ${me?'me':'them'}">${esc(m.message||'')}<div class="tm">${hm}</div></div>`;
+    }).join('');
+    wrap.scrollTop=wrap.scrollHeight;
+  }catch(e){ document.getElementById('chatWrap').innerHTML=`<div class="chatempty">⚠️ ${esc(e.message)}</div>`; }
+}
+async function sendChatMessage(){
+  const inp=document.getElementById('chatInp'); const text=(inp.value||'').trim(); if(!text) return;
+  inp.value='';
+  try{
+    const r=await fetch('/api/order/'+chatOrderId+'/message',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+    await loadChat();
+  }catch(e){ tg.showAlert("Yuborilmadi: "+e.message); inp.value=text; }
+}
+function closeChat(){ document.getElementById('chatview').classList.remove('open'); clearInterval(chatPoll); chatPoll=null; chatOrderId=null; }
+document.getElementById('chatClose').onclick=closeChat;
+document.getElementById('chatSend').onclick=sendChatMessage;
+document.getElementById('chatInp').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); sendChatMessage(); }});
+
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
 tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
@@ -755,6 +817,7 @@ function orderCardHtml(o){
     <div class="oshop">🏪 ${esc(o.shop_name||'')}</div>
     ${(o.amount_due && o.amount_due>0)?`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`:''}
     ${contact}
+    <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">💬 Xabar yozish</button>
   </div>`;
 }
 
@@ -769,6 +832,7 @@ async function loadMyOrders(){
     }
     v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="olist">${orders.map(orderCardHtml).join('')}</div>`;
     v.querySelectorAll('button.ocontact[data-un]').forEach(b=>b.onclick=()=>tg.openTelegramLink(`https://t.me/${b.dataset.un}`));
+    v.querySelectorAll('[data-chat]').forEach(b=>b.onclick=()=>openChat(b.dataset.chat));
   }catch(e){
     v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
   }
@@ -879,7 +943,9 @@ function sellerOrderCard(o){
     <div class="ometa">${o.quantity} dona · <b>${money(o.total_price)}</b></div>
     <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
     ${o.delivery_address?`<div class="oshop">📍 ${esc(o.delivery_address)}</div>`:''}
-    ${contact}${actions}
+    ${contact}
+    <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">💬 Xabar</button>
+    ${actions}
   </div>`;
 }
 
@@ -891,6 +957,7 @@ async function loadSellerOrders(){
     if(!orders.length){ b.innerHTML = `<div class="empty"><span class="big">📥</span>Hali buyurtma yo'q</div>`; return; }
     b.innerHTML = `<div class="olist">${orders.map(sellerOrderCard).join('')}</div>`;
     b.querySelectorAll('[data-act]').forEach(btn=>btn.onclick=()=>sellerOrderAction(btn.dataset.oid, btn.dataset.act, btn));
+    b.querySelectorAll('[data-chat]').forEach(btn=>btn.onclick=()=>openChat(btn.dataset.chat));
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 

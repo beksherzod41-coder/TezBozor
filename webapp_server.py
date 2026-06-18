@@ -263,6 +263,74 @@ def api_my_orders(authorization: str = Header(None)):
     return _rows(db.get_buyer_orders_list(buyer["id"]))
 
 
+def _order_party_or_403(user, order):
+    if user.get("id") not in (order.get("buyer_id"), order.get("seller_id")) \
+       and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="not_your_order")
+
+
+@app.get("/api/order/{order_id}/messages")
+def api_order_messages(order_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    _order_party_or_403(user, order)
+    cp = order.get("shop_name") if user["id"] == order.get("buyer_id") else order.get("buyer_name")
+    return {"me": user["id"], "counterparty": cp or "—",
+            "messages": _rows(db.get_messages_by_order(order_id))}
+
+
+class MsgIn(BaseModel):
+    text: str
+
+
+@app.post("/api/order/{order_id}/message")
+async def api_send_message(order_id: int, body: MsgIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="too_long")
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    _order_party_or_403(user, order)
+
+    if user["id"] == order.get("buyer_id"):
+        receiver_id = order.get("seller_id")
+        receiver_tg = order.get("seller_tg")
+        sender_is_buyer = True
+    else:
+        receiver_id = order.get("buyer_id")
+        receiver_tg = order.get("buyer_tg")
+        sender_is_buyer = False
+    db.create_message(order_id, user["id"], receiver_id, text)
+
+    # Qabul qiluvchini Telegram orqali xabardor qilamiz (uning tilida) + bot'dan javob tugmasi
+    try:
+        receiver = db.get_user_by_id(receiver_id) if receiver_id else None
+        rlang = get_user_lang(receiver) if receiver else DEFAULT_LANG
+        if sender_is_buyer:
+            sender_label = t(rlang, "sender_label_buyer", name=html.escape(user.get("name") or ""))
+        else:
+            sender_label = t(rlang, "sender_label_seller",
+                             name=html.escape(user.get("shop_name") or user.get("name") or ""))
+        if receiver_tg:
+            await _tg_call("sendMessage", {
+                "chat_id": receiver_tg,
+                "text": t(rlang, "new_message_notify", oid=fmt_order_id(order_id),
+                          sender=sender_label, msg=html.escape(text)),
+                "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": t(rlang, "btn_reply"), "callback_data": f"order_msg_{order_id}"}]]},
+            })
+    except Exception as e:
+        logging.error(f"xabar bildirishnomasi xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
 class MeEdit(BaseModel):
     name: Optional[str] = None
     phone: Optional[str] = None
