@@ -415,6 +415,11 @@
     <div id="chanBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="staffview">
+    <div class="cohead"><span>👥 Xodimlar</span><span class="x" id="staffClose">✕</span></div>
+    <div id="staffBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1256,7 +1261,7 @@ document.getElementById('aiInp').addEventListener('keydown',e=>{ if(e.key==='Ent
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
-  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span><span id="chanBtn" style="font-size:22px;cursor:pointer;margin-right:10px">📢</span><span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></span></div>
+  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span><span id="staffBtn" style="font-size:22px;cursor:pointer;margin-right:10px">👥</span><span id="chanBtn" style="font-size:22px;cursor:pointer;margin-right:10px">📢</span><span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></span></div>
     <div class="seg" style="margin:0 12px 6px">
       <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:10px 4px;font-size:11.5px">📥 Buyurtma</div>
       <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:10px 4px;font-size:11.5px">📦 Mahsulot</div>
@@ -1267,6 +1272,7 @@ function loadSeller(){
   v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
   document.getElementById('shopSetBtn').onclick = openShopSettings;
   document.getElementById('chanBtn').onclick = openChannels;
+  document.getElementById('staffBtn').onclick = openStaff;
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else if(sellerSub==='stats') loadSellerStats();
@@ -1350,6 +1356,70 @@ function removeChannel(cid, title){
   else if(confirm("O'chirilsinmi?")) doIt();
 }
 document.getElementById('chanClose').onclick=()=>document.getElementById('chanview').classList.remove('open');
+
+// ---------- XODIMLAR (multivendor) ----------
+async function openStaff(){ document.getElementById('staffview').classList.add('open'); await loadStaff(); }
+function staffCard(s){
+  const role = s.staff_role==='manager'?'Menejer':(s.staff_role==='owner'?'Ega':'Xodim');
+  const active = s.is_active? '<span class="ostatus st-ok">Faol</span>':'<span class="ostatus st-pending">Nofaol</span>';
+  const uname = s.telegram_username? '@'+String(s.telegram_username).replace('@',''):'';
+  return `<div class="ocard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div style="min-width:0"><div class="oname" style="font-size:14px">👤 ${esc(s.name||uname||'Xodim')}</div><div style="font-size:11.5px;color:var(--hint)">${role}${uname?' · '+esc(uname):''}${s.department?' · '+esc(s.department):''}</div></div>
+      ${active}
+    </div>
+    <div class="oactions">
+      <button class="oact ${s.is_active?'no':'ok'}" data-toggle="${s.id}">${s.is_active?"⏸ To'xtatish":"▶️ Faollashtirish"}</button>
+      <button class="oact no" data-rmstaff="${s.id}" style="background:#fdebef;color:var(--sale)">🗑 Chiqarish</button>
+    </div>
+  </div>`;
+}
+async function loadStaff(){
+  const b=document.getElementById('staffBody');
+  b.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const d=await api('/api/seller/staff');
+    const inviteBtn=`<div style="padding:8px 12px"><button class="oact ok" id="staffInviteBtn" style="width:100%">➕ Xodim taklif qilish</button></div>`;
+    let invites='';
+    if(d.invites && d.invites.length)
+      invites=`<div class="cosec" style="margin:0 12px"><div class="lbl">Faol takliflar</div>`+d.invites.map(iv=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0"><span style="font-size:13px">🔗 …${esc(String(iv.code).slice(-6))}</span><button class="crm" data-shareinv="${esc(iv.code)}" style="color:var(--accent);font-size:13px">Ulashish</button></div>`).join('')+`</div>`;
+    const list = (d.staff && d.staff.length) ? `<div class="olist">${d.staff.map(staffCard).join('')}</div>` : `<div class="empty"><span class="big">👥</span>Hali xodim yo'q</div>`;
+    b.innerHTML=`<div style="padding:8px 0">${inviteBtn}${invites}</div>`+list;
+    document.getElementById('staffInviteBtn').onclick=createInvite;
+    b.querySelectorAll('[data-toggle]').forEach(btn=>btn.onclick=()=>staffToggle(btn.dataset.toggle));
+    b.querySelectorAll('[data-rmstaff]').forEach(btn=>btn.onclick=()=>staffRemove(btn.dataset.rmstaff));
+    b.querySelectorAll('[data-shareinv]').forEach(btn=>btn.onclick=()=>shareInvite(btn.dataset.shareinv));
+  }catch(e){
+    b.innerHTML = e.message==='not_owner'
+      ? `<div class="empty"><span class="big">🔒</span>Bu bo'lim faqat do'kon EGASI uchun.</div>`
+      : `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
+  }
+}
+function inviteLink(code){ return BOT_USERNAME?`https://t.me/${BOT_USERNAME}?start=staff_${code}`:null; }
+function shareInvite(code){
+  const link=inviteLink(code); if(!link){ tg.showAlert("Havola tayyor emas."); return; }
+  try{ tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent("Do'konimga xodim bo'lib qo'shiling:")}`); }catch(e){ tg.showAlert(link); }
+}
+async function createInvite(){
+  const btn=document.getElementById('staffInviteBtn'); btn.disabled=true; btn.textContent='...';
+  try{
+    const r=await fetch('/api/seller/staff/invite',{method:'POST',headers:{Authorization:AUTH}});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    const res=await r.json();
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    await loadStaff();
+    shareInvite(res.code);
+  }catch(e){ btn.disabled=false; btn.textContent='➕ Xodim taklif qilish'; tg.showAlert(e.message==='not_owner'?"Faqat do'kon egasi xodim qo'sha oladi.":("Xatolik: "+e.message)); }
+}
+async function staffToggle(sid){
+  try{ const r=await fetch('/api/seller/staff/'+sid+'/toggle',{method:'POST',headers:{Authorization:AUTH}}); if(!r.ok) throw new Error('HTTP '+r.status); loadStaff(); }
+  catch(e){ tg.showAlert("Xatolik: "+e.message); }
+}
+function staffRemove(sid){
+  const doIt=async()=>{ try{ const r=await fetch('/api/seller/staff/'+sid,{method:'DELETE',headers:{Authorization:AUTH}}); if(!r.ok) throw new Error('HTTP '+r.status); loadStaff(); }catch(e){ tg.showAlert("Xatolik: "+e.message); } };
+  if(tg.showConfirm) tg.showConfirm("Xodimni do'kondan chiqarasizmi?", ok=>{ if(ok) doIt(); }); else if(confirm("Chiqarilsinmi?")) doIt();
+}
+document.getElementById('staffClose').onclick=()=>document.getElementById('staffview').classList.remove('open');
 
 // ---------- DO'KON SOZLAMALARI ----------
 let shopForm={};

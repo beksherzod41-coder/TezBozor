@@ -577,6 +577,62 @@ def api_remove_channel(body: ChannelRemove, authorization: str = Header(None)):
     return {"ok": True}
 
 
+# ---- Xodimlar (multivendor) — faqat do'kon egasi ----
+def _owner_shop(user):
+    shop = db.get_shop_by_owner(user["id"])
+    if not shop:
+        raise HTTPException(status_code=403, detail="not_owner")
+    return dict(shop)
+
+
+def _staff_in_shop(shop_id, staff_id):
+    for s in db.get_shop_staff(shop_id):
+        if s.get("id") == staff_id:
+            return s
+    return None
+
+
+@app.get("/api/seller/staff")
+def api_staff(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    return {"staff": _rows(db.get_shop_staff(shop["id"], include_owner=False)),
+            "invites": _rows(db.get_active_invites(shop["id"]))}
+
+
+@app.post("/api/seller/staff/invite")
+def api_staff_invite(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    code = db.create_invite(shop["id"], created_by=user["id"])
+    return {"ok": True, "code": code}
+
+
+@app.post("/api/seller/staff/{staff_id}/toggle")
+def api_staff_toggle(staff_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    if s.get("staff_role") == "owner":
+        raise HTTPException(status_code=400, detail="cant_owner")
+    db.set_staff_active(staff_id, 0 if s.get("is_active") else 1)
+    return {"ok": True, "is_active": 0 if s.get("is_active") else 1}
+
+
+@app.delete("/api/seller/staff/{staff_id}")
+def api_staff_remove(staff_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not db.remove_staff(staff_id):
+        raise HTTPException(status_code=400, detail="cant_remove")
+    return {"ok": True}
+
+
 class ReplyIn(BaseModel):
     text: str
 
