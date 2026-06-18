@@ -507,6 +507,8 @@ const I18N = {
   err:{uz:"Xatolik",ru:"Ошибка"}, open_in_tg:{uz:"Mini App'ni Telegram orqali oching.",ru:"Откройте Mini App через Telegram."},
   // admin
   nav_admin:{uz:"Admin",ru:"Админ"}, adm_title:{uz:"🛡️ Admin panel",ru:"🛡️ Админ-панель"},
+  mode_to_seller:{uz:"🏪 Sotuvchi rejimiga o'tish",ru:"🏪 Перейти в режим продавца"},
+  mode_to_buyer:{uz:"🛍 Xaridor rejimiga o'tish",ru:"🛍 Перейти в режим покупателя"},
   adm_stats:{uz:"📊 Statistika",ru:"📊 Статистика"}, adm_requests:{uz:"🏪 So'rovlar",ru:"🏪 Заявки"},
   adm_disputes:{uz:"⚖️ Nizolar",ru:"⚖️ Споры"}, adm_users:{uz:"👥 Odamlar",ru:"👥 Люди"},
   adm_shops:{uz:"🏬 Do'konlar",ru:"🏬 Магазины"}, adm_orders:{uz:"📦 Buyurtmalar",ru:"📦 Заказы"},
@@ -1401,12 +1403,14 @@ async function loadProfile(){
       </div>`:''}
       <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
         <button class="oact ok" id="meEditBtn" style="width:100%">${L('edit_profile')}</button>
+        ${canManage()?`<button class="oact ok" id="modeSwitchBtn" style="width:100%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:none">${appMode==='seller'?L('mode_to_buyer'):L('mode_to_seller')}</button>`:''}
         ${(me.role!=='seller' && !me.is_approved)?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('become_seller')}</button>`:''}
         <button class="oact no" id="contactAdminBtn" style="width:100%;background:var(--bg);color:var(--accent)">${L('contact_admin')}</button>
       </div>`;
     document.getElementById('meEditBtn').onclick = openProfileEdit;
     const rb=document.getElementById('refShareBtn'); if(rb) rb.onclick=()=>shareReferral(me.referral_code);
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
+    const ms=document.getElementById('modeSwitchBtn'); if(ms) ms.onclick=()=>switchMode(appMode==='seller'?'buyer':'seller');
     document.getElementById('contactAdminBtn').onclick=openContact;
   }catch(e){
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
@@ -1458,18 +1462,41 @@ function closeProfileEdit(){ document.getElementById('meform').classList.remove(
 document.getElementById('meClose').onclick = closeProfileEdit;
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
-let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, SELLER_ORDERS_LIST = [], dState = {};
+let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, SELLER_ORDERS_LIST = [], dState = {}, appMode = 'buyer';
 
 async function loadMe(){
   try{ ME = await api('/api/me'); }catch(e){ ME = null; }
   try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
   // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz
   if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); if(catMode==='products') loadProducts(); }
-  if(ME && (ME.role==='seller' || ME.role==='admin'))
-    document.getElementById('navSeller').style.display = '';
-  if(ME && ME.role==='admin')
-    document.getElementById('navAdmin').style.display = '';
+  applyMode();
   applyStaticI18n();
+}
+
+// ---------- REJIM: XARIDOR / SOTUVCHI panellari ALOHIDA ----------
+// Botdagidek — bir vaqtda faqat bitta panel. Sotuvchi/admin rejimni almashtiradi.
+function canManage(){ return !!(ME && (ME.role==='seller' || ME.role==='admin' || ME.is_approved)); }
+function isAdminUser(){ return !!(ME && ME.role==='admin'); }
+
+function applyMode(){
+  const seller = appMode==='seller';
+  const vis = {
+    catalog: !seller,
+    orders: !seller,
+    seller: seller && canManage(),
+    admin: seller && isAdminUser(),
+    profile: true,
+  };
+  document.querySelectorAll('#bottomnav .navitem').forEach(n=>{
+    n.style.display = vis[n.dataset.tab] ? '' : 'none';
+  });
+}
+
+function switchMode(m){
+  appMode = (m==='seller') ? 'seller' : 'buyer';
+  try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  applyMode();
+  switchTab(appMode==='seller' ? 'seller' : 'catalog');
 }
 
 function shareReferral(code){
