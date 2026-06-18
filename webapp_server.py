@@ -361,6 +361,71 @@ def _buyer_from_auth(authorization):
     return buyer
 
 
+import re as _re
+
+
+def _normalize_phone(raw):
+    """Telefonni standartlashtirish (bot normalize_phone bilan bir xil mantiq).
+    '901234567' → '+998901234567'; yaroqsiz bo'lsa None."""
+    if not raw:
+        return None
+    digits = _re.sub(r"\D", "", str(raw))
+    if len(digits) == 9:
+        digits = "998" + digits
+    if len(digits) == 12 and digits.startswith("998"):
+        return "+" + digits
+    if 10 <= len(digits) <= 15:
+        return "+" + digits
+    return None
+
+
+class RegisterIn(BaseModel):
+    name: str
+    phone: str
+    language: str = "uz"
+
+
+@app.post("/api/register")
+async def api_register(body: RegisterIn, authorization: str = Header(None)):
+    """Mini App ichida yangi xaridorni ro'yxatdan o'tkazadi (bot FSM o'rniga).
+    initData imzosi tekshiriladi — telegram_id ishonchli manbadan olinadi."""
+    auth = require_auth(authorization)
+    tg_user = auth.get("user") or {}
+    tg_id = tg_user.get("id")
+    if not tg_id:
+        raise HTTPException(status_code=401, detail="no_user")
+    _rate_limit("register", tg_id, 5, 600)
+    # Idempotent — allaqachon ro'yxatda bo'lsa, qayta yaratmaymiz
+    existing = db.get_user_by_telegram_id(tg_id)
+    if existing:
+        return {"ok": True, "already": True}
+    name = (body.name or "").strip()
+    if not name or len(name) > 60:
+        raise HTTPException(status_code=400, detail="bad_name")
+    phone = _normalize_phone(body.phone)
+    if not phone:
+        raise HTTPException(status_code=400, detail="bad_phone")
+    lang = body.language if body.language in ("uz", "ru") else "uz"
+    uid = db.create_user(telegram_id=tg_id, phone_number=phone, name=name, role="buyer")
+    fields = {"language": lang}
+    uname = tg_user.get("username")
+    if uname:
+        fields["telegram_username"] = uname
+    db.update_user(uid, **fields)
+    # Adminga yangi foydalanuvchi haqida xabar (xato yutiladi)
+    try:
+        if ADMIN_ID:
+            await _tg_call("sendMessage", {
+                "chat_id": ADMIN_ID,
+                "text": (f"👤 <b>Yangi foydalanuvchi (Mini App)</b>\n"
+                         f"Ism: {html.escape(name)}\nTelefon: {html.escape(phone)}\n"
+                         f"🆔 {tg_id}"),
+                "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"register notify xato: {e}")
+    return {"ok": True, "id": uid}
+
+
 @app.get("/api/me")
 def api_me(authorization: str = Header(None)):
     b = dict(_buyer_from_auth(authorization))

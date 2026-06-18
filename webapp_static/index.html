@@ -442,6 +442,11 @@
     <div id="auserBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="regview" style="z-index:120">
+    <div class="cohead"><span id="ttl_regview">Ro'yxatdan o'tish</span></div>
+    <div id="regBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -666,6 +671,15 @@ const I18N = {
   bp_ov_checkout:{uz:"Buyurtma berish",ru:"Оформление заказа"}, bp_ov_meform:{uz:"Profilni tahrirlash",ru:"Редактировать профиль"},
   bp_ov_review:{uz:"⭐ Baholash",ru:"⭐ Оценка"}, adm_bcast_title:{uz:"📣 Ommaviy xabar",ru:"📣 Рассылка"},
   bp_back:{uz:"‹ Orqaga",ru:"‹ Назад"},
+  // ro'yxatdan o'tish (app ichida)
+  reg_title:{uz:"Ro'yxatdan o'tish",ru:"Регистрация"},
+  reg_welcome:{uz:"TezBozor'ga xush kelibsiz! Davom etish uchun ma'lumotlaringizni kiriting.",ru:"Добро пожаловать в TezBozor! Введите данные, чтобы продолжить."},
+  reg_name:{uz:"Ism familiya",ru:"Имя и фамилия"}, reg_name_ph:{uz:"Masalan: Ali Valiyev",ru:"Например: Иван Иванов"},
+  reg_phone:{uz:"Telefon raqam",ru:"Номер телефона"}, reg_phone_ph:{uz:"+998 90 123 45 67",ru:"+998 90 123 45 67"},
+  reg_lang:{uz:"Til",ru:"Язык"}, reg_submit:{uz:"✅ Ro'yxatdan o'tish",ru:"✅ Зарегистрироваться"},
+  reg_bad_name:{uz:"Ism familiyangizni to'liq kiriting.",ru:"Введите имя и фамилию полностью."},
+  reg_bad_phone:{uz:"Telefon raqami noto'g'ri.",ru:"Неверный номер телефона."},
+  reg_success:{uz:"✅ Ro'yxatdan o'tdingiz!",ru:"✅ Вы зарегистрированы!"},
 };
 function L(k){ const e=I18N[k]; return e ? (e[LANG]||e.uz) : k; }
 function activeCatModeShops(){ try{ return document.querySelector('#catMode .opt[data-mode=shops]').classList.contains('on'); }catch(e){ return false; } }
@@ -682,7 +696,7 @@ function applyStaticI18n(){
     ttl_staffview:'sp_ov_staff',ttl_schedview:'sp_ov_sched',ttl_deliverform:'sp_ov_deliver',
     ttl_checkout:'bp_ov_checkout',ttl_meform:'bp_ov_meform',ttl_cartview:'cart_title',
     ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',
-    ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title'};
+    ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
 }
@@ -1465,12 +1479,68 @@ document.getElementById('meClose').onclick = closeProfileEdit;
 let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, SELLER_ORDERS_LIST = [], dState = {}, appMode = 'buyer';
 
 async function loadMe(){
-  try{ ME = await api('/api/me'); }catch(e){ ME = null; }
+  let needReg=false;
+  try{
+    const r = await fetch('/api/me', {headers:{Authorization:AUTH}});
+    if(r.status===403){ ME=null; needReg=true; }       // ro'yxatdan o'tmagan
+    else if(r.ok){ ME = await r.json(); }
+    else { ME=null; }
+  }catch(e){ ME=null; }
   try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
+  if(needReg){ showRegistration(); return; }            // app ichida ro'yxatdan o'tish
   // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz
   if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); if(catMode==='products') loadProducts(); }
   applyMode();
   applyStaticI18n();
+}
+
+// ---------- RO'YXATDAN O'TISH (app ichida — yangi xaridor) ----------
+let regState={name:'',phone:'',lang:'uz'};
+function showRegistration(){
+  const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
+  const rl = String(u.language_code||'').toLowerCase().startsWith('ru') ? 'ru' : 'uz';
+  LANG = rl; applyStaticI18n();
+  regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl };
+  renderRegistration();
+  document.getElementById('regview').classList.add('open');
+}
+function renderRegistration(){
+  const tt=document.getElementById('ttl_regview'); if(tt) tt.textContent=L('reg_title');
+  const b=document.getElementById('regBody');
+  b.innerHTML=`<div class="cobody">
+    <div style="font-size:13.5px;color:var(--hint);line-height:1.5;margin-bottom:4px">${L('reg_welcome')}</div>
+    <div class="cosec"><div class="lbl">${L('reg_name')}</div>
+      <input class="coaddr" id="regName" style="min-height:auto" placeholder="${L('reg_name_ph')}" value="${esc(regState.name)}"></div>
+    <div class="cosec"><div class="lbl">${L('reg_phone')}</div>
+      <input class="coaddr" id="regPhone" type="tel" inputmode="tel" style="min-height:auto" placeholder="${L('reg_phone_ph')}" value="${esc(regState.phone)}"></div>
+    <div class="cosec"><div class="lbl">${L('reg_lang')}</div>
+      <div class="seg">
+        <div class="opt ${regState.lang==='uz'?'on':''}" data-rl="uz">🇺🇿 O‘zbekcha</div>
+        <div class="opt ${regState.lang==='ru'?'on':''}" data-rl="ru">🇷🇺 Русский</div>
+      </div></div>
+  </div>
+  <div class="cobar"><button id="regSubmit">${L('reg_submit')}</button></div>`;
+  document.getElementById('regName').oninput=e=>regState.name=e.target.value;
+  document.getElementById('regPhone').oninput=e=>regState.phone=e.target.value;
+  b.querySelectorAll('[data-rl]').forEach(o=>o.onclick=()=>{ regState.lang=o.dataset.rl; LANG=regState.lang; applyStaticI18n(); renderRegistration(); });
+  document.getElementById('regSubmit').onclick=submitRegistration;
+}
+async function submitRegistration(){
+  const name=(regState.name||'').trim();
+  if(name.length<3){ tg.showAlert(L('reg_bad_name')); return; }
+  if(!(regState.phone||'').trim()){ tg.showAlert(L('reg_bad_phone')); return; }
+  const btn=document.getElementById('regSubmit'); btn.disabled=true; btn.textContent=L('sending');
+  try{
+    await apiSend('/api/register','POST',{name, phone:regState.phone.trim(), language:regState.lang});
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('regview').classList.remove('open');
+    tg.showAlert(L('reg_success'));
+    await loadMe(); loadCategories(); loadProducts(); switchTab('catalog');
+  }catch(e){
+    btn.disabled=false; btn.textContent=L('reg_submit');
+    const m=e.message;
+    tg.showAlert(m==='bad_phone'?L('reg_bad_phone'):m==='bad_name'?L('reg_bad_name'):(L('err')+': '+m));
+  }
 }
 
 // ---------- REJIM: XARIDOR / SOTUVCHI panellari ALOHIDA ----------

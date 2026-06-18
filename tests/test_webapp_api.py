@@ -231,3 +231,32 @@ def test_seller_customers_lists_buyer(client):
     assert r.status_code == 200
     rows = r.json()
     assert any(c["name"] == "Buyer" and c["orders_count"] >= 1 for c in rows)
+
+
+# ===== App ichida ro'yxatdan o'tish =====
+def test_register_requires_auth(client):
+    assert client.post("/api/register", json={"name": "X", "phone": "998901112233"}).status_code == 401
+
+
+def test_me_unregistered_403_then_register_200(client):
+    # Yangi tg_id — avval ro'yxatda yo'q
+    assert client.get("/api/me", headers=hdr(6001)).status_code == 403
+    r = client.post("/api/register", headers=hdr(6001),
+                    json={"name": "Yangi Xaridor", "phone": "901234567", "language": "uz"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    # Endi ro'yxatda — /api/me ishlaydi, telefon normallashgan
+    me = client.get("/api/me", headers=hdr(6001))
+    assert me.status_code == 200 and me.json()["phone"] == "+998901234567"
+
+
+def test_register_bad_phone_400(client):
+    r = client.post("/api/register", headers=hdr(6002),
+                    json={"name": "Test User", "phone": "123"})
+    assert r.status_code == 400
+
+
+def test_register_idempotent_for_existing(client):
+    # Mavjud foydalanuvchi (5001) — qayta yaratilmaydi, ok qaytaradi
+    r = client.post("/api/register", headers=hdr(5001),
+                    json={"name": "X", "phone": "998901112233"})
+    assert r.status_code == 200 and r.json().get("already") is True
