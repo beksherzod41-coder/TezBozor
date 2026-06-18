@@ -16,7 +16,7 @@ import os
 import html
 import hashlib
 import logging
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -373,7 +373,17 @@ class ProductIn(BaseModel):
     category_id: Optional[int] = None
     description: Optional[str] = None
     stock_count: Optional[int] = None
-    image_url: Optional[str] = None  # Telegram file_id
+    image_url: Optional[str] = None  # eski: bitta file_id (moslik uchun)
+    images: Optional[List[str]] = None  # galereya: file_id ro'yxati (1-chi = asosiy)
+
+
+def _images_list(p):
+    """ProductIn/ProductEdit'dan rasm ro'yxatini chiqaradi (images ustun, bo'lmasa image_url)."""
+    if p.images is not None:
+        return [f for f in p.images if f][:4]
+    if p.image_url:
+        return [p.image_url]
+    return None
 
 
 @app.post("/api/seller/product")
@@ -386,11 +396,17 @@ def api_create_product(p: ProductIn, authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail="bad_price")
     if p.stock_count is not None and p.stock_count < 0:
         raise HTTPException(status_code=400, detail="bad_stock")
+    imgs = _images_list(p)
     pid = db.create_product(
         seller_id=user["id"], name=name, price=float(p.price),
         category_id=p.category_id, description=(p.description or "").strip() or None,
-        image_url=p.image_url, stock_count=p.stock_count, created_by=user["id"],
+        image_url=(imgs[0] if imgs else None), stock_count=p.stock_count, created_by=user["id"],
     )
+    if imgs:
+        try:
+            db.set_product_images(pid, imgs)
+        except Exception as e:
+            logging.warning(f"set_product_images xato (pid {pid}): {e}")
     fields = {"in_stock": 1, "status": "active"}
     if user.get("region_id"):
         fields["region_id"] = user["region_id"]
@@ -407,6 +423,7 @@ class ProductEdit(BaseModel):
     description: Optional[str] = None
     stock_count: Optional[int] = None
     image_url: Optional[str] = None
+    images: Optional[List[str]] = None
 
 
 @app.patch("/api/seller/product/{product_id}")
@@ -429,10 +446,13 @@ def api_edit_product(product_id: int, p: ProductEdit, authorization: str = Heade
         if p.stock_count < 0:
             raise HTTPException(status_code=400, detail="bad_stock")
         fields["stock_count"] = p.stock_count
-    if p.image_url is not None:
-        fields["image_url"] = p.image_url
     if fields:
         db.update_product_fields(product_id, **fields)
+    # Rasmlar (galereya) — berilgan bo'lsa to'liq almashtiramiz (image_url ham sinxronlanadi)
+    if p.images is not None:
+        db.set_product_images(product_id, [f for f in p.images if f][:4])
+    elif p.image_url is not None:
+        db.update_product_fields(product_id, image_url=p.image_url)
     return {"ok": True}
 
 

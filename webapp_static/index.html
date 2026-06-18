@@ -246,6 +246,19 @@
            cursor:pointer; border:1.5px dashed #d3d3da;}
   .pfphoto img{width:100%; height:100%; object-fit:cover;}
   .pfedit-hint{font-size:11px; color:var(--hint); margin-top:6px; text-align:center;}
+  /* ko'p rasmli galereya */
+  .pfimgs{display:flex; gap:8px; flex-wrap:wrap;}
+  .pfthumb{position:relative; width:74px; height:74px; border-radius:12px; overflow:hidden;
+           box-shadow:var(--shadow); background:#ececed; flex:0 0 auto;}
+  .pfthumb img{width:100%; height:100%; object-fit:cover;}
+  .pfx{position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%;
+       background:rgba(0,0,0,.55); color:#fff; font-size:11px; display:flex; align-items:center;
+       justify-content:center; cursor:pointer;}
+  .pfmain{position:absolute; bottom:0; left:0; right:0; background:rgba(112,0,255,.85); color:#fff;
+          font-size:9px; text-align:center; padding:2px 0; font-weight:700;}
+  .pfadd{width:74px; height:74px; border-radius:12px; border:1.5px dashed #c9c9d2; display:flex;
+         align-items:center; justify-content:center; cursor:pointer; color:var(--accent);
+         font-size:30px; background:var(--card); flex:0 0 auto;}
 </style>
 </head>
 <body>
@@ -797,24 +810,28 @@ function openProductForm(prod){
   pf = prod ? {
     id: prod.id, name: prod.name||'', price: prod.price||'', category_id: prod.category_id||null,
     description: prod.description||'', stock_count: (prod.stock_count==null?'':prod.stock_count),
-    image_url: prod.image_url||null, in_stock: prod.in_stock
-  } : { id:null, name:'', price:'', category_id:null, description:'', stock_count:'', image_url:null };
+    images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
+  } : { id:null, name:'', price:'', category_id:null, description:'', stock_count:'', images:[] };
   document.getElementById('pfTitle').textContent = pf.id ? 'Mahsulotni tahrirlash' : 'Yangi mahsulot';
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
   document.getElementById('prodform').scrollTop = 0;
+  // Tahrirda to'liq galereyani fon'da yuklaymiz (bir nechta rasm bo'lsa)
+  if(prod) api('/api/products/'+prod.id).then(d=>{
+    if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,4); renderProductForm(); }
+  }).catch(()=>{});
 }
 
 function renderProductForm(){
   const body = document.getElementById('prodformBody');
   const isEdit = !!pf.id;
-  const imgInner = pf.image_url
-    ? `<img src="${imgUrl(pf.image_url)}">`
-    : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--hint)"><span style="font-size:34px">📷</span><span style="font-size:12.5px">Rasm qo'shish</span></div>`;
+  const thumbs = pf.images.map((fid,i)=>
+    `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
+  const addTile = pf.images.length<4
+    ? `<label class="pfadd">＋<input type="file" id="pfFile" accept="image/*" style="display:none"></label>` : '';
   body.innerHTML = `<div class="cobody">
-    <div>
-      <label class="pfphoto">${imgInner}<input type="file" id="pfFile" accept="image/*" style="display:none"></label>
-      ${pf.image_url?`<div class="pfedit-hint">Rasmni o'zgartirish uchun bosing</div>`:''}
+    <div class="cosec"><div class="lbl">Rasmlar (${pf.images.length}/4 — 1-chi asosiy)</div>
+      <div class="pfimgs">${thumbs}${addTile}</div>
     </div>
     <div class="cosec"><div class="lbl">Nomi</div>
       <input class="coaddr" id="pfName" style="min-height:auto" placeholder="Mahsulot nomi" value="${esc(pf.name)}"></div>
@@ -831,7 +848,8 @@ function renderProductForm(){
   </div>
   <div class="cobar"><button id="pfSave">${isEdit?'💾 Saqlash':"➕ Qo'shish"}</button></div>`;
 
-  document.getElementById('pfFile').onchange = onPhotoPick;
+  const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
+  body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ pf.images.splice(Number(x.dataset.rm),1); renderProductForm(); });
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
   document.getElementById('pfPrice').oninput = e=>pf.price=e.target.value;
   document.getElementById('pfStock').oninput = e=>pf.stock_count=e.target.value;
@@ -847,13 +865,13 @@ function renderProductForm(){
 
 async function onPhotoPick(e){
   const f = e.target.files[0]; if(!f) return;
-  const box = document.querySelector('.pfphoto');
-  box.innerHTML = `<div class="loading" style="padding:0">⏳ Yuklanmoqda...</div>`;
+  const add = document.querySelector('.pfadd');
+  if(add) add.innerHTML = `<div class="loading" style="padding:0;font-size:18px">⏳</div>`;
   const fd = new FormData(); fd.append('file', f);
   try{
     const r = await fetch('/api/seller/product/photo', {method:'POST', headers:{Authorization:AUTH}, body:fd});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
-    pf.image_url = (await r.json()).file_id;
+    pf.images.push((await r.json()).file_id);
   }catch(err){ tg.showAlert("Rasm yuklanmadi: "+err.message); }
   renderProductForm();
 }
@@ -869,7 +887,7 @@ async function saveProduct(){
     category_id: pf.category_id || null,
     description: (pf.description||'').trim() || null,
     stock_count: (pf.stock_count===''||pf.stock_count==null) ? null : Number(pf.stock_count),
-    image_url: pf.image_url || null,
+    images: pf.images || [],
   };
   try{
     const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';
