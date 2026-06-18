@@ -556,8 +556,34 @@ async function openDetail(id){
   }
 }
 
+// ---------- LOKATSIYA (Telegram LocationManager yoki brauzer geolocation) ----------
+function getLocation(){
+  return new Promise((resolve)=>{
+    try{
+      const lm = tg.LocationManager;
+      if(lm && typeof lm.getLocation==='function'){
+        const grab=()=>lm.getLocation(d=>resolve(d&&d.latitude?{lat:d.latitude,lon:d.longitude}:null));
+        if(lm.isInited) grab(); else lm.init(grab);
+        return;
+      }
+    }catch(e){}
+    if(navigator.geolocation){
+      navigator.geolocation.getCurrentPosition(
+        p=>resolve({lat:p.coords.latitude, lon:p.coords.longitude}),
+        ()=>resolve(null), {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
+    } else resolve(null);
+  });
+}
+async function captureLocation(setter, btnId){
+  const btn=document.getElementById(btnId); if(btn){ btn.disabled=true; btn.textContent='📍 Olinmoqda...'; }
+  const loc=await getLocation();
+  if(loc){ setter(loc); try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){} }
+  else tg.showAlert("Joylashuvni olib bo'lmadi. Brauzer/Telegram ruxsatini tekshiring yoki manzilni matnda yozing.");
+  return loc;
+}
+
 // ---------- CHECKOUT (to'liq app ichida) ----------
-let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='';
+let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='', coLat=null, coLon=null;
 const PAYMENTS = [['cash',"💵 Naqd pul"],['terminal',"💳 Terminal (karta)"],['p2p',"📲 Karta raqamiga (P2P)"]];
 
 async function openCheckout(id){
@@ -568,7 +594,7 @@ async function openCheckout(id){
   try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
   try{
     coProduct = await api('/api/products/'+id);
-    coQty=1; coDelivery='pickup'; coPayment='cash'; coAddrText='';
+    coQty=1; coDelivery='pickup'; coPayment='cash'; coAddrText=''; coLat=null; coLon=null;
     renderCheckout();
   }catch(e){
     body.innerHTML = `<div class="empty"><span class="big">⚠️</span>Xatolik: ${esc(e.message)}</div>`;
@@ -601,6 +627,7 @@ function renderCheckout(){
           <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">🚚 Yetkazib berish</div>
         </div>
         <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
+          <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;${coLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${coLat?'✓ Joylashuv olindi (qayta olish)':'📍 Joylashuvni yuborish'}</button>
           <textarea class="coaddr" id="coAddr" placeholder="Manzil: ko'cha, uy raqami, mo'ljal...">${esc(coAddrText)}</textarea>
         </div>
       </div>
@@ -621,6 +648,8 @@ function renderCheckout(){
   body.querySelectorAll('[data-pay]').forEach(o=>o.onclick=()=>{ coPayment=o.dataset.pay; renderCheckout(); });
   const addr = body.querySelector('#coAddr');
   if(addr) addr.oninput=()=>{ coAddrText = addr.value; };
+  const locBtn = body.querySelector('#coLocBtn');
+  if(locBtn) locBtn.onclick = async()=>{ await captureLocation(l=>{ coLat=l.lat; coLon=l.lon; }, 'coLocBtn'); renderCheckout(); };
   body.querySelector('#coSubmit').onclick = submitOrder;
 }
 
@@ -636,7 +665,9 @@ async function submitOrder(){
       body: JSON.stringify({
         product_id: coProduct.id, quantity: coQty,
         delivery_type: coDelivery, payment_method: coPayment,
-        address: coDelivery==='delivery' ? coAddrText.trim() : null
+        address: coDelivery==='delivery' ? coAddrText.trim() : null,
+        lat: coDelivery==='delivery' ? coLat : null,
+        lon: coDelivery==='delivery' ? coLon : null
       })
     });
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
@@ -666,7 +697,7 @@ function closeCheckout(){ document.getElementById('checkout').classList.remove('
 document.getElementById('coClose').onclick = closeCheckout;
 
 // ---------- SAVAT (client-side, bitta sotuvchi) ----------
-let CART = _loadCart(), CATALOG_ITEMS = [], kDlv='pickup', kPay='cash', kAddr='';
+let CART = _loadCart(), CATALOG_ITEMS = [], kDlv='pickup', kPay='cash', kAddr='', kLat=null, kLon=null;
 function _loadCart(){ try{ return JSON.parse(localStorage.getItem('tb_cart')||'null') || {seller_id:null,seller_name:'',items:{}}; }catch(e){ return {seller_id:null,seller_name:'',items:{}}; } }
 function _saveCart(){ try{ localStorage.setItem('tb_cart', JSON.stringify(CART)); }catch(e){} updateCartFab(); }
 function cartCount(){ return Object.values(CART.items).reduce((s,i)=>s+i.qty,0); }
@@ -702,7 +733,7 @@ function cartSetQty(pid,d){
 }
 function cartRemove(pid){ delete CART.items[String(pid)]; if(cartCount()===0){CART.seller_id=null;CART.seller_name='';} _saveCart(); renderCart(); }
 
-function openCart(){ kDlv='pickup'; kPay='cash'; kAddr=''; renderCart(); document.getElementById('cartview').classList.add('open'); document.getElementById('cartview').scrollTop=0; }
+function openCart(){ kDlv='pickup'; kPay='cash'; kAddr=''; kLat=null; kLon=null; renderCart(); document.getElementById('cartview').classList.add('open'); document.getElementById('cartview').scrollTop=0; }
 function closeCart(){ document.getElementById('cartview').classList.remove('open'); }
 
 function renderCart(){
@@ -728,7 +759,10 @@ function renderCart(){
         <div class="opt ${kDlv==='pickup'?'on':''}" data-kdlv="pickup">🚶 Olib ketaman</div>
         <div class="opt ${kDlv==='delivery'?'on':''}" data-kdlv="delivery">🚚 Yetkazib berish</div>
       </div>
-      <div style="${kDlv==='delivery'?'':'display:none'}"><textarea class="coaddr" id="kAddrInp" placeholder="Manzil: ko'cha, uy, mo'ljal...">${esc(kAddr)}</textarea></div>
+      <div style="${kDlv==='delivery'?'':'display:none'}">
+        <button class="oact ok" id="kLocBtn" style="width:100%;margin-top:10px;${kLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${kLat?'✓ Joylashuv olindi (qayta olish)':'📍 Joylashuvni yuborish'}</button>
+        <textarea class="coaddr" id="kAddrInp" placeholder="Manzil: ko'cha, uy, mo'ljal...">${esc(kAddr)}</textarea>
+      </div>
     </div>
     <div class="cosec"><div class="lbl">To'lov usuli</div>
       <div class="seg col">${PAYMENTS.map(([k,l])=>`<div class="opt ${kPay===k?'on':''}" data-kpay="${k}">${l}</div>`).join('')}</div>
@@ -744,6 +778,8 @@ function renderCart(){
   body.querySelectorAll('[data-kdlv]').forEach(o=>o.onclick=()=>{ kDlv=o.dataset.kdlv; renderCart(); });
   body.querySelectorAll('[data-kpay]').forEach(o=>o.onclick=()=>{ kPay=o.dataset.kpay; renderCart(); });
   const ai=body.querySelector('#kAddrInp'); if(ai) ai.oninput=()=>{ kAddr=ai.value; };
+  const kloc=body.querySelector('#kLocBtn');
+  if(kloc) kloc.onclick=async()=>{ await captureLocation(l=>{ kLat=l.lat; kLon=l.lon; }, 'kLocBtn'); renderCart(); };
   document.getElementById('kSubmit').onclick=cartCheckout;
 }
 
@@ -755,7 +791,8 @@ async function cartCheckout(){
   btn.disabled=true; btn.textContent='Yuborilmoqda...';
   try{
     const r=await fetch('/api/cart/checkout',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},
-      body:JSON.stringify({seller_id:CART.seller_id, items, delivery_type:kDlv, payment_method:kPay, address:kDlv==='delivery'?kAddr.trim():null})});
+      body:JSON.stringify({seller_id:CART.seller_id, items, delivery_type:kDlv, payment_method:kPay,
+        address:kDlv==='delivery'?kAddr.trim():null, lat:kDlv==='delivery'?kLat:null, lon:kDlv==='delivery'?kLon:null})});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     const res=await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
