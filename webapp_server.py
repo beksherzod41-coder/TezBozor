@@ -37,6 +37,10 @@ from languages import t, get_user_lang, DEFAULT_LANG
 from tezbozor_design import fmt_order_id
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or "0")
+except ValueError:
+    ADMIN_ID = 0
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp_static")
 IMG_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img_cache")
 os.makedirs(IMG_CACHE_DIR, exist_ok=True)
@@ -82,12 +86,64 @@ def api_products(
     category_id: int = Query(None),
     sort: str = Query("rating"),
     region_id: int = Query(None),
+    seller_id: int = Query(None),
 ):
     require_auth(authorization)
     items = db.search_products(
-        query=q, category_id=category_id, sort_by=sort, region_id=region_id
+        query=q, category_id=category_id, sort_by=sort, region_id=region_id,
+        seller_id=seller_id,
     )
     return _rows(items)
+
+
+@app.get("/api/shops")
+def api_shops(authorization: str = Header(None), q: str = Query(None)):
+    require_auth(authorization)
+    return _rows(db.search_shops(query=q))
+
+
+class ContactIn(BaseModel):
+    text: str
+
+
+@app.post("/api/contact-admin")
+async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="too_long")
+    if not ADMIN_ID:
+        raise HTTPException(status_code=503, detail="no_admin")
+    uname = user.get("telegram_username")
+    contact = f"@{uname}" if uname else (user.get("phone_number") or "")
+    msg = (f"📩 Foydalanuvchi murojaati (Mini App)\n"
+           f"👤 {html.escape(user.get('name') or '')} {html.escape(contact)}\n"
+           f"🆔 {user.get('telegram_id')}\n\n{html.escape(text)}")
+    await _tg_call("sendMessage", {"chat_id": ADMIN_ID, "text": msg, "parse_mode": "HTML"})
+    return {"ok": True}
+
+
+@app.post("/api/become-seller")
+async def api_become_seller(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") in ("seller", "admin") or user.get("is_approved"):
+        raise HTTPException(status_code=409, detail="already_seller")
+    existing = db.get_seller_request_by_user(user["id"])
+    if existing and existing.get("status") == "pending":
+        raise HTTPException(status_code=409, detail="already_pending")
+    db.create_seller_request(user["id"])
+    try:
+        if ADMIN_ID:
+            await _tg_call("sendMessage", {
+                "chat_id": ADMIN_ID,
+                "text": (f"🏪 Yangi sotuvchi arizasi (Mini App)\n"
+                         f"👤 {html.escape(user.get('name') or '')}\n🆔 {user.get('telegram_id')}"),
+                "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"become-seller notify xato: {e}")
+    return {"ok": True}
 
 
 @app.get("/api/products/{product_id}")
@@ -254,6 +310,8 @@ def api_me(authorization: str = Header(None)):
         "id": b.get("id"), "name": b.get("name"), "phone": b.get("phone_number"),
         "username": b.get("telegram_username"), "role": b.get("role"),
         "language": b.get("language"), "created_at": b.get("created_at"),
+        "is_approved": b.get("is_approved"),
+        "referral_code": b.get("referral_code"), "referral_count": b.get("referral_count"),
     }
 
 

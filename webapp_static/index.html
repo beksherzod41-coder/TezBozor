@@ -309,6 +309,10 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input class="search" id="search" placeholder="Mahsulot qidirish...">
       </div>
+      <div class="seg" id="catMode" style="margin-top:8px">
+        <div class="opt on" data-mode="products">🛍 Mahsulotlar</div>
+        <div class="opt" data-mode="shops">🏪 Do'konlar</div>
+      </div>
     </div>
     <div class="chips" id="chips"></div>
     <div id="content"></div>
@@ -330,6 +334,14 @@
       <div class="bk" id="backBtn">‹ Orqaga</div>
     </div>
     <div id="detailBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="detail" id="shopview">
+    <div class="dtop">
+      <div class="bk" id="shopClose">‹ Orqaga</div>
+      <span id="shopTitle" style="font-weight:700;margin-left:4px;font-size:15px"></span>
+    </div>
+    <div id="shopBody"></div>
   </div>
 
   <div class="checkout" id="checkout">
@@ -366,6 +378,11 @@
   <div class="checkout" id="debtsview">
     <div class="cohead"><span>💳 Qarzlarim</span><span class="x" id="dbClose">✕</span></div>
     <div id="debtsBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="contactform">
+    <div class="cohead"><span>📞 Admin bilan bog'lanish</span><span class="x" id="caClose">✕</span></div>
+    <div id="contactBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
 <script>
@@ -842,7 +859,56 @@ tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
   const co = document.getElementById('checkout');
   if(co.classList.contains('open')) closeCheckout(); else closeDetail();
 });
-document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(loadProducts,350); };
+// ---------- DO'KON QIDIRISH ----------
+let catMode='products', SHOP_ITEMS=[];
+document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
+  catMode=o.dataset.mode;
+  document.querySelectorAll('#catMode .opt').forEach(x=>x.classList.toggle('on',x.dataset.mode===catMode));
+  document.getElementById('chips').style.display = catMode==='products'?'':'none';
+  document.getElementById('search').value='';
+  document.getElementById('search').placeholder = catMode==='products'?'Mahsulot qidirish...':"Do'kon qidirish...";
+  document.getElementById('cartFab').style.display = catMode==='products'? (cartCount()>0?'flex':'none') : 'none';
+  if(catMode==='products') loadProducts(); else loadShops();
+});
+
+function shopCardHtml(s){
+  const r=s.avg_rating? `⭐ ${Number(s.avg_rating).toFixed(1)}`:'';
+  return `<div class="ocard" data-shop="${s.id}" data-name="${esc(s.shop_name||'')}" style="cursor:pointer">
+    <div class="oname">🏪 ${esc(s.shop_name||'')}</div>
+    <div class="ometa">${s.product_count||0} mahsulot${r?' · '+r:''}</div>
+    ${s.shop_address?`<div class="oshop">📍 ${esc(s.shop_address)}</div>`:''}
+    <div style="color:var(--accent);font-size:13px;font-weight:600;margin-top:6px">Mahsulotlarni ko'rish ›</div>
+  </div>`;
+}
+async function loadShops(){
+  const content=document.getElementById('content');
+  content.innerHTML=skeleton();
+  const q=document.getElementById('search').value.trim();
+  try{
+    const shops=await api('/api/shops'+(q?('?q='+encodeURIComponent(q)):''));
+    if(!shops.length){ content.innerHTML=`<div class="empty"><span class="big">🏪</span>Do'kon topilmadi</div>`; return; }
+    content.innerHTML=`<div class="olist" style="padding:10px 12px">${shops.map(shopCardHtml).join('')}</div>`;
+    content.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>openShop(c.dataset.shop, c.dataset.name));
+  }catch(e){ content.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+async function openShop(sellerId, name){
+  document.getElementById('shopview').classList.add('open');
+  document.getElementById('shopview').scrollTop=0;
+  document.getElementById('shopTitle').textContent='🏪 '+(name||'Do\'kon');
+  const body=document.getElementById('shopBody'); body.innerHTML=skeleton();
+  try{
+    const items=await api('/api/products?seller_id='+sellerId);
+    SHOP_ITEMS=items;
+    if(!items.length){ body.innerHTML=`<div class="empty"><span class="big">📦</span>Mahsulot yo'q</div>`; return; }
+    body.innerHTML=`<div class="grid">${items.map(cardHtml).join('')}</div>`;
+    body.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+    body.querySelectorAll('[data-cart]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); const p=SHOP_ITEMS.find(x=>String(x.id)===b.dataset.cart); if(p) cartAdd(p); });
+  }catch(e){ body.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+function closeShop(){ document.getElementById('shopview').classList.remove('open'); }
+document.getElementById('shopClose').onclick=closeShop;
+
+document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='products'?loadProducts():loadShops(); },350); };
 
 // ---------- TAB NAVIGATSIYA ----------
 function switchTab(tab){
@@ -954,8 +1020,20 @@ async function loadProfile(){
         <div class="prow"><span>🌐 Til</span><b>${langLabel}</b></div>
         <div class="prow"><span>🗓 Ro'yxatdan</span><b>${fmtDate(me.created_at)}</b></div>
       </div>
-      <div style="padding:12px"><button class="oact ok" id="meEditBtn" style="width:100%">✏️ Profilni tahrirlash</button></div>`;
+      ${me.referral_code?`<div class="pinfo" style="padding:14px">
+        <div style="font-size:12px;color:var(--hint);font-weight:600;text-transform:uppercase">🎁 Do'stlarni taklif qiling</div>
+        <div style="font-size:13px;margin:6px 0 10px">Taklif qilingan: <b>${me.referral_count||0}</b></div>
+        <button class="oact ok" id="refShareBtn" style="width:100%">📨 Havolani ulashish</button>
+      </div>`:''}
+      <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
+        <button class="oact ok" id="meEditBtn" style="width:100%">✏️ Profilni tahrirlash</button>
+        ${(me.role!=='seller' && !me.is_approved)?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">🏪 Sotuvchi bo'lish</button>`:''}
+        <button class="oact no" id="contactAdminBtn" style="width:100%;background:var(--bg);color:var(--accent)">📞 Admin bilan bog'lanish</button>
+      </div>`;
     document.getElementById('meEditBtn').onclick = openProfileEdit;
+    const rb=document.getElementById('refShareBtn'); if(rb) rb.onclick=()=>shareReferral(me.referral_code);
+    const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
+    document.getElementById('contactAdminBtn').onclick=openContact;
   }catch(e){
     v.innerHTML = `<div class="vhead">Profil</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
   }
@@ -1003,13 +1081,62 @@ function closeProfileEdit(){ document.getElementById('meform').classList.remove(
 document.getElementById('meClose').onclick = closeProfileEdit;
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
-let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {};
+let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null;
 
 async function loadMe(){
   try{ ME = await api('/api/me'); }catch(e){ ME = null; }
+  try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
   if(ME && (ME.role==='seller' || ME.role==='admin'))
     document.getElementById('navSeller').style.display = '';
 }
+
+function shareReferral(code){
+  const link = BOT_USERNAME ? `https://t.me/${BOT_USERNAME}?start=${code}` : null;
+  if(!link){ tg.showAlert("Havola tayyor emas, birozdan keyin urinib ko'ring."); return; }
+  const txt = "TezBozor — onlayn bozor! Mana havolam orqali qo'shiling:";
+  try{ tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(txt)}`); }
+  catch(e){ tg.showAlert(link); }
+}
+
+function becomeSeller(){
+  const doIt=async()=>{
+    try{
+      const r=await fetch('/api/become-seller',{method:'POST',headers:{Authorization:AUTH}});
+      if(!r.ok){ const d=await r.json().catch(()=>({}));
+        if(d.detail==='already_pending'){ tg.showAlert("Arizangiz allaqachon ko'rib chiqilmoqda."); return; }
+        if(d.detail==='already_seller'){ tg.showAlert("Siz allaqachon sotuvchisiz."); return; }
+        throw new Error(d.detail||('HTTP '+r.status)); }
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      tg.showAlert("✅ Ariza yuborildi! Admin ko'rib chiqadi.");
+    }catch(e){ tg.showAlert("Xatolik: "+e.message); }
+  };
+  if(tg.showConfirm) tg.showConfirm("Sotuvchi bo'lish uchun ariza yuborilsinmi?", ok=>{ if(ok) doIt(); });
+  else doIt();
+}
+
+function openContact(){
+  const body=document.getElementById('contactBody');
+  body.innerHTML=`<div class="cobody">
+    <div style="font-size:13px;color:var(--hint)">Savol yoki muammoyingizni yozing — admin javob beradi.</div>
+    <textarea class="coaddr" id="caText" style="min-height:120px" placeholder="Xabaringiz..."></textarea>
+  </div><div class="cobar"><button id="caSend">📨 Yuborish</button></div>`;
+  document.getElementById('caSend').onclick=sendContact;
+  document.getElementById('contactform').classList.add('open');
+}
+async function sendContact(){
+  const text=(document.getElementById('caText').value||'').trim();
+  if(!text){ tg.showAlert("Xabar yozing."); return; }
+  const btn=document.getElementById('caSend'); btn.disabled=true; btn.textContent='Yuborilmoqda...';
+  try{
+    const r=await fetch('/api/contact-admin',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('contactform').classList.remove('open');
+    tg.showAlert("✅ Xabaringiz adminga yuborildi.");
+  }catch(e){ btn.disabled=false; btn.textContent='📨 Yuborish'; tg.showAlert("Yuborilmadi: "+e.message); }
+}
+function closeContact(){ document.getElementById('contactform').classList.remove('open'); }
+document.getElementById('caClose').onclick = closeContact;
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
