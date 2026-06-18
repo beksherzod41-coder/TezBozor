@@ -405,6 +405,11 @@
     <div id="shopFormBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="replyform">
+    <div class="cohead"><span>💬 Sharhga javob</span><span class="x" id="replyClose">✕</span></div>
+    <div id="replyBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1248,17 +1253,58 @@ function loadSeller(){
   const v = document.getElementById('viewSeller');
   v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></div>
     <div class="seg" style="margin:0 12px 6px">
-      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:11px 6px;font-size:12.5px">📥 Buyurtma</div>
-      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:11px 6px;font-size:12.5px">📦 Mahsulot</div>
-      <div class="opt ${sellerSub==='stats'?'on':''}" data-sub="stats" style="padding:11px 6px;font-size:12.5px">📊 Stat</div>
+      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:10px 4px;font-size:11.5px">📥 Buyurtma</div>
+      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:10px 4px;font-size:11.5px">📦 Mahsulot</div>
+      <div class="opt ${sellerSub==='stats'?'on':''}" data-sub="stats" style="padding:10px 4px;font-size:11.5px">📊 Stat</div>
+      <div class="opt ${sellerSub==='reviews'?'on':''}" data-sub="reviews" style="padding:10px 4px;font-size:11.5px">💬 Sharh</div>
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
   document.getElementById('shopSetBtn').onclick = openShopSettings;
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
-  else loadSellerStats();
+  else if(sellerSub==='stats') loadSellerStats();
+  else loadSellerReviews();
 }
+
+function reviewCard(r){
+  return `<div class="ocard">
+    <div class="orow1"><span class="stars"><b style="color:var(--star)">★</b> ${r.rating||'-'}${r.product_rating?` · mahsulot ${r.product_rating}★`:''}</span><span class="odate">${fmtDate(r.created_at)}</span></div>
+    <div style="font-size:13px;color:var(--hint)">👤 ${esc(r.buyer_name||'')} · ${esc(r.product_name||'')}</div>
+    ${r.comment?`<div class="ddesc" style="font-size:14px;margin-top:6px">${esc(r.comment)}</div>`:'<div style="font-size:12px;color:var(--hint);margin-top:4px">(izohsiz baho)</div>'}
+    ${r.seller_reply
+      ? `<div style="margin-top:9px;background:var(--accent-soft);border-radius:10px;padding:9px 11px;font-size:13px"><b style="color:var(--accent)">Javobingiz:</b> ${esc(r.seller_reply)}</div>`
+      : `<button class="oact ok" data-reply="${r.id}" style="width:100%;margin-top:9px;background:var(--accent-soft);color:var(--accent);box-shadow:none">💬 Javob berish</button>`}
+  </div>`;
+}
+async function loadSellerReviews(){
+  const b=document.getElementById('sellerBody');
+  b.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const revs=await api('/api/seller/reviews');
+    if(!revs.length){ b.innerHTML=`<div class="empty"><span class="big">💬</span>Hali sharh yo'q</div>`; return; }
+    b.innerHTML=`<div class="olist">${revs.map(reviewCard).join('')}</div>`;
+    b.querySelectorAll('[data-reply]').forEach(btn=>btn.onclick=()=>openReply(btn.dataset.reply));
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+let replyRid=null;
+function openReply(rid){
+  replyRid=rid;
+  document.getElementById('replyBody').innerHTML=`<div class="cobody"><div class="cosec"><div class="lbl">Mijozga ochiq javob</div><textarea class="coaddr" id="rpText" placeholder="Rahmat! Yana tashrif buyuring..."></textarea></div></div><div class="cobar"><button id="rpSend">📨 Javob yuborish</button></div>`;
+  document.getElementById('rpSend').onclick=sendReply;
+  document.getElementById('replyform').classList.add('open');
+}
+async function sendReply(){
+  const txt=(document.getElementById('rpText').value||'').trim(); if(!txt){ tg.showAlert("Javob yozing."); return; }
+  const btn=document.getElementById('rpSend'); btn.disabled=true; btn.textContent='Yuborilmoqda...';
+  try{
+    const r=await fetch('/api/seller/review/'+replyRid+'/reply',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({text:txt})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('replyform').classList.remove('open'); loadSellerReviews();
+  }catch(e){ btn.disabled=false; btn.textContent='📨 Javob yuborish'; tg.showAlert("Xatolik: "+e.message); }
+}
+document.getElementById('replyClose')?.addEventListener('click',()=>document.getElementById('replyform').classList.remove('open'));
 
 // ---------- DO'KON SOZLAMALARI ----------
 let shopForm={};

@@ -554,6 +554,43 @@ def api_seller_products(authorization: str = Header(None)):
     return _rows(db.get_products_by_seller(user["id"]))
 
 
+@app.get("/api/seller/reviews")
+def api_seller_reviews(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_reviews(user["id"]))
+
+
+class ReplyIn(BaseModel):
+    text: str
+
+
+@app.post("/api/seller/review/{review_id}/reply")
+async def api_review_reply(review_id: int, body: ReplyIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 1000:
+        raise HTTPException(status_code=400, detail="too_long")
+    if not db.set_review_reply(review_id, user["id"], text):
+        raise HTTPException(status_code=403, detail="not_your_review")
+    try:
+        rev = db.get_review_by_id(review_id)
+        buyer = db.get_user_by_id(rev["buyer_id"]) if rev and rev.get("buyer_id") else None
+        if buyer and buyer.get("telegram_id"):
+            blang = get_user_lang(buyer)
+            pname = html.escape(rev.get("product_name") or "")
+            if blang == "ru":
+                msg = f"💬 Продавец ответил на ваш отзыв ({pname}):\n\n{html.escape(text)}"
+            else:
+                msg = f"💬 Sotuvchi sharhingizga javob berdi ({pname}):\n\n{html.escape(text)}"
+            await _tg_call("sendMessage", {"chat_id": buyer["telegram_id"], "text": msg,
+                                           "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"review reply notify xato (review {review_id}): {e}")
+    return {"ok": True}
+
+
 @app.get("/api/seller/stats")
 def api_seller_stats(authorization: str = Header(None)):
     user = _buyer_from_auth(authorization)
