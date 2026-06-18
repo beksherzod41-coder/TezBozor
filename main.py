@@ -44,7 +44,7 @@ if MINIAPP_URL and not MINIAPP_URL.startswith("https://"):
     logging.warning("⚠️ MINIAPP_URL https:// bilan boshlanishi shart (Telegram WebApp talabi) — o'chirildi.")
     MINIAPP_URL = None
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo, MenuButtonWebApp, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
 from database import Database
@@ -185,21 +185,32 @@ def all_bottom_menu_texts():
 
 
 def buyer_bottom_kb(lang):
-    """Xaridor rejimidagi pastki Reply klaviatura (tanlangan tilda)."""
-    return ReplyKeyboardMarkup([
+    """Xaridor rejimidagi pastki Reply klaviatura (tanlangan tilda).
+    MINIAPP_URL bo'lsa — eng tepada to'g'ridan-to'g'ri Mini App'ni ochuvchi tugma."""
+    rows = []
+    if MINIAPP_URL:
+        rows.append([KeyboardButton(t(lang, 'btn_open_app'),
+                                    web_app=WebAppInfo(url=MINIAPP_URL))])
+    rows += [
         [KeyboardButton(t(lang, 'btn_search_menu'))],
         [KeyboardButton(t(lang, 'btn_my_orders')), KeyboardButton(t(lang, 'btn_profile'))],
         [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],
-    ], resize_keyboard=True)
+    ]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def seller_bottom_kb(lang):
     """Sotuvchi rejimidagi pastki Reply klaviatura (tanlangan tilda)."""
-    return ReplyKeyboardMarkup([
+    rows = []
+    if MINIAPP_URL:
+        rows.append([KeyboardButton(t(lang, 'btn_open_app'),
+                                    web_app=WebAppInfo(url=MINIAPP_URL))])
+    rows += [
         [KeyboardButton(t(lang, 'btn_add_product')), KeyboardButton(t(lang, 'btn_my_products'))],
         [KeyboardButton(t(lang, 'btn_orders')), KeyboardButton(t(lang, 'btn_profile'))],
         [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],
-    ], resize_keyboard=True)
+    ]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -668,9 +679,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await seller_panel(update, context)
         else:
+            # App-first: MINIAPP_URL bo'lsa, birinchi xabar to'g'ridan-to'g'ri ilovaga
+            # yo'naltiradi (pastki klaviaturadagi "Ilovani ochish" tugmasi + Menu tugmasi).
+            hint_key = 'open_app_hint' if MINIAPP_URL else 'bottom_hint'
             await update.message.reply_text(
-                t(lang, 'bottom_hint'),
-                reply_markup=buyer_bottom_kb(lang)
+                t(lang, hint_key),
+                reply_markup=buyer_bottom_kb(lang),
+                parse_mode='HTML'
             )
             await buyer_panel(update, context)
         return ConversationHandler.END
@@ -14488,12 +14503,30 @@ async def webapp_autorepost_scan_job(context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"Mini App auto-repost ulandi: {rp['id']} (soat {hour})")
 
 
+async def _post_init(application):
+    """Bot ishga tushganda — chat Menu tugmasini to'g'ridan-to'g'ri Mini App'ga ulaymiz.
+    Shunda foydalanuvchi buyer panelga kirmasdan, matn maydoni yonidagi doimiy tugma
+    bilan bitta tegishda ilovani ochadi (app-first kirish)."""
+    try:
+        if MINIAPP_URL:
+            await application.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="🛍 TezBozor",
+                    web_app=WebAppInfo(url=MINIAPP_URL)))
+            logging.info("✅ Menu tugmasi Mini App'ga ulandi (app-first kirish).")
+        else:
+            await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    except Exception as e:
+        logging.warning(f"Menu tugmasi o'rnatilmadi: {e}")
+
+
 def main():
     _validate_env()
     # Persistence — bot qayta ishga tushganda foydalanuvchi sessiyalari saqlanadi
     # (yarim qolgan ro'yxatdan o'tish, qidiruv state, va h.k.)
     persistence = PicklePersistence(filepath="tezbozor_state.pickle")
-    app = Application.builder().token(TOKEN).persistence(persistence).build()
+    app = (Application.builder().token(TOKEN).persistence(persistence)
+           .post_init(_post_init).build())
 
     # ============================================================
     # GURUH/KANAL HIMOYASI — bot FAQAT shaxsiy (private) chatda javob beradi

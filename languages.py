@@ -247,6 +247,14 @@ _TEXTS = {
         'uz': "🛍 Katalog (ilova)",
         'ru': "🛍 Каталог (приложение)",
     },
+    'btn_open_app': {
+        'uz': "🛍 Ilovani ochish",
+        'ru': "🛍 Открыть приложение",
+    },
+    'open_app_hint': {
+        'uz': "🛍 <b>TezBozor ilovasi</b> — bozorni to'liq ko'rish, buyurtma berish va boshqarish uchun pastdagi tugmani bosing 👇",
+        'ru': "🛍 <b>Приложение TezBozor</b> — нажмите кнопку ниже, чтобы открыть весь маркетплейс, оформлять и управлять заказами 👇",
+    },
     'search_menu_title': {
         'uz': "🔍 <b>Qidiruv</b>\n\nNima qidiramiz? Bo'limni tanlang:",
         'ru': "🔍 <b>Поиск</b>\n\nЧто ищем? Выберите раздел:",
@@ -1615,6 +1623,10 @@ _TEXTS = {
     'dispute_resolved_admin_keep': {
         'uz': "✅ {oid} — shartnoma kuchda qoldirildi. Ikkala tomon xabardor qilindi.",
         'ru': "✅ {oid} — договор оставлен в силе. Обе стороны уведомлены.",
+    },
+    'dispute_admin_message': {
+        'uz': "🛡 <b>{oid}</b> — nizo bo'yicha admin xabari:\n\n{msg}",
+        'ru': "🛡 <b>{oid}</b> — сообщение админа по спору:\n\n{msg}",
     },
 
     # ===== O'CHIRILGAN MAHSULOTLAR (audit jurnali) =====

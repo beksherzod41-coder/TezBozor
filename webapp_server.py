@@ -459,6 +459,96 @@ async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
     return {"ok": True}
 
 
+class CancelReqIn(BaseModel):
+    reason: Optional[str] = None
+
+
+@app.post("/api/order/{order_id}/request-cancel")
+async def api_request_cancel(order_id: int, body: CancelReqIn, authorization: str = Header(None)):
+    """Xaridor TASDIQLANGAN buyurtmani bekor qilishni so'raydi (nizo oqimi boshlanishi).
+    Sotuvchiga rozilik so'rovi (rozi/rad tugmalari) yuboriladi — bot ularni ushlaydi."""
+    user = dict(_buyer_from_auth(authorization))
+    _rate_limit("cancel_req", user["id"], 10, 60)
+    reason = (body.reason or "").strip() or ("—")
+    if len(reason) > 500:
+        raise HTTPException(status_code=400, detail="too_long")
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if order.get("buyer_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("status") != "confirmed" or (order.get("cancel_state") or ""):
+        raise HTTPException(status_code=409, detail="cancel_not_available")
+    if not db.request_order_cancel(order_id, "buyer", reason):
+        raise HTTPException(status_code=409, detail="cancel_not_available")
+    try:
+        seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
+        slang = get_user_lang(seller) if seller else DEFAULT_LANG
+        if order.get("seller_tg"):
+            await _tg_call("sendMessage", {
+                "chat_id": order["seller_tg"],
+                "text": t(slang, "cancel_request_notify", oid=fmt_order_id(order_id),
+                          pname=html.escape(order.get("product_name") or ""),
+                          reason=html.escape(reason)),
+                "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": [
+                    [{"text": t(slang, "btn_cancel_agree"), "callback_data": f"cclagree_{order_id}"}],
+                    [{"text": t(slang, "btn_cancel_deny"), "callback_data": f"ccldeny_{order_id}"}]]}})
+    except Exception as e:
+        logging.warning(f"request-cancel notify xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
+class CancelRespondIn(BaseModel):
+    agree: bool
+
+
+@app.post("/api/order/{order_id}/cancel-respond")
+async def api_cancel_respond(order_id: int, body: CancelRespondIn, authorization: str = Header(None)):
+    """Xaridor SOTUVCHI boshlagan bekor so'roviga javob beradi: rozi (bekor) yoki rad (nizo)."""
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if order.get("buyer_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("cancel_state") != "requested":
+        raise HTTPException(status_code=409, detail="cancel_already_handled")
+    if order.get("cancel_by") == "buyer":
+        raise HTTPException(status_code=409, detail="cancel_wait_other")  # o'zi so'ragan
+    oid = fmt_order_id(order_id)
+    pname = html.escape(order.get("product_name") or "")
+    seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
+    slang = get_user_lang(seller) if seller else DEFAULT_LANG
+    if body.agree:
+        if db.agree_order_cancel(order_id):
+            try:
+                db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
+            except Exception as e:
+                logging.warning(f"cancel-respond restock xato (order {order_id}): {e}")
+        if order.get("seller_tg"):
+            await _tg_call("sendMessage", {"chat_id": order["seller_tg"],
+                           "text": t(slang, "cancel_agreed_notify", oid=oid, pname=pname),
+                           "parse_mode": "HTML"})
+        return {"ok": True, "cancelled": True}
+    # rad — admin hakamligiga
+    db.dispute_order_cancel(order_id)
+    if order.get("seller_tg"):
+        await _tg_call("sendMessage", {"chat_id": order["seller_tg"],
+                       "text": t(slang, "cancel_denied_notify", oid=oid, pname=pname),
+                       "parse_mode": "HTML"})
+    try:
+        if ADMIN_ID:
+            await _tg_call("sendMessage", {"chat_id": ADMIN_ID,
+                           "text": t(DEFAULT_LANG, "admin_dispute_notify", oid=oid, pname=pname,
+                                     by=html.escape(user.get("name") or "xaridor"),
+                                     reason=html.escape(order.get("cancel_reason") or "—")),
+                           "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"cancel-respond admin notify xato (order {order_id}): {e}")
+    return {"ok": True, "disputed": True}
+
+
 def _order_party_or_403(user, order):
     if user.get("id") not in (order.get("buyer_id"), order.get("seller_id")) \
        and user.get("role") != "admin":
@@ -590,6 +680,12 @@ def api_seller_products(authorization: str = Header(None)):
 def api_seller_reviews(authorization: str = Header(None)):
     user = _buyer_from_auth(authorization)
     return _rows(db.get_seller_reviews(user["id"]))
+
+
+@app.get("/api/seller/customers")
+def api_seller_customers(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_customers(user["id"]))
 
 
 @app.get("/api/seller/channels")
@@ -1255,6 +1351,254 @@ async def api_config(authorization: str = Header(None)):
 @app.get("/api/health")
 def api_health():
     return {"ok": True, "backend": db.backend}
+
+
+# ============================================================
+# ADMIN PANELI (G bo'lagi) — faqat admin rolli foydalanuvchi
+# Bot main.py'dagi admin handlerlarning to'liq parite ko'chirmasi.
+# ============================================================
+def _admin_from_auth(authorization):
+    """initData'dan adminni (DB user) qaytaradi yoki 403. Admin = role=='admin' yoki ADMIN_ID."""
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") != "admin" and user.get("telegram_id") != ADMIN_ID:
+        raise HTTPException(status_code=403, detail="not_admin")
+    return user
+
+
+@app.get("/api/admin/stats")
+def api_admin_stats(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return dict(db.get_admin_stats_summary() or {})
+
+
+@app.get("/api/admin/seller-requests")
+def api_admin_seller_requests(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_pending_seller_requests())
+
+
+class SellerReqDecision(BaseModel):
+    approve: bool = True
+
+
+@app.post("/api/admin/seller-request/{user_id}")
+async def api_admin_seller_decide(user_id: int, body: SellerReqDecision,
+                                  authorization: str = Header(None)):
+    """Sotuvchi arizasini tasdiqlash/rad etish — bot approve_seller/reject_seller bilan bir xil."""
+    admin = _admin_from_auth(authorization)
+    _rate_limit("admin_seller", admin["id"], 30, 60)
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    target = dict(target)
+    if body.approve:
+        db.update_user(user_id, is_approved=1, role="seller")
+        # Tasdiqlangan sotuvchida do'kon bo'lishini kafolatlaymiz (idempotent, xodim bo'lmasa)
+        try:
+            if not db.get_staff_by_user(user_id):
+                db.create_shop(
+                    user_id,
+                    name=target.get("shop_name"), address=target.get("shop_address"),
+                    landmark=target.get("shop_landmark"), lat=target.get("shop_lat"),
+                    lon=target.get("shop_lon"), working_days=target.get("working_days"),
+                    working_hours=target.get("working_hours"), region_id=target.get("region_id"),
+                    card_number=target.get("card_number"), card_owner=target.get("card_owner"),
+                    card_type=target.get("card_type"),
+                )
+        except Exception as e:
+            logging.error(f"admin approve: do'kon yaratilmadi (uid {user_id}): {e}")
+    else:
+        db.update_user(user_id, is_approved=0, role="buyer")
+    req = db.get_seller_request_by_user(user_id)
+    if req:
+        db.update_seller_request(dict(req)["id"], "approved" if body.approve else "rejected")
+    # Foydalanuvchiga uning tilida xabar
+    try:
+        if target.get("telegram_id"):
+            tlang = get_user_lang(target)
+            key = "approve_seller_notify" if body.approve else "reject_seller_notify"
+            await _tg_call("sendMessage", {"chat_id": target["telegram_id"],
+                                           "text": t(tlang, key), "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"admin seller decide notify xato (uid {user_id}): {e}")
+    return {"ok": True, "approved": body.approve}
+
+
+@app.get("/api/admin/users")
+def api_admin_users(authorization: str = Header(None), q: str = Query(None),
+                    offset: int = Query(0)):
+    _admin_from_auth(authorization)
+    q = (q or "").strip()
+    if q:
+        return {"total": None, "offset": 0, "users": _rows(db.search_users(q, limit=30))}
+    total, rows = db.get_users_paginated(limit=ADMIN_PAGE, offset=max(0, offset))
+    return {"total": total, "offset": offset, "users": _rows(rows)}
+
+
+ADMIN_PAGE = 15
+
+
+class UserBlockIn(BaseModel):
+    block: bool
+
+
+@app.post("/api/admin/user/{user_id}/block")
+def api_admin_block_user(user_id: int, body: UserBlockIn, authorization: str = Header(None)):
+    admin = _admin_from_auth(authorization)
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    if dict(target).get("role") == "admin":
+        raise HTTPException(status_code=400, detail="cant_block_admin")
+    db.update_user(user_id, is_blocked=1 if body.block else 0)
+    return {"ok": True, "is_blocked": 1 if body.block else 0}
+
+
+@app.get("/api/admin/disputes")
+def api_admin_disputes(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_disputed_orders())
+
+
+@app.get("/api/admin/dispute/{order_id}/messages")
+def api_admin_dispute_messages(order_id: int, authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    return {"messages": _rows(db.get_dispute_messages(order_id))}
+
+
+class DisputeResolveIn(BaseModel):
+    cancel: bool   # True -> buyurtmani bekor; False -> kuchda qoldirish
+
+
+@app.post("/api/admin/dispute/{order_id}/resolve")
+async def api_admin_resolve_dispute(order_id: int, body: DisputeResolveIn,
+                                    authorization: str = Header(None)):
+    """Nizoni hal qilish — bot admin_resolve_dispute bilan bir xil (ikkala tomonga xabar)."""
+    _admin_from_auth(authorization)
+    order = db.get_order_by_id(order_id)
+    if not order or order.get("cancel_state") != "disputed":
+        raise HTTPException(status_code=404, detail="dispute_not_found")
+    do_cancel = bool(body.cancel)
+    if not db.resolve_order_dispute(order_id, do_cancel):
+        raise HTTPException(status_code=409, detail="not_resolved")
+    if do_cancel:
+        # Bekorda omborni qaytaramiz (confirmed buyurtma stokni kamaytirgan edi)
+        try:
+            db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
+        except Exception as e:
+            logging.warning(f"dispute restock xato (order {order_id}): {e}")
+    oid = fmt_order_id(order_id)
+    pname = html.escape(order.get("product_name") or "")
+    key = "dispute_resolved_cancel" if do_cancel else "dispute_resolved_keep"
+    for uid_key, tg_key in (("buyer_id", "buyer_tg"), ("seller_id", "seller_tg")):
+        try:
+            u = db.get_user_by_id(order[uid_key]) if order.get(uid_key) else None
+            ulang = get_user_lang(u) if u else DEFAULT_LANG
+            if order.get(tg_key):
+                await _tg_call("sendMessage", {"chat_id": order[tg_key],
+                               "text": t(ulang, key, oid=oid, pname=pname), "parse_mode": "HTML"})
+        except Exception as e:
+            logging.warning(f"dispute resolve notify xato (order {order_id}): {e}")
+    return {"ok": True, "cancelled": do_cancel}
+
+
+class DisputeMsgIn(BaseModel):
+    text: str
+    party: str   # 'buyer' | 'seller' — kimga (qaysi tomonga) yoziladi
+
+
+@app.post("/api/admin/dispute/{order_id}/message")
+async def api_admin_dispute_message(order_id: int, body: DisputeMsgIn,
+                                    authorization: str = Header(None)):
+    """Admin nizo bo'yicha tomonga xabar yozadi (bot admin_dispute_msg bilan bir xil)."""
+    admin = _admin_from_auth(authorization)
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="too_long")
+    if body.party not in ("buyer", "seller"):
+        raise HTTPException(status_code=400, detail="bad_party")
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    db.add_dispute_message(order_id, body.party, "admin", admin["id"],
+                           admin.get("name") or "Admin", text)
+    try:
+        tg = order.get("buyer_tg") if body.party == "buyer" else order.get("seller_tg")
+        uid = order.get("buyer_id") if body.party == "buyer" else order.get("seller_id")
+        u = db.get_user_by_id(uid) if uid else None
+        ulang = get_user_lang(u) if u else DEFAULT_LANG
+        if tg:
+            oid = fmt_order_id(order_id)
+            await _tg_call("sendMessage", {"chat_id": tg,
+                           "text": t(ulang, "dispute_admin_message", oid=oid, msg=html.escape(text)),
+                           "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"dispute admin msg notify xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
+@app.get("/api/admin/shops")
+def api_admin_shops(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_all_shops())
+
+
+@app.get("/api/admin/orders")
+def api_admin_orders(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_all_orders())
+
+
+@app.get("/api/admin/products")
+def api_admin_products(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_admin_products_summary(limit=30))
+
+
+@app.delete("/api/admin/product/{product_id}")
+def api_admin_delete_product(product_id: int, authorization: str = Header(None)):
+    admin = _admin_from_auth(authorization)
+    prod = db.get_product_by_id(product_id)
+    if not prod:
+        raise HTTPException(status_code=404, detail="not_found")
+    db.delete_product(product_id, deleted_by=admin["id"], deleted_by_role="admin")
+    return {"ok": True}
+
+
+class BroadcastIn(BaseModel):
+    text: str
+    target: str = "all"   # 'all' | 'buyer' | 'seller'
+
+
+@app.post("/api/admin/broadcast")
+async def api_admin_broadcast(body: BroadcastIn, authorization: str = Header(None)):
+    """Ommaviy xabar — barcha (yoki rol bo'yicha) foydalanuvchilarga yuboradi."""
+    admin = _admin_from_auth(authorization)
+    _rate_limit("admin_broadcast", admin["id"], 3, 600)
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 4000:
+        raise HTTPException(status_code=400, detail="too_long")
+    role = body.target if body.target in ("buyer", "seller") else None
+    users = db.get_all_users(role=role)
+    sent, failed = 0, 0
+    for u in users:
+        u = dict(u)
+        tg = u.get("telegram_id")
+        if not tg or u.get("is_blocked"):
+            continue
+        res = await _tg_call("sendMessage", {"chat_id": tg, "text": html.escape(text)})
+        if res and res.get("ok"):
+            sent += 1
+        else:
+            failed += 1
+    return {"ok": True, "sent": sent, "failed": failed, "total": len(users)}
 
 
 # ============================================================

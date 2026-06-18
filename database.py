@@ -2825,6 +2825,25 @@ class Database:
         """, (seller_id,))
         return [dict(r) for r in cursor.fetchall()]
 
+    def get_seller_customers(self, seller_id, limit=100):
+        """Sotuvchining mijozlari — buyurtma bergan xaridorlar (umumiy soni, sarflagan
+        summasi va oxirgi buyurtma vaqti bilan jamlanadi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.name, u.phone_number, u.telegram_username, u.telegram_id,
+                   COUNT(o.id) AS orders_count,
+                   COALESCE(SUM(CASE WHEN o.status='delivered' THEN o.total_price ELSE 0 END), 0) AS spent,
+                   MAX(o.created_at) AS last_order
+            FROM orders o
+            JOIN users u ON o.buyer_id = u.id
+            WHERE o.seller_id = ?
+            GROUP BY o.buyer_id
+            ORDER BY last_order DESC
+            LIMIT ?
+        """, (seller_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
     def get_users_paginated(self, limit=15, offset=0):
         """Sahifalangan foydalanuvchilar ro'yxati."""
         conn = self.get_connection()
