@@ -108,6 +108,9 @@ class Database:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA foreign_keys=ON")
+                # Ikki jarayon (bot + webapp) bir faylga yozadi — qulf bo'lsa darhol
+                # xato bermay 5s kutadi ("database is locked" oldini oladi). Audit #2.
+                conn.execute("PRAGMA busy_timeout=5000")
             self._local.conn = conn
         return conn
 
