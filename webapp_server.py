@@ -554,6 +554,21 @@ def api_seller_products(authorization: str = Header(None)):
     return _rows(db.get_products_by_seller(user["id"]))
 
 
+@app.get("/api/seller/stats")
+def api_seller_stats(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    raw = db.get_seller_stats(user["id"]) or {}
+    stats = dict(raw)
+    try:
+        stats["avg_rating"] = round(float(db.get_seller_avg_rating(user["id"]) or 0), 1)
+    except Exception:
+        stats["avg_rating"] = 0
+    debts = db.get_seller_open_debts(user["id"]) or []
+    stats["open_debt_total"] = sum(float(d.get("total_due") or 0) for d in debts)
+    stats["open_debt_count"] = len(debts)
+    return stats
+
+
 class OrderAction(BaseModel):
     action: str  # 'confirm' | 'reject'
 

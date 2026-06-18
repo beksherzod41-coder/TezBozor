@@ -1243,12 +1243,32 @@ function loadSeller(){
   const v = document.getElementById('viewSeller');
   v.innerHTML = `<div class="vhead">Do'konim</div>
     <div class="seg" style="margin:0 12px 6px">
-      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders">📥 Buyurtmalar</div>
-      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products">📦 Mahsulotlar</div>
+      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:11px 6px;font-size:12.5px">📥 Buyurtma</div>
+      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:11px 6px;font-size:12.5px">📦 Mahsulot</div>
+      <div class="opt ${sellerSub==='stats'?'on':''}" data-sub="stats" style="padding:11px 6px;font-size:12.5px">📊 Stat</div>
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  if(sellerSub==='orders') loadSellerOrders(); else loadSellerProducts();
+  if(sellerSub==='orders') loadSellerOrders();
+  else if(sellerSub==='products') loadSellerProducts();
+  else loadSellerStats();
+}
+
+async function loadSellerStats(){
+  const b=document.getElementById('sellerBody');
+  b.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const s=await api('/api/seller/stats');
+    const card=(label,val,color)=>`<div style="flex:1;background:var(--card);border-radius:14px;padding:13px 8px;box-shadow:var(--shadow);text-align:center;min-width:0"><div style="font-size:18px;font-weight:800;${color?`color:${color};`:''}overflow:hidden;text-overflow:ellipsis">${val}</div><div style="font-size:11px;color:var(--hint);margin-top:3px">${label}</div></div>`;
+    const row=(label,n,sum)=>`<div class="cosec"><div class="lbl">${label}</div><div style="display:flex;justify-content:space-between;align-items:baseline"><span>${n} buyurtma</span><b style="font-size:15px">${money(sum)}</b></div></div>`;
+    b.innerHTML=`<div style="padding:8px 12px 16px;display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;gap:10px">${card("Jami daromad", money(s.total_revenue||0), 'var(--ok)')}${card("Jami buyurtma", s.total_orders||0)}</div>
+      <div style="display:flex;gap:8px">${card("⏳ Yangi", s.pending||0,'#d98300')}${card("✅ Tasdiq", s.confirmed||0,'var(--ok)')}${card("🚚 Berildi", s.delivered||0,'#2563eb')}${card("❌ Bekor", s.cancelled||0,'var(--sale)')}</div>
+      ${row("Bu hafta", s.week_orders||0, s.week_revenue||0)}
+      ${row("Bu oy", s.month_orders||0, s.month_revenue||0)}
+      <div style="display:flex;gap:10px">${card("Mahsulotlar", s.products_count||0)}${card("Reyting", '⭐ '+(s.avg_rating||0))}${card("Ochiq qarz", money(s.open_debt_total||0), (s.open_debt_total>0?'var(--sale)':''))}</div>
+    </div>`;
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 
 function sellerOrderCard(o){
