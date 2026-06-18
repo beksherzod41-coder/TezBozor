@@ -13,6 +13,7 @@ Ishga tushirish (lokal/sinov):
 Kerakli paketlar:  fastapi  uvicorn[standard]  httpx
 """
 import os
+import html
 import hashlib
 import logging
 from typing import Optional
@@ -32,6 +33,8 @@ import httpx
 
 from database import Database
 from webapp_auth import validate_init_data
+from languages import t, get_user_lang, DEFAULT_LANG
+from tezbozor_design import fmt_order_id
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webapp_static")
@@ -188,6 +191,97 @@ def api_me(authorization: str = Header(None)):
 def api_my_orders(authorization: str = Header(None)):
     buyer = _buyer_from_auth(authorization)
     return _rows(db.get_buyer_orders_list(buyer["id"]))
+
+
+# ============================================================
+# SOTUVCHI PANELI (D bo'lagi)
+# ============================================================
+async def _tg_call(method, payload):
+    """Telegram Bot API'ga to'g'ridan-to'g'ri chaqiruv (webapp bot token bilan)."""
+    if not BOT_TOKEN:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/{method}", json=payload)
+            return r.json()
+    except Exception as e:
+        logging.warning(f"Telegram {method} xato: {e}")
+        return None
+
+
+@app.get("/api/seller/orders")
+def api_seller_orders(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_orders_list(user["id"]))
+
+
+@app.get("/api/seller/products")
+def api_seller_products(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_products_by_seller(user["id"]))
+
+
+class OrderAction(BaseModel):
+    action: str  # 'confirm' | 'reject'
+
+
+@app.post("/api/seller/order/{order_id}/action")
+async def api_seller_order_action(order_id: int, body: OrderAction,
+                                  authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if body.action not in ("confirm", "reject"):
+        raise HTTPException(status_code=400, detail="bad_action")
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    # Egalik: faqat shu buyurtma sotuvchisi (egasi) yoki admin
+    if not (order.get("seller_id") == user.get("id") or user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="not_your_order")
+    # Faqat 'pending' holatdagiga ishlov beramiz (ikki marta tasdiq/bekorni oldini olamiz)
+    if order.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="already_processed")
+
+    new_status = "confirmed" if body.action == "confirm" else "cancelled"
+    if new_status == "confirmed":
+        try:
+            db.decrement_stock_on_confirm(order["product_id"], order["quantity"])
+        except Exception as e:
+            logging.error(f"stock kamaytirish xato (order {order_id}): {e}")
+    db.update_order_status(order_id, new_status)
+
+    # Xaridorga bildirishnoma (xaridor tilida) — bot order_confirm bilan bir xil matn
+    try:
+        buyer = db.get_user_by_id(order["buyer_id"])
+        blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+        is_pickup = order.get("delivery_type") == "pickup"
+        oid = fmt_order_id(order_id)
+        pname = html.escape(order.get("product_name") or "")
+        if new_status == "confirmed":
+            key = "order_confirmed_pickup" if is_pickup else "order_confirmed_delivery"
+        else:
+            key = "order_cancelled_notify"
+        txt = t(blang, key, oid=oid, pname=pname)
+        if order.get("buyer_tg") and txt:
+            await _tg_call("sendMessage", {
+                "chat_id": order["buyer_tg"], "text": txt, "parse_mode": "HTML"})
+    except Exception as e:
+        logging.error(f"xaridorga xabar xato (order {order_id}): {e}")
+
+    # Sotuvchining bildirishnoma xabaridagi tugmalarni olib tashlaymiz (eski tugma bosilmasin)
+    try:
+        chat_id = order.get("notify_chat_id")
+        msg_id = order.get("notify_message_id")
+        if chat_id and msg_id:
+            final = (order.get("notify_caption") or "")
+            final += "\n\n" + ("✅ Tasdiqlandi" if new_status == "confirmed" else "❌ Bekor qilindi")
+            await _tg_call("editMessageText", {
+                "chat_id": chat_id, "message_id": msg_id, "text": final,
+                "parse_mode": "HTML", "reply_markup": {"inline_keyboard": []}})
+    except Exception as e:
+        logging.warning(f"sotuvchi xabarini tahrirlash xato (order {order_id}): {e}")
+
+    return {"ok": True, "status": new_status}
 
 
 @app.get("/api/image/{file_id}")

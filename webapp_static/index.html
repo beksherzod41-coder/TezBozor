@@ -232,6 +232,14 @@
         font-size:14px; border-bottom:1px solid var(--line);}
   .prow:last-child{border-bottom:none;}
   .prow span{color:var(--hint);} .prow b{font-weight:600; text-align:right;}
+  /* sotuvchi buyurtma amallari */
+  .oactions{display:flex; gap:8px; margin-top:11px;}
+  .oact{flex:1; padding:12px; border:none; border-radius:11px; font-size:13.5px;
+        font-weight:700; cursor:pointer;}
+  .oact.ok{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;
+           box-shadow:0 4px 12px rgba(112,0,255,.25);}
+  .oact.no{background:#fdebef; color:var(--sale);}
+  .oact:active{transform:scale(.97);} .oact:disabled{opacity:.5;}
 </style>
 </head>
 <body>
@@ -246,11 +254,13 @@
     <div id="content"></div>
   </div>
   <div id="viewOrders" style="display:none"></div>
+  <div id="viewSeller" style="display:none"></div>
   <div id="viewProfile" style="display:none"></div>
 
   <nav class="bottomnav" id="bottomnav">
     <div class="navitem active" data-tab="catalog"><span>🛍️</span><small>Katalog</small></div>
     <div class="navitem" data-tab="orders"><span>📦</span><small>Buyurtmalar</small></div>
+    <div class="navitem" data-tab="seller" id="navSeller" style="display:none"><span>🏪</span><small>Do'kon</small></div>
     <div class="navitem" data-tab="profile"><span>👤</span><small>Profil</small></div>
   </nav>
 
@@ -537,9 +547,11 @@ function switchTab(tab){
   document.querySelectorAll('.navitem').forEach(n=>n.classList.toggle('active', n.dataset.tab===tab));
   document.getElementById('viewCatalog').style.display = tab==='catalog'?'':'none';
   document.getElementById('viewOrders').style.display = tab==='orders'?'':'none';
+  document.getElementById('viewSeller').style.display = tab==='seller'?'':'none';
   document.getElementById('viewProfile').style.display = tab==='profile'?'':'none';
   window.scrollTo(0,0);
   if(tab==='orders') loadMyOrders();
+  if(tab==='seller') loadSeller();
   if(tab==='profile') loadProfile();
 }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
@@ -616,6 +628,97 @@ async function loadProfile(){
   }
 }
 
+// ---------- SOTUVCHI PANELI (Do'kon) ----------
+let ME = null, sellerSub = 'orders';
+
+async function loadMe(){
+  try{ ME = await api('/api/me'); }catch(e){ ME = null; }
+  if(ME && (ME.role==='seller' || ME.role==='admin'))
+    document.getElementById('navSeller').style.display = '';
+}
+
+function loadSeller(){
+  const v = document.getElementById('viewSeller');
+  v.innerHTML = `<div class="vhead">Do'konim</div>
+    <div class="seg" style="margin:0 12px 6px">
+      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders">📥 Buyurtmalar</div>
+      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products">📦 Mahsulotlar</div>
+    </div>
+    <div id="sellerBody"></div>`;
+  v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
+  if(sellerSub==='orders') loadSellerOrders(); else loadSellerProducts();
+}
+
+function sellerOrderCard(o){
+  const st = ORDER_STATUS[o.status] || [esc(o.status||'?'),'st-pending'];
+  const dlv = o.delivery_type==='delivery' ? '🚚 Yetkazib berish' : '🚶 Olib ketish';
+  const contact = o.buyer_phone ? `<a class="ocontact" href="tel:${esc(o.buyer_phone)}">📞 ${esc(o.buyer_phone)}</a>` : '';
+  const actions = o.status==='pending'
+    ? `<div class="oactions">
+         <button class="oact ok" data-oid="${o.id}" data-act="confirm">✅ Tasdiqlash</button>
+         <button class="oact no" data-oid="${o.id}" data-act="reject">❌ Rad etish</button>
+       </div>` : '';
+  return `<div class="ocard">
+    <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
+    <div class="oname">${esc(o.product_name||'')}</div>
+    <div class="ometa">${o.quantity} dona · <b>${money(o.total_price)}</b></div>
+    <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
+    ${o.delivery_address?`<div class="oshop">📍 ${esc(o.delivery_address)}</div>`:''}
+    ${contact}${actions}
+  </div>`;
+}
+
+async function loadSellerOrders(){
+  const b = document.getElementById('sellerBody');
+  b.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const orders = await api('/api/seller/orders');
+    if(!orders.length){ b.innerHTML = `<div class="empty"><span class="big">📥</span>Hali buyurtma yo'q</div>`; return; }
+    b.innerHTML = `<div class="olist">${orders.map(sellerOrderCard).join('')}</div>`;
+    b.querySelectorAll('[data-act]').forEach(btn=>btn.onclick=()=>sellerOrderAction(btn.dataset.oid, btn.dataset.act, btn));
+  }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+
+async function sellerOrderAction(oid, action, btn){
+  const card = btn.closest('.ocard');
+  card.querySelectorAll('.oact').forEach(x=>x.disabled=true);
+  btn.textContent = '...';
+  try{
+    const r = await fetch(`/api/seller/order/${oid}/action`, {
+      method:'POST', headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body: JSON.stringify({action})
+    });
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+  }catch(e){ tg.showAlert("Xatolik: "+e.message); }
+  loadSellerOrders();
+}
+
+function sellerProductCard(p){
+  const img = p.image_url ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">` : `<div class="ph">🖼️</div>`;
+  const stock = p.stock_count==null ? 'Cheksiz zahira' : (p.stock_count>0?`${p.stock_count} dona`:'Tugagan');
+  const hidden = p.in_stock ? '' : ` <span class="ostatus st-cancel">Yashirin</span>`;
+  return `<div class="ocard" style="display:flex;gap:12px;align-items:center">
+    <div class="coprod" style="padding:0;background:none;box-shadow:none;flex:0 0 auto">${img}</div>
+    <div style="flex:1;min-width:0">
+      <div class="oname" style="font-size:14px">${esc(p.name||'')}</div>
+      <div class="ometa"><b>${money(p.price)}</b></div>
+      <div class="oshop">📦 ${stock}${hidden}</div>
+    </div>
+  </div>`;
+}
+
+async function loadSellerProducts(){
+  const b = document.getElementById('sellerBody');
+  b.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const prods = await api('/api/seller/products');
+    if(!prods.length){ b.innerHTML = `<div class="empty"><span class="big">📦</span>Hali mahsulot yo'q</div>`; return; }
+    b.innerHTML = `<div class="olist">${prods.map(sellerProductCard).join('')}</div>`;
+  }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+
+loadMe();
 loadCategories();
 loadProducts();
 </script>

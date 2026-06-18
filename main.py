@@ -10805,6 +10805,15 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     status_map = {'confirm': 'confirmed', 'cancel': 'cancelled', 'deliver': 'delivered'}
     new_status = status_map.get(action)
     if new_status:
+        # HIMOYA: agar buyurtma allaqachon 'pending' emas (masalan, Mini App orqali yoki
+        # eski tugmadan ishlov berilgan) — qayta ishlamaymiz (ikki marta stock kamaytirish
+        # va takroriy xabarning oldini olamiz). Faqat detalni yangilaymiz.
+        if action in ('confirm', 'cancel'):
+            _cur = db.get_order_by_id(order_id)
+            if _cur and _cur.get('status') != 'pending':
+                await seller_order_detail(update, context)
+                return
+
         # Jonli sanoq + avtomatik bekor taymerini o'chiramiz
         if new_status in ('confirmed', 'cancelled') and context.application.job_queue:
             for jn in (f"countdown_order_{order_id}", f"auto_cancel_{order_id}", f"reminder_{order_id}"):
