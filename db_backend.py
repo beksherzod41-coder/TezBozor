@@ -187,13 +187,14 @@ class PgCursor:
         self._cur = conn._pg.cursor()
         self._buf = []
         self._idx = 0
+        self._cols_map = {}   # ustun-nomlari -> index (RELEASE'dan oldin saqlanadi)
         self.lastrowid = None
         self.rowcount = -1
 
     def _cols(self):
-        if self._cur.description is None:
-            return {}
-        return {d.name: i for i, d in enumerate(self._cur.description)}
+        # RELEASE/commit'dan keyin self._cur.description None bo'ladi — shuning uchun
+        # execute paytida saqlangan ustun xaritasini qaytaramiz (audit #1 fix).
+        return self._cols_map
 
     def execute(self, sql, params=None):
         params = tuple(params) if params else ()
@@ -201,6 +202,7 @@ class PgCursor:
         # PRAGMA -> no-op
         if re.match(r"^\s*PRAGMA\b", sql, re.I):
             self._buf, self._idx, self.lastrowid, self.rowcount = [], 0, None, -1
+            self._cols_map = {}
             return self
 
         translated = translate_sql(sql)
@@ -220,6 +222,17 @@ class PgCursor:
                     self._cur.execute(translated, params)
             else:
                 self._cur.execute(translated, params)
+            # MUHIM (audit #1 fix): natija + ustun-nomlarni RELEASE'dan OLDIN o'qiymiz.
+            # RELEASE SAVEPOINT o'sha cursor'da bajarilsa, psycopg cursor.description'ni
+            # None qiladi va natija to'plami yo'qoladi — shu sabab BARCHA SELECT bo'sh
+            # qaytar edi. Buferlash endi RELEASE'dan oldin.
+            self.rowcount = self._cur.rowcount
+            if self._cur.description is not None:
+                self._cols_map = {d.name: i for i, d in enumerate(self._cur.description)}
+                captured = self._cur.fetchall()
+            else:
+                self._cols_map = {}
+                captured = []
             self._cur.execute(f"RELEASE SAVEPOINT {sp}")
         except Exception:
             try:
@@ -229,19 +242,13 @@ class PgCursor:
                 pass
             raise
 
-        # Natijani mijoz tomonida buferlash (commit natijani yo'qotmasin)
-        self.rowcount = self._cur.rowcount
         self._idx = 0
-        if self._cur.description is not None:
-            rows = self._cur.fetchall()
-            if is_insert and not has_returning:
-                # RETURNING id natijasi -> lastrowid
-                self.lastrowid = rows[0][0] if rows else None
-                self._buf = []
-            else:
-                self._buf = rows
-        else:
+        if is_insert and not has_returning:
+            # RETURNING id natijasi -> lastrowid
+            self.lastrowid = captured[0][0] if captured else None
             self._buf = []
+        else:
+            self._buf = captured
 
         if is_insert or is_ddl or re.match(r"^\s*(UPDATE|DELETE)\b", translated, re.I):
             self._conn._dirty = True
@@ -266,7 +273,7 @@ class PgCursor:
             raise
         self.rowcount = self._cur.rowcount
         self.lastrowid = None
-        self._buf, self._idx = [], 0
+        self._buf, self._idx, self._cols_map = [], 0, {}
         self._conn._dirty = True
         return self
 
