@@ -25,7 +25,7 @@ try:
 except Exception:
     pass
 
-from fastapi import FastAPI, Header, HTTPException, Query, File, UploadFile
+from fastapi import FastAPI, Header, HTTPException, Query, File, UploadFile, Request
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -1121,16 +1121,23 @@ def api_delete_product(product_id: int, authorization: str = Header(None)):
 
 
 @app.get("/api/image/{file_id}")
-async def api_image(file_id: str):
-    """Telegram file_id'ni haqiqiy rasmga aylantiradi (getFile → yuklab → cache → stream)."""
+async def api_image(file_id: str, request: Request = None):
+    """Telegram file_id'ni haqiqiy rasmga aylantiradi (getFile → yuklab → cache → stream).
+    Autentifikatsiyasiz (img-teglar header yubora olmaydi), lekin cache-miss (Telegram'ga
+    yangi so'rov) IP bo'yicha cheklanadi — proksi sifatida suiiste'molni cheklaydi (audit #4)."""
     if not BOT_TOKEN:
         raise HTTPException(status_code=503, detail="no token")
-    # Disk-cache (getFile rate-limitiga tushmaslik uchun)
+    # Disk-cache (getFile rate-limitiga tushmaslik uchun) — keshlangan rasm cheklanmaydi
     safe = hashlib.sha256(file_id.encode()).hexdigest()
     cache_path = os.path.join(IMG_CACHE_DIR, safe + ".jpg")
     if os.path.exists(cache_path):
         return FileResponse(cache_path, media_type="image/jpeg",
                             headers={"Cache-Control": "public, max-age=604800"})
+    # Cache-miss: Telegram'ga yangi so'rov — IP bo'yicha 60/min (hammerlashning oldini oladi)
+    if request is not None:
+        ip = (request.headers.get("x-forwarded-for") or
+              (request.client.host if request.client else "?")).split(",")[0].strip()
+        _rate_limit("img", ip, 60, 60)
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             meta = await client.get(
