@@ -34,7 +34,7 @@ import httpx
 from database import Database
 from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
-from tezbozor_design import fmt_order_id
+from tezbozor_design import fmt_order_id, fmt_price
 import ai_assistant
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -614,6 +614,73 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
         logging.warning(f"sotuvchi xabarini tahrirlash xato (order {order_id}): {e}")
 
     return {"ok": True, "status": new_status}
+
+
+class DeliverIn(BaseModel):
+    settlement_type: str  # 'paid' | 'debt' | 'installment'
+    paid: float = 0
+
+
+@app.post("/api/seller/order/{order_id}/deliver")
+async def api_deliver(order_id: int, body: DeliverIn, authorization: str = Header(None)):
+    """Berish + to'lov holati (to'liq/qarz/bo'lib). Tasdiqlangan buyurtmani 'delivered'
+    qiladi, settlement saqlaydi, xaridorga xabar (qarz bo'lsa qarz ham) yuboradi.
+    Guruh (savat) buyurtmasi bo'lsa — butun guruhga."""
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not (order.get("seller_id") == user.get("id") or user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("status") != "confirmed":
+        raise HTTPException(status_code=409, detail="not_confirmed")
+    st = body.settlement_type
+    if st not in ("paid", "debt", "installment"):
+        raise HTTPException(status_code=400, detail="bad_settlement")
+
+    gid = order.get("order_group_id")
+    if gid:
+        group_orders = db.get_orders_in_group(gid)
+        total = sum(float(o.get("total_price") or 0) for o in group_orders)
+    else:
+        group_orders = None
+        total = float(order.get("total_price") or 0)
+    paid = max(0.0, min(float(body.paid or 0), total))
+    due = round(total - paid, 2)
+    eff = "paid" if due <= 0 else st
+
+    if gid:
+        for o in group_orders:
+            db.update_order_status(o["id"], "delivered")
+        db.set_group_settlement(gid, eff, paid, due)
+        disp = fmt_order_id(int(gid))
+    else:
+        db.update_order_status(order_id, "delivered")
+        db.set_order_settlement(order_id, eff, paid, due)
+        disp = fmt_order_id(order_id)
+
+    try:
+        buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
+        blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+        seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
+        is_pickup = order.get("delivery_type") == "pickup"
+        if gid:
+            txt = t(blang, "grp_delivered_pickup" if is_pickup else "grp_delivered_delivery",
+                    oid=disp, n=len(group_orders))
+        else:
+            txt = t(blang, "order_delivered_pickup" if is_pickup else "order_delivered_delivery",
+                    oid=disp, pname=html.escape(order.get("product_name") or ""))
+        if due > 0:
+            shop = html.escape((seller.get("shop_name") or seller.get("name") or "") if seller else "")
+            txt += t(blang, "buyer_debt_notify", shop=shop, due=fmt_price(due))
+        if order.get("buyer_tg"):
+            await _tg_call("sendMessage", {
+                "chat_id": order["buyer_tg"], "text": txt, "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": [[
+                    {"text": t(blang, "btn_leave_rating"), "callback_data": f"order_rate_{order_id}"}]]}})
+    except Exception as e:
+        logging.warning(f"deliver buyer notify xato (order {order_id}): {e}")
+    return {"ok": True, "total": total, "paid": paid, "due": due}
 
 
 # ---- Mahsulot boshqaruvi (D2) ----

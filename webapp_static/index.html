@@ -395,6 +395,11 @@
     <div class="chatbar"><input id="aiInp" placeholder="Nima qidiryapsiz?..." maxlength="1000"><button id="aiSendBtn">➤</button></div>
   </div>
 
+  <div class="checkout" id="deliverform">
+    <div class="cohead"><span>📦 Berish va to'lov</span><span class="x" id="dClose">✕</span></div>
+    <div id="deliverBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1128,7 +1133,7 @@ function closeProfileEdit(){ document.getElementById('meform').classList.remove(
 document.getElementById('meClose').onclick = closeProfileEdit;
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
-let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null;
+let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, SELLER_ORDERS_LIST = [], dState = {};
 
 async function loadMe(){
   try{ ME = await api('/api/me'); }catch(e){ ME = null; }
@@ -1250,11 +1255,12 @@ function sellerOrderCard(o){
   const st = ORDER_STATUS[o.status] || [esc(o.status||'?'),'st-pending'];
   const dlv = o.delivery_type==='delivery' ? '🚚 Yetkazib berish' : '🚶 Olib ketish';
   const contact = o.buyer_phone ? `<a class="ocontact" href="tel:${esc(o.buyer_phone)}">📞 ${esc(o.buyer_phone)}</a>` : '';
-  const actions = o.status==='pending'
-    ? `<div class="oactions">
-         <button class="oact ok" data-oid="${o.id}" data-act="confirm">✅ Tasdiqlash</button>
-         <button class="oact no" data-oid="${o.id}" data-act="reject">❌ Rad etish</button>
-       </div>` : '';
+  let actions='';
+  if(o.status==='pending')
+    actions=`<div class="oactions"><button class="oact ok" data-oid="${o.id}" data-act="confirm">✅ Tasdiqlash</button><button class="oact no" data-oid="${o.id}" data-act="reject">❌ Rad etish</button></div>`;
+  else if(o.status==='confirmed')
+    actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">📦 Berildi (to'lov)</button></div>`;
+  if(o.amount_due && o.amount_due>0) actions=`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`+actions;
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
     <div class="oname">${esc(o.product_name||'')}</div>
@@ -1272,10 +1278,12 @@ async function loadSellerOrders(){
   b.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
   try{
     const orders = await api('/api/seller/orders');
+    SELLER_ORDERS_LIST = orders;
     if(!orders.length){ b.innerHTML = `<div class="empty"><span class="big">📥</span>Hali buyurtma yo'q</div>`; return; }
     b.innerHTML = `<div class="olist">${orders.map(sellerOrderCard).join('')}</div>`;
     b.querySelectorAll('[data-act]').forEach(btn=>btn.onclick=()=>sellerOrderAction(btn.dataset.oid, btn.dataset.act, btn));
     b.querySelectorAll('[data-chat]').forEach(btn=>btn.onclick=()=>openChat(btn.dataset.chat));
+    b.querySelectorAll('[data-deliver]').forEach(btn=>btn.onclick=()=>openDeliver(btn.dataset.deliver));
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 
@@ -1293,6 +1301,49 @@ async function sellerOrderAction(oid, action, btn){
   }catch(e){ tg.showAlert("Xatolik: "+e.message); }
   loadSellerOrders();
 }
+
+// ---------- BERISH + TO'LOV (settlement) ----------
+function openDeliver(oid){
+  const o=SELLER_ORDERS_LIST.find(x=>String(x.id)===String(oid)); if(!o) return;
+  let total=Number(o.total_price||0);
+  if(o.order_group_id) total=SELLER_ORDERS_LIST.filter(x=>String(x.order_group_id)===String(o.order_group_id)).reduce((s,x)=>s+Number(x.total_price||0),0);
+  dState={orderId:oid, total, type:'paid', paid:''};
+  renderDeliver();
+  document.getElementById('deliverform').classList.add('open');
+}
+function renderDeliver(){
+  const body=document.getElementById('deliverBody');
+  const needAmount=dState.type!=='paid';
+  const rem=Math.max(0, dState.total-(Number(dState.paid)||0));
+  body.innerHTML=`<div class="cobody">
+    <div style="text-align:center"><div style="font-size:13px;color:var(--hint)">Buyurtma summasi</div><div style="font-size:25px;font-weight:800">${money(dState.total)}</div></div>
+    <div class="cosec"><div class="lbl">To'lov holati</div><div class="seg col">
+      <div class="opt ${dState.type==='paid'?'on':''}" data-st="paid">✅ To'liq to'landi</div>
+      <div class="opt ${dState.type==='debt'?'on':''}" data-st="debt">💳 Qarzga berildi</div>
+      <div class="opt ${dState.type==='installment'?'on':''}" data-st="installment">📅 Bo'lib to'lash</div>
+    </div></div>
+    ${needAmount?`<div class="cosec"><div class="lbl">To'langan summa (so'm)</div>
+      <input class="coaddr" id="dPaid" type="number" inputmode="numeric" style="min-height:auto" placeholder="0" value="${dState.paid}">
+      <div style="font-size:12.5px;color:var(--hint);margin-top:7px">Qolgan qarz: <b id="dRemain" style="color:var(--sale)">${money(rem)}</b></div></div>`:''}
+  </div>
+  <div class="cobar"><button id="dSubmit">📦 Berishni tasdiqlash</button></div>`;
+  body.querySelectorAll('[data-st]').forEach(o=>o.onclick=()=>{ dState.type=o.dataset.st; if(dState.type==='paid') dState.paid=''; renderDeliver(); });
+  const pi=body.querySelector('#dPaid');
+  if(pi) pi.oninput=()=>{ dState.paid=pi.value; const r=document.getElementById('dRemain'); if(r) r.textContent=money(Math.max(0,dState.total-(Number(dState.paid)||0))); };
+  document.getElementById('dSubmit').onclick=submitDeliver;
+}
+async function submitDeliver(){
+  const btn=document.getElementById('dSubmit'); btn.disabled=true; btn.textContent='Yuborilmoqda...';
+  const paid=dState.type==='paid'? dState.total : (Number(dState.paid)||0);
+  try{
+    const r=await fetch('/api/seller/order/'+dState.orderId+'/deliver',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({settlement_type:dState.type, paid})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('deliverform').classList.remove('open');
+    loadSellerOrders();
+  }catch(e){ btn.disabled=false; btn.textContent='📦 Berishni tasdiqlash'; tg.showAlert("Xatolik: "+e.message); }
+}
+document.getElementById('dClose').onclick=()=>document.getElementById('deliverform').classList.remove('open');
 
 function sellerProductCard(p){
   const img = p.image_url ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">` : `<div class="ph">🖼️</div>`;
