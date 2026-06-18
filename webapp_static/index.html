@@ -259,6 +259,25 @@
   .pfadd{width:74px; height:74px; border-radius:12px; border:1.5px dashed #c9c9d2; display:flex;
          align-items:center; justify-content:center; cursor:pointer; color:var(--accent);
          font-size:30px; background:var(--card); flex:0 0 auto;}
+  /* ---------- SAVAT ---------- */
+  .cartfab{position:fixed; right:14px; bottom:84px; z-index:25; cursor:pointer; font-weight:700;
+           background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;
+           border-radius:16px; padding:12px 15px; display:none; align-items:center; gap:9px;
+           box-shadow:0 8px 22px rgba(112,0,255,.42);}
+  .cartfab .cnt{background:#fff; color:var(--accent); border-radius:10px; padding:1px 8px; font-size:13px;}
+  .citem{display:flex; gap:11px; align-items:flex-start; background:var(--card); border-radius:14px;
+         padding:10px; box-shadow:var(--shadow);}
+  .citem img,.citem .ph{width:58px; height:58px; border-radius:10px; object-fit:cover;
+         background:#ececed; flex:0 0 auto; display:flex; align-items:center; justify-content:center; font-size:24px;}
+  .citem .nm{font-size:13px; line-height:1.25; max-height:2.5em; overflow:hidden;}
+  .citem .pr{font-weight:800; font-size:14px; margin-top:3px;}
+  .cqty{display:flex; align-items:center; gap:8px; margin-top:7px;}
+  .cqty button{width:30px; height:30px; border-radius:9px; border:none; background:var(--accent-soft);
+               color:var(--accent); font-size:18px; font-weight:700; cursor:pointer; line-height:1;}
+  .cqty .v{min-width:22px; text-align:center; font-weight:700;}
+  .crm{color:var(--sale); font-size:18px; cursor:pointer; padding:2px 4px; line-height:1;}
+  .cartempty{text-align:center; color:var(--hint); padding:60px 24px; font-size:14.5px;}
+  .cartempty .big{font-size:48px; display:block; margin-bottom:10px;}
 </style>
 </head>
 <body>
@@ -271,6 +290,7 @@
     </div>
     <div class="chips" id="chips"></div>
     <div id="content"></div>
+    <div class="cartfab" id="cartFab">🛒 Savat <span class="cnt" id="cartFabCnt">0</span></div>
   </div>
   <div id="viewOrders" style="display:none"></div>
   <div id="viewSeller" style="display:none"></div>
@@ -303,6 +323,11 @@
   <div class="checkout" id="meform">
     <div class="cohead"><span>Profilni tahrirlash</span><span class="x" id="meClose">✕</span></div>
     <div id="meformBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="cartview">
+    <div class="cohead"><span>🛒 Savat</span><span class="x" id="cartClose">✕</span></div>
+    <div id="cartBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
 <script>
@@ -350,7 +375,7 @@ function cardHtml(p){
         <div><span class="price">${money(p.price)}</span>${op?`<span class="oldprice">${money(op)}</span>`:''}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${starHtml(p)} <span class="shopname">${esc(p.shop_name||'')}</span></div>
-        <button class="buy" data-buy="${p.id}">🛒 Sotib olish</button>
+        <button class="buy" data-cart="${p.id}">➕ Savatga</button>
       </div>
     </div>`;
 }
@@ -390,13 +415,18 @@ async function loadProducts(){
   if(activeCat) url += '&category_id=' + activeCat;
   try{
     const items = await api(url);
+    CATALOG_ITEMS = items;
     if(!items.length){
       content.innerHTML = `<div class="empty"><span class="big">🔍</span>Hech narsa topilmadi<br><small>Boshqa so'rov yoki kategoriyani sinab ko'ring</small></div>`;
       return;
     }
     content.innerHTML = `<div class="grid">${items.map(cardHtml).join('')}</div>`;
     content.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
-    content.querySelectorAll('[data-buy]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); openCheckout(b.dataset.buy); });
+    content.querySelectorAll('[data-cart]').forEach(b=>b.onclick=(e)=>{
+      e.stopPropagation();
+      const p = CATALOG_ITEMS.find(x=>String(x.id)===b.dataset.cart);
+      if(p) cartAdd(p);
+    });
   }catch(e){
     content.innerHTML = `<div class="empty"><span class="big">⚠️</span>Xatolik: ${esc(e.message)}<br><small>Mini App'ni Telegram orqali oching.</small></div>`;
   }
@@ -439,9 +469,15 @@ async function openDetail(id){
         ${p.description?`<div class="dsec"><h4>Tavsif</h4><div class="dcard"><div class="ddesc">${esc(p.description)}</div></div></div>`:''}
       </div>
       <div class="buybar">
-        <button id="buyBtn" ${stockOk?'':'disabled'}>${stockOk?'🛒 Buyurtma berish':'Hozircha mavjud emas'}</button>
+        ${stockOk?`<div style="display:flex;gap:10px">
+          <button id="cartBtn" style="flex:0 0 auto;width:56px;background:var(--accent-soft);color:var(--accent);box-shadow:none">➕</button>
+          <button id="buyBtn" style="flex:1">🛒 Buyurtma berish</button>
+        </div>`:`<button disabled>Hozircha mavjud emas</button>`}
       </div>`;
-    if(stockOk) document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
+    if(stockOk){
+      document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
+      document.getElementById('cartBtn').onclick = ()=>{ cartAdd(p); tg.showAlert && null; };
+    }
     // dots sinxronlash
     if(imgs.length>1){
       const g = document.getElementById('gallery');
@@ -563,6 +599,109 @@ function showOrderSuccess(oid){
 
 function closeCheckout(){ document.getElementById('checkout').classList.remove('open'); }
 document.getElementById('coClose').onclick = closeCheckout;
+
+// ---------- SAVAT (client-side, bitta sotuvchi) ----------
+let CART = _loadCart(), CATALOG_ITEMS = [], kDlv='pickup', kPay='cash', kAddr='';
+function _loadCart(){ try{ return JSON.parse(localStorage.getItem('tb_cart')||'null') || {seller_id:null,seller_name:'',items:{}}; }catch(e){ return {seller_id:null,seller_name:'',items:{}}; } }
+function _saveCart(){ try{ localStorage.setItem('tb_cart', JSON.stringify(CART)); }catch(e){} updateCartFab(); }
+function cartCount(){ return Object.values(CART.items).reduce((s,i)=>s+i.qty,0); }
+function cartTotal(){ return Object.values(CART.items).reduce((s,i)=>s+i.qty*Number(i.price||0),0); }
+function updateCartFab(){
+  const fab=document.getElementById('cartFab'); if(!fab) return;
+  const n=cartCount(); document.getElementById('cartFabCnt').textContent=n; fab.style.display=n>0?'flex':'none';
+}
+function _cartPut(p){
+  const k=String(p.id);
+  if(CART.items[k]) CART.items[k].qty++;
+  else CART.items[k]={qty:1, name:p.name, price:p.price, image:p.image_url||null};
+  CART.seller_id=p.seller_id; CART.seller_name=p.shop_name||CART.seller_name;
+  _saveCart();
+  try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+}
+function cartAdd(p){
+  if(p.seller_id==null){ tg.showAlert("Mahsulot ma'lumoti to'liq emas."); return; }
+  if(CART.seller_id && CART.seller_id!==p.seller_id && cartCount()>0){
+    const sw=()=>{ CART={seller_id:p.seller_id,seller_name:p.shop_name||'',items:{}}; _cartPut(p); };
+    if(tg.showConfirm) tg.showConfirm("Savatda boshqa do'kon mahsuloti bor. Tozalab, yangi do'kondan boshlaymizmi?", ok=>{ if(ok) sw(); });
+    else if(confirm("Boshqa do'kon — savat tozalansinmi?")) sw();
+    return;
+  }
+  _cartPut(p);
+}
+function cartSetQty(pid,d){
+  const k=String(pid); if(!CART.items[k]) return;
+  CART.items[k].qty += d;
+  if(CART.items[k].qty<=0) delete CART.items[k];
+  if(cartCount()===0){ CART.seller_id=null; CART.seller_name=''; }
+  _saveCart(); renderCart();
+}
+function cartRemove(pid){ delete CART.items[String(pid)]; if(cartCount()===0){CART.seller_id=null;CART.seller_name='';} _saveCart(); renderCart(); }
+
+function openCart(){ kDlv='pickup'; kPay='cash'; kAddr=''; renderCart(); document.getElementById('cartview').classList.add('open'); document.getElementById('cartview').scrollTop=0; }
+function closeCart(){ document.getElementById('cartview').classList.remove('open'); }
+
+function renderCart(){
+  const body=document.getElementById('cartBody');
+  const items=Object.entries(CART.items);
+  if(!items.length){ body.innerHTML=`<div class="cartempty"><span class="big">🛒</span>Savat bo'sh<br><small>Katalogdan mahsulot qo'shing</small></div>`; return; }
+  const rows=items.map(([pid,it])=>{
+    const img=it.image?`<img src="${imgUrl(it.image)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`:`<div class="ph">🖼️</div>`;
+    return `<div class="citem">${img}
+      <div style="flex:1;min-width:0">
+        <div class="nm">${esc(it.name||'')}</div>
+        <div class="pr">${money(it.qty*Number(it.price||0))}</div>
+        <div class="cqty"><button data-dec="${pid}">−</button><span class="v">${it.qty}</span><button data-inc="${pid}">＋</button></div>
+      </div>
+      <span class="crm" data-rm="${pid}">🗑</span>
+    </div>`;
+  }).join('');
+  body.innerHTML=`<div class="cobody">
+    <div style="font-size:13px;color:var(--hint)">🏪 ${esc(CART.seller_name||'')}</div>
+    ${rows}
+    <div class="cosec"><div class="lbl">Yetkazib berish</div>
+      <div class="seg">
+        <div class="opt ${kDlv==='pickup'?'on':''}" data-kdlv="pickup">🚶 Olib ketaman</div>
+        <div class="opt ${kDlv==='delivery'?'on':''}" data-kdlv="delivery">🚚 Yetkazib berish</div>
+      </div>
+      <div style="${kDlv==='delivery'?'':'display:none'}"><textarea class="coaddr" id="kAddrInp" placeholder="Manzil: ko'cha, uy, mo'ljal...">${esc(kAddr)}</textarea></div>
+    </div>
+    <div class="cosec"><div class="lbl">To'lov usuli</div>
+      <div class="seg col">${PAYMENTS.map(([k,l])=>`<div class="opt ${kPay===k?'on':''}" data-kpay="${k}">${l}</div>`).join('')}</div>
+    </div>
+  </div>
+  <div class="cobar">
+    <div class="cototal"><span class="t1">Jami (${cartCount()} dona)</span><span class="t2">${money(cartTotal())}</span></div>
+    <button id="kSubmit">✅ Buyurtma berish</button>
+  </div>`;
+  body.querySelectorAll('[data-dec]').forEach(b=>b.onclick=()=>cartSetQty(b.dataset.dec,-1));
+  body.querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>cartSetQty(b.dataset.inc,1));
+  body.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>cartRemove(b.dataset.rm));
+  body.querySelectorAll('[data-kdlv]').forEach(o=>o.onclick=()=>{ kDlv=o.dataset.kdlv; renderCart(); });
+  body.querySelectorAll('[data-kpay]').forEach(o=>o.onclick=()=>{ kPay=o.dataset.kpay; renderCart(); });
+  const ai=body.querySelector('#kAddrInp'); if(ai) ai.oninput=()=>{ kAddr=ai.value; };
+  document.getElementById('kSubmit').onclick=cartCheckout;
+}
+
+async function cartCheckout(){
+  const btn=document.getElementById('kSubmit');
+  if(kDlv==='delivery' && !(kAddr||'').trim()){ tg.showAlert("Yetkazib berish uchun manzilni kiriting."); return; }
+  const items=Object.entries(CART.items).map(([pid,it])=>({product_id:Number(pid), quantity:it.qty}));
+  if(!items.length) return;
+  btn.disabled=true; btn.textContent='Yuborilmoqda...';
+  try{
+    const r=await fetch('/api/cart/checkout',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body:JSON.stringify({seller_id:CART.seller_id, items, delivery_type:kDlv, payment_method:kPay, address:kDlv==='delivery'?kAddr.trim():null})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    const res=await r.json();
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    CART={seller_id:null,seller_name:'',items:{}}; _saveCart();
+    document.getElementById('cartBody').innerHTML=`<div class="cosuccess"><div class="ico">🎉</div><h3>Buyurtma qabul qilindi!</h3><p>Raqamingiz: <span class="oid">#${res.group_id}</span> · ${res.count} ta mahsulot<br>Sotuvchi tez orada bog'lanadi.</p><div style="width:100%;margin-top:24px"><button class="oact ok" style="width:100%" onclick="closeCart()">Katalogga qaytish</button></div></div>`;
+  }catch(e){ btn.disabled=false; btn.textContent='✅ Buyurtma berish'; tg.showAlert("Buyurtma berilmadi: "+e.message); }
+}
+
+document.getElementById('cartFab').onclick = openCart;
+document.getElementById('cartClose').onclick = closeCart;
+updateCartFab();
 
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;

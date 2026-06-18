@@ -4067,6 +4067,32 @@ async def _dispatch_order_notification(context, order_id):
         logging.error(f"Sotuvchiga bildirishnoma ketmadi (order {order_id}): {e}")
 
 
+async def _dispatch_group_notification(context, group_id):
+    """Savat (guruh) buyurtmasi uchun sotuvchiga BITTA bildirishnoma + jonli sanoq.
+    Mini App yaratgan guruh buyurtmalari uchun fon job'idan chaqiriladi (mavjud
+    _notify_seller_group qayta ishlatiladi — bot va app uchun bir xil)."""
+    try:
+        orders = db.get_orders_in_group(group_id)
+        if not orders:
+            return
+        first = orders[0]
+        seller = db.get_user_by_id(first.get('seller_id')) if first.get('seller_id') else None
+        seller_tg = seller.get('telegram_id') if seller else first.get('seller_tg')
+        if not seller_tg:
+            return
+        dlv = first.get('delivery_type') or 'delivery'
+        payment = first.get('payment_method')
+        addr = first.get('delivery_address')
+        b_lat = first.get('buyer_lat')
+        b_lon = first.get('buyer_lon')
+        deadline = _order_deadline(first)
+        await _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr,
+                                   deadline=deadline)
+        _schedule_order_countdown(context.application.job_queue, group_id=group_id, first=60)
+    except Exception as e:
+        logging.error(f"Guruh bildirishnomasi (group {group_id}) ketmadi: {e}")
+
+
 async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -14390,9 +14416,18 @@ async def webapp_order_dispatch_job(context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logging.error(f"webapp_order_dispatch_job: ro'yxat olinmadi: {e}")
         return
+    handled_groups = set()
     for oid in ids:
         try:
-            await _dispatch_order_notification(context, oid)
+            order = db.get_order_by_id(oid)
+            gid = order.get('order_group_id') if order else None
+            if gid:
+                # Savat (guruh) buyurtmasi — butun guruhga BITTA xabar (bir marta)
+                if gid not in handled_groups:
+                    handled_groups.add(gid)
+                    await _dispatch_group_notification(context, gid)
+            else:
+                await _dispatch_order_notification(context, oid)
         except Exception as e:
             logging.error(f"webapp_order_dispatch_job: order {oid} xabar xato: {e}")
         finally:

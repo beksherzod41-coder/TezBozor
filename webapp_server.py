@@ -165,6 +165,76 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
     return {"ok": True, "order_id": order_id, "total": total}
 
 
+class CartItemIn(BaseModel):
+    product_id: int
+    quantity: int = 1
+
+
+class CartCheckoutIn(BaseModel):
+    seller_id: int
+    items: List[CartItemIn]
+    delivery_type: str = "pickup"
+    payment_method: str = "cash"
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+@app.post("/api/cart/checkout")
+def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
+    """Savat (bitta sotuvchi, ko'p mahsulot) -> guruh buyurtma. Bot fon job'i sotuvchiga
+    BITTA guruh bildirishnomasi yuboradi."""
+    buyer = dict(_buyer_from_auth(authorization))
+    if not co.items:
+        raise HTTPException(status_code=400, detail="empty_cart")
+    if co.delivery_type not in _VALID_DELIVERY:
+        raise HTTPException(status_code=400, detail="bad_delivery_type")
+    if co.payment_method not in _VALID_PAYMENT:
+        raise HTTPException(status_code=400, detail="bad_payment_method")
+    if co.delivery_type == "delivery":
+        address = (co.address or "").strip() or None
+        lat, lon = co.lat, co.lon
+    else:
+        address, lat, lon = None, None, None
+
+    created, grand = [], 0.0
+    for it in co.items:
+        if it.quantity < 1:
+            continue
+        product = db.get_product_by_id(it.product_id)
+        if not product or not product.get("in_stock") or product.get("status") == "deleted":
+            continue
+        if product.get("seller_id") != co.seller_id:   # savat = bitta sotuvchi
+            continue
+        if buyer["id"] == product["seller_id"]:
+            continue
+        qty = it.quantity
+        stock = product.get("stock_count")
+        if stock is not None:
+            qty = min(qty, int(stock))
+        if qty <= 0:
+            continue
+        line = qty * float(product["price"])
+        grand += line
+        oid = db.create_order(
+            buyer_id=buyer["id"], seller_id=co.seller_id, product_id=it.product_id,
+            quantity=qty, total_price=line, delivery_address=address,
+            buyer_lat=lat, buyer_lon=lon, payment_method=co.payment_method,
+            delivery_type=co.delivery_type,
+        )
+        created.append(oid)
+
+    if not created:
+        raise HTTPException(status_code=409, detail="nothing_available")
+    group_id = str(created[0])
+    db.set_orders_group(created, group_id)
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
+    db.set_group_deadline(group_id, deadline)
+    for oid in created:
+        db.mark_order_notify_pending(oid)
+    return {"ok": True, "group_id": group_id, "count": len(created), "total": grand}
+
+
 def _buyer_from_auth(authorization):
     """initData'dan xaridorni (DB user) qaytaradi yoki 401/403 ko'taradi."""
     auth = require_auth(authorization)
