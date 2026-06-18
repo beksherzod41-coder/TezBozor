@@ -560,6 +560,23 @@ def api_seller_reviews(authorization: str = Header(None)):
     return _rows(db.get_seller_reviews(user["id"]))
 
 
+@app.get("/api/seller/channels")
+def api_seller_channels(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_channels(user["id"]))
+
+
+class ChannelRemove(BaseModel):
+    channel_id: str
+
+
+@app.post("/api/seller/channel/remove")
+def api_remove_channel(body: ChannelRemove, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    db.remove_seller_channel(user["id"], body.channel_id)
+    return {"ok": True}
+
+
 class ReplyIn(BaseModel):
     text: str
 

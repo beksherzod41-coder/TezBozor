@@ -410,6 +410,11 @@
     <div id="replyBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="chanview">
+    <div class="cohead"><span>📢 Kanal va guruhlar</span><span class="x" id="chanClose">✕</span></div>
+    <div id="chanBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1251,7 +1256,7 @@ document.getElementById('aiInp').addEventListener('keydown',e=>{ if(e.key==='Ent
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
-  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></div>
+  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span><span id="chanBtn" style="font-size:22px;cursor:pointer;margin-right:10px">📢</span><span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></span></div>
     <div class="seg" style="margin:0 12px 6px">
       <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:10px 4px;font-size:11.5px">📥 Buyurtma</div>
       <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:10px 4px;font-size:11.5px">📦 Mahsulot</div>
@@ -1261,6 +1266,7 @@ function loadSeller(){
     <div id="sellerBody"></div>`;
   v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
   document.getElementById('shopSetBtn').onclick = openShopSettings;
+  document.getElementById('chanBtn').onclick = openChannels;
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else if(sellerSub==='stats') loadSellerStats();
@@ -1305,6 +1311,45 @@ async function sendReply(){
   }catch(e){ btn.disabled=false; btn.textContent='📨 Javob yuborish'; tg.showAlert("Xatolik: "+e.message); }
 }
 document.getElementById('replyClose')?.addEventListener('click',()=>document.getElementById('replyform').classList.remove('open'));
+
+// ---------- KANAL / GURUHLAR ----------
+async function openChannels(){ document.getElementById('chanview').classList.add('open'); await loadChannels(); }
+function chanCard(ch){
+  const icon = ch.chat_type==='group'?'👥':'📢';
+  return `<div class="ocard" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <div style="min-width:0"><div class="oname" style="font-size:14px">${icon} ${esc(ch.channel_title||ch.channel_id)}</div><div style="font-size:11px;color:var(--hint)">${ch.chat_type==='group'?'Guruh':'Kanal'}</div></div>
+    <button class="oact no" data-rmchan="${esc(ch.channel_id)}" data-title="${esc(ch.channel_title||'')}" style="width:auto;padding:9px 13px;background:#fdebef;color:var(--sale)">🗑</button>
+  </div>`;
+}
+async function loadChannels(){
+  const b=document.getElementById('chanBody');
+  b.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const chans=await api('/api/seller/channels');
+    const botU = BOT_USERNAME ? '@'+BOT_USERNAME : 'bot';
+    const help=`<div class="cosec" style="margin:0 12px"><div style="font-size:13px;line-height:1.55">➕ <b>Yangi kanal/guruh ulash:</b><br>1. Botni (${esc(botU)}) kanal/guruhingizga qo'shing<br>2. Unga <b>admin</b> huquqini bering<br>3. Bot avtomatik ulanadi — mahsulotlaringiz o'sha yerga post bo'ladi</div></div>`;
+    const refresh=`<div style="padding:8px 12px"><button class="oact ok" id="chanRefresh" style="width:100%;background:var(--bg);color:var(--accent)">♻️ Yangilash</button></div>`;
+    if(!chans.length)
+      b.innerHTML=`<div style="padding:8px 0">${refresh}${help}</div><div class="empty"><span class="big">📢</span>Hali ulangan kanal yo'q</div>`;
+    else
+      b.innerHTML=`<div style="padding:8px 0">${refresh}${help}<div class="olist" style="margin-top:6px">`+chans.map(chanCard).join('')+`</div></div>`;
+    document.getElementById('chanRefresh').onclick=loadChannels;
+    b.querySelectorAll('[data-rmchan]').forEach(btn=>btn.onclick=()=>removeChannel(btn.dataset.rmchan, btn.dataset.title));
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+function removeChannel(cid, title){
+  const doIt=async()=>{
+    try{
+      const r=await fetch('/api/seller/channel/remove',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({channel_id:cid})});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      loadChannels();
+    }catch(e){ tg.showAlert("Xatolik: "+e.message); }
+  };
+  if(tg.showConfirm) tg.showConfirm("«"+(title||cid)+"» ro'yxatdan o'chirilsinmi? (botni kanaldan ham olib tashlang)", ok=>{ if(ok) doIt(); });
+  else if(confirm("O'chirilsinmi?")) doIt();
+}
+document.getElementById('chanClose').onclick=()=>document.getElementById('chanview').classList.remove('open');
 
 // ---------- DO'KON SOZLAMALARI ----------
 let shopForm={};
