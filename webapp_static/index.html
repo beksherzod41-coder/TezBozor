@@ -316,6 +316,7 @@
         <div class="opt on" data-mode="products">🛍 Mahsulotlar</div>
         <div class="opt" data-mode="shops">🏪 Do'konlar</div>
       </div>
+      <button id="regionBtn" style="margin-top:8px;width:100%;background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;text-align:left;cursor:pointer">🌍 <span id="regionLbl">Barcha hududlar</span></button>
     </div>
     <div class="chips" id="chips"></div>
     <div id="content"></div>
@@ -360,6 +361,21 @@
     <div id="prodformBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="adview">
+    <div class="cohead"><span id="ttl_adview">🎨 Reklama</span><span class="x" id="adClose">✕</span></div>
+    <div id="adBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="regionview">
+    <div class="cohead"><span id="ttl_regionview">🌍 Hudud</span><span class="x" id="regionClose">✕</span></div>
+    <div id="regionBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="stockview">
+    <div class="cohead"><span id="ttl_stockview">📦 Zahira</span><span class="x" id="stockClose">✕</span></div>
+    <div id="stockBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="meform">
     <div class="cohead"><span id="ttl_meform">Profilni tahrirlash</span><span class="x" id="meClose">✕</span></div>
     <div id="meformBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -384,6 +400,16 @@
   <div class="checkout" id="debtsview">
     <div class="cohead"><span id="ttl_debtsview">💳 Qarzlarim</span><span class="x" id="dbClose">✕</span></div>
     <div id="debtsBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="myrevview">
+    <div class="cohead"><span id="ttl_myrevview">⭐ Mening sharhlarim</span><span class="x" id="mrClose">✕</span></div>
+    <div id="myrevBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="joincodeview">
+    <div class="cohead"><span id="ttl_joincodeview">🔑 Kod bilan qo'shilish</span><span class="x" id="jcClose">✕</span></div>
+    <div id="joincodeBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
   <div class="checkout" id="contactform">
@@ -452,6 +478,18 @@ const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
 try{ tg.setHeaderColor('#f2f3f5'); tg.setBackgroundColor('#f2f3f5'); }catch(e){}
 
+// ---- Global xato ushlagich: bo'sh ekran o'rniga aniq xatoni ko'rsatadi ----
+function showFatal(t){
+  try{
+    var c=document.getElementById('content');
+    var msg=String(t||'').slice(0,500).replace(/[&<>]/g,'');
+    var html='<div class="empty"><span class="big">⚠️</span>Ilovada xatolik<br><small style="word-break:break-all;color:#999">'+msg+'</small></div>';
+    if(c) c.innerHTML=html; else document.body.insertAdjacentHTML('afterbegin','<div style="padding:20px;font-size:13px">'+html+'</div>');
+  }catch(e){}
+}
+window.onerror=function(msg,src,line,col,err){ showFatal(((err&&err.stack)||msg)+' @'+(line||'?')+':'+(col||'?')); };
+window.addEventListener('unhandledrejection',function(e){ showFatal('Promise: '+((e.reason&&(e.reason.message||e.reason.stack))||e.reason)); });
+
 const AUTH = "tma " + (tg.initData || "");
 let activeCat = null, searchTimer = null, botUsername = null;
 
@@ -514,10 +552,27 @@ const I18N = {
   nav_admin:{uz:"Admin",ru:"Админ"}, adm_title:{uz:"🛡️ Admin panel",ru:"🛡️ Админ-панель"},
   mode_to_seller:{uz:"🏪 Sotuvchi rejimiga o'tish",ru:"🏪 Перейти в режим продавца"},
   mode_to_buyer:{uz:"🛍 Xaridor rejimiga o'tish",ru:"🛍 Перейти в режим покупателя"},
+  mode_to_admin:{uz:"🛡️ Admin paneliga o'tish",ru:"🛡️ Перейти в админ-панель"},
   adm_stats:{uz:"📊 Statistika",ru:"📊 Статистика"}, adm_requests:{uz:"🏪 So'rovlar",ru:"🏪 Заявки"},
   adm_disputes:{uz:"⚖️ Nizolar",ru:"⚖️ Споры"}, adm_users:{uz:"👥 Odamlar",ru:"👥 Люди"},
   adm_shops:{uz:"🏬 Do'konlar",ru:"🏬 Магазины"}, adm_orders:{uz:"📦 Buyurtmalar",ru:"📦 Заказы"},
   adm_products:{uz:"🛍️ Mahsulotlar",ru:"🛍️ Товары"}, adm_broadcast:{uz:"📣 Xabar",ru:"📣 Рассылка"},
+  adm_channels:{uz:"📢 Kanallar",ru:"📢 Каналы"}, adm_deleted:{uz:"🗑 O'chirilgan",ru:"🗑 Удалённые"},
+  adm_settings:{uz:"⚙️ Sozlamalar",ru:"⚙️ Настройки"},
+  adm_no_channels:{uz:"Ulangan kanal yo'q",ru:"Нет подключённых каналов"},
+  adm_no_deleted:{uz:"O'chirilgan mahsulot yo'q",ru:"Нет удалённых товаров"},
+  adm_shop_open:{uz:"Boshqarish",ru:"Управление"}, adm_shop_owner:{uz:"Ega",ru:"Владелец"},
+  adm_shop_mod:{uz:"Moderatsiya",ru:"Модерация"}, adm_shop_paymode:{uz:"To'lov rejimi",ru:"Режим оплаты"},
+  adm_mod_owner:{uz:"Ega tasdiqlaydi",ru:"Подтверждает владелец"}, adm_mod_direct:{uz:"To'g'ridan-to'g'ri",ru:"Напрямую"},
+  adm_pm_shop:{uz:"Do'kon kartasi",ru:"Карта магазина"}, adm_pm_staff:{uz:"Xodim kartasi",ru:"Карта сотрудника"},
+  adm_toggle_mod:{uz:"🔁 Moderatsiyani almashtirish",ru:"🔁 Переключить модерацию"},
+  adm_shop_staff:{uz:"Xodimlar",ru:"Сотрудники"}, adm_no_staff:{uz:"Xodim yo'q",ru:"Нет сотрудников"},
+  adm_shop_revenue:{uz:"Daromad",ru:"Выручка"},
+  adm_staff_activate:{uz:"✅ Faollashtirish",ru:"✅ Активировать"}, adm_staff_freeze:{uz:"❄️ Muzlatish",ru:"❄️ Заморозить"},
+  adm_s_users:{uz:"Foydalanuvchilar",ru:"Пользователи"}, adm_s_products:{uz:"Mahsulotlar",ru:"Товары"},
+  adm_s_orders:{uz:"Buyurtmalar",ru:"Заказы"},
+  adm_backup:{uz:"💾 Bazani zaxiralash",ru:"💾 Резервная копия БД"}, adm_backup_sent:{uz:"Backup Telegram'ga yuborildi",ru:"Бэкап отправлен в Telegram"},
+  adm_clean:{uz:"🧹 Eski bekorlarni tozalash",ru:"🧹 Очистить старые отмены"}, adm_clean_done:{uz:"{n} ta buyurtma o'chirildi",ru:"Удалено заказов: {n}"},
   adm_buyers:{uz:"Xaridorlar",ru:"Покупатели"}, adm_sellers:{uz:"Sotuvchilar",ru:"Продавцы"},
   adm_total_users:{uz:"Jami foydalanuvchi",ru:"Всего пользователей"}, adm_revenue:{uz:"Aylanma",ru:"Оборот"},
   adm_today:{uz:"Bugun",ru:"Сегодня"}, adm_week:{uz:"Hafta",ru:"Неделя"}, adm_month:{uz:"Oy",ru:"Месяц"},
@@ -527,6 +582,20 @@ const I18N = {
   adm_block:{uz:"🚫 Bloklash",ru:"🚫 Заблокировать"}, adm_unblock:{uz:"✅ Blokdan chiqarish",ru:"✅ Разблокировать"},
   adm_blocked:{uz:"🚫 Bloklangan",ru:"🚫 Заблокирован"},
   adm_search_user:{uz:"Ism, telefon yoki do'kon...",ru:"Имя, телефон или магазин..."},
+  adm_u_role:{uz:"Rol",ru:"Роль"}, adm_u_phone:{uz:"Telefon",ru:"Телефон"}, adm_u_username:{uz:"Username",ru:"Username"},
+  adm_u_region:{uz:"Hudud",ru:"Регион"}, adm_u_lang:{uz:"Til",ru:"Язык"}, adm_u_referral:{uz:"Referal kod",ru:"Реф. код"},
+  adm_u_orders:{uz:"Buyurtmalari",ru:"Заказов"}, adm_u_created:{uz:"Ro'yxatdan o'tgan",ru:"Регистрация"},
+  adm_u_approved:{uz:"Tasdiqlangan",ru:"Подтверждён"}, adm_u_addr:{uz:"Manzil",ru:"Адрес"}, adm_u_landmark:{uz:"Mo'ljal",ru:"Ориентир"},
+  adm_u_hours:{uz:"Ish vaqti",ru:"Часы работы"}, adm_u_days:{uz:"Ish kunlari",ru:"Рабочие дни"}, adm_u_card:{uz:"Karta",ru:"Карта"},
+  adm_u_sales:{uz:"Sotuvlari",ru:"Продаж"}, adm_u_channels:{uz:"Kanallar",ru:"Каналы"},
+  adm_u_missing:{uz:"To'ldirilmagan maydonlar",ru:"Незаполненные поля"},
+  adm_u_askfill:{uz:"🤖 Kamchilikni to'ldirishni so'rash",ru:"🤖 Запросить заполнение"},
+  adm_u_generating:{uz:"AI xabar tayyorlamoqda...",ru:"AI готовит сообщение..."},
+  adm_u_msg_preview:{uz:"Foydalanuvchiga yuboriladigan xabar (tahrirlash mumkin)",ru:"Сообщение пользователю (можно изменить)"},
+  adm_u_send:{uz:"📨 Yuborish",ru:"📨 Отправить"}, adm_u_sent:{uz:"✅ Xabar yuborildi",ru:"✅ Сообщение отправлено"},
+  adm_export:{uz:"Excel hisobot",ru:"Excel отчёт"}, adm_exp_users:{uz:"👥 Foydalanuvchilar",ru:"👥 Пользователи"},
+  adm_exp_products:{uz:"📦 Mahsulotlar",ru:"📦 Товары"}, adm_exp_orders:{uz:"🧾 Buyurtmalar",ru:"🧾 Заказы"},
+  adm_exp_sent:{uz:"✅ Excel fayl Telegram chatingizga yuborildi ({n} qator).",ru:"✅ Excel-файл отправлен в ваш Telegram-чат ({n} строк)."},
   adm_load_more:{uz:"Ko'proq yuklash",ru:"Загрузить ещё"},
   adm_dispute_keep:{uz:"⚖️ Kuchda qoldirish",ru:"⚖️ Оставить в силе"}, adm_dispute_cancel:{uz:"❌ Buyurtmani bekor",ru:"❌ Отменить заказ"},
   adm_to_buyer:{uz:"Xaridorga",ru:"Покупателю"}, adm_to_seller:{uz:"Sotuvchiga",ru:"Продавцу"},
@@ -630,12 +699,60 @@ const I18N = {
   sp_desc:{uz:"Tavsif",ru:"Описание"}, sp_desc_ph:{uz:"Mahsulot haqida...",ru:"О товаре..."},
   sp_hide:{uz:"🙈 Sotuvdan yashirish",ru:"🙈 Скрыть из продажи"}, sp_unhide:{uz:"👁 Sotuvga qaytarish",ru:"👁 Вернуть в продажу"},
   sp_delete:{uz:"🗑 O'chirish",ru:"🗑 Удалить"}, sp_add:{uz:"➕ Qo'shish",ru:"➕ Добавить"},
+  sp_add_ad:{uz:"➕ Qo'shish va reklama yasash",ru:"➕ Добавить и создать рекламу"},
+  sp_old_price:{uz:"Eski narx (chegirma uchun)",ru:"Старая цена (для скидки)"},
+  sp_old_price_ph:{uz:"Bo'sh = chegirmasiz",ru:"Пусто = без скидки"},
+  sp_stock_now:{uz:"Hozirgi zahira",ru:"Текущий запас"}, sp_stock_req:{uz:"Zahira sonini kiriting.",ru:"Введите количество."},
+  sp_ov_stock:{uz:"📦 Zahira",ru:"📦 Запас"},
+  sp_chan_add_group:{uz:"➕ Botni guruhga qo'shish",ru:"➕ Добавить бота в группу"},
+  sp_exp_orders:{uz:"🧾 Buyurtmalar (Excel)",ru:"🧾 Заказы (Excel)"}, sp_exp_products:{uz:"📦 Mahsulotlar (Excel)",ru:"📦 Товары (Excel)"},
   sp_save_failed:{uz:"Saqlanmadi: ",ru:"Не сохранено: "}, sp_delete_failed:{uz:"O'chirilmadi: ",ru:"Не удалено: "},
   sp_delete_product_confirm:{uz:"Mahsulot butunlay o'chirilsinmi?",ru:"Удалить товар полностью?"},
+  // reklama generatori
+  sp_ad_btn:{uz:"🎨 Reklama yasash",ru:"🎨 Создать рекламу"},
+  sp_ad_loading:{uz:"Reklama tayyorlanmoqda...",ru:"Готовим рекламу..."},
+  sp_ad_no_design:{uz:"Dizayn rasm yasalmadi (mahsulot rasmi yo'q yoki xato). Matn baribir e'lon qilinadi.",ru:"Дизайн не создан (нет фото или ошибка). Текст всё равно будет опубликован."},
+  sp_ad_caption:{uz:"Reklama matni (tahrirlash mumkin)",ru:"Текст рекламы (можно изменить)"},
+  sp_ad_length:{uz:"Matn uzunligi",ru:"Длина текста"},
+  sp_ad_long:{uz:"Uzun",ru:"Длинный"}, sp_ad_short:{uz:"Qisqa",ru:"Короткий"},
+  sp_ad_regen:{uz:"🔄 Boshqa variant",ru:"🔄 Другой вариант"},
+  sp_ad_publish:{uz:"📢 Hozir e'lon qilish",ru:"📢 Опубликовать сейчас"},
+  sp_ad_publishing:{uz:"E'lon qilinmoqda...",ru:"Публикация..."},
+  sp_ad_published:{uz:"✅ Reklama navbatga qo'yildi — 1 daqiqa ichida kanal/guruhlaringizga joylanadi.",ru:"✅ Реклама в очереди — появится в ваших каналах/группах в течение минуты."},
+  sp_ad_publish_q:{uz:"Reklama barcha kanal va guruhlaringizga e'lon qilinsinmi?",ru:"Опубликовать рекламу во всех ваших каналах и группах?"},
+  sp_ad_failed:{uz:"E'lon qilinmadi: ",ru:"Не опубликовано: "},
+  sp_ov_adview:{uz:"🎨 Reklama",ru:"🎨 Реклама"},
+  sp_ad_more:{uz:"Yoki keyinroq / avtomatik",ru:"Или позже / автоматически"},
+  sp_ad_autorep:{uz:"♻️ Har kuni avto-post",ru:"♻️ Авто-пост ежедневно"},
+  sp_ad_skip:{uz:"✅ Hozircha shart emas (savdoda qoladi)",ru:"✅ Пока не нужно (товар в продаже)"},
+  sp_ad_on_sale:{uz:"✅ Mahsulot savdoga qo'yildi. Reklamani keyin Do'kon → 📅 dan ham qila olasiz.",ru:"✅ Товар в продаже. Рекламу можно сделать позже в Магазин → 📅."},
+  sp_ad_pick_time:{uz:"Sana va vaqtni tanlang.",ru:"Выберите дату и время."},
+  sp_ad_scheduled:{uz:"📅 Rejalashtirildi — belgilangan vaqtda avtomatik e'lon qilinadi.",ru:"📅 Запланировано — будет опубликовано автоматически."},
+  sp_ad_autorep_set:{uz:"♻️ Avto-post yoqildi — har kuni belgilangan soatda qayta joylanadi.",ru:"♻️ Авто-пост включён — будет публиковаться ежедневно."},
+  sp_ad_past:{uz:"O'tgan vaqt — kelajakdagi vaqtni tanlang.",ru:"Прошедшее время — выберите будущее."},
+  // mahsulot savollari / atributlar (3 rejim)
+  sp_q_mode:{uz:"🧩 Mahsulotni qanday joylaymiz?",ru:"🧩 Как разместить товар?"},
+  sp_q_classic:{uz:"📋 Klassik",ru:"📋 Классический"},
+  sp_q_classic_d:{uz:"Har kategoriya uchun standart savollar (tez, oddiy).",ru:"Стандартные вопросы для категории (быстро, просто)."},
+  sp_q_ai:{uz:"🤖 AI savollar",ru:"🤖 AI вопросы"},
+  sp_q_ai_d:{uz:"AI aynan sizning mahsulotingizga mos savollar beradi.",ru:"AI задаёт вопросы именно под ваш товар."},
+  sp_q_smart:{uz:"✨ AI aqlli",ru:"✨ AI умный"},
+  sp_q_smart_d:{uz:"Tavsifdan o'zi tushunadi, faqat yetishmaganini so'raydi.",ru:"Понимает из описания, спросит только недостающее."},
+  sp_q_load:{uz:"🧩 Savollarni yuklash",ru:"🧩 Загрузить вопросы"},
+  sp_q_loading:{uz:"Yuklanmoqda...",ru:"Загрузка..."},
+  sp_q_fields:{uz:"Xususiyatlar",ru:"Характеристики"},
+  sp_q_none:{uz:"Bu kategoriya uchun savol yo'q — to'g'ridan-to'g'ri saqlang.",ru:"Для этой категории вопросов нет — сохраняйте сразу."},
+  sp_q_failed:{uz:"Savollar yuklanmadi: ",ru:"Не удалось загрузить вопросы: "},
+  sp_q_need_name:{uz:"Avval mahsulot nomini kiriting.",ru:"Сначала введите название товара."},
+  sp_q_need_cat:{uz:"Avval kategoriyani tanlang.",ru:"Сначала выберите категорию."},
+  sp_q_required:{uz:"«{f}» — majburiy maydon.",ru:"«{f}» — обязательное поле."},
   // overlay sarlavhalari
   sp_ov_shop:{uz:"⚙️ Do'kon sozlamalari",ru:"⚙️ Настройки магазина"}, sp_ov_reply:{uz:"💬 Sharhga javob",ru:"💬 Ответ на отзыв"},
   sp_ov_chan:{uz:"📢 Kanal va guruhlar",ru:"📢 Каналы и группы"}, sp_ov_staff:{uz:"👥 Xodimlar",ru:"👥 Сотрудники"},
   sp_ov_sched:{uz:"📅 Rejalashtirilgan postlar",ru:"📅 Запланированные посты"}, sp_ov_deliver:{uz:"📦 Berish va to'lov",ru:"📦 Выдача и оплата"},
+  sp_ov_ai:{uz:"🤖 AI yordamchi",ru:"🤖 AI помощник"},
+  sp_cancel_incoming:{uz:"🚫 Xaridor bekor qilishni so'radi:",ru:"🚫 Покупатель запросил отмену:"},
+  sp_cancel_wait:{uz:"⏳ Bekor so'rovi yuborildi — xaridor javobini kuting.",ru:"⏳ Запрос на отмену отправлен — ждите ответа покупателя."},
   sp_img_failed:{uz:"Rasm yuklanmadi: ",ru:"Фото не загружено: "}, sp_name_req:{uz:"Mahsulot nomini kiriting.",ru:"Введите название товара."},
   sp_price_req:{uz:"To'g'ri narx kiriting.",ru:"Введите корректную цену."},
   // xaridor / profil — qolgan matnlar
@@ -655,6 +772,21 @@ const I18N = {
   bp_view_products:{uz:"Mahsulotlarni ko'rish ›",ru:"Смотреть товары ›"}, bp_no_shops:{uz:"Do'kon topilmadi",ru:"Магазины не найдены"},
   bp_shop_word:{uz:"Do'kon",ru:"Магазин"}, bp_no_products_short:{uz:"Mahsulot yo'q",ru:"Нет товаров"},
   bp_contact_seller:{uz:"💬 Sotuvchi bilan bog'lanish",ru:"💬 Связаться с продавцом"},
+  bp_seller_word:{uz:"Sotuvchi",ru:"Продавец"},
+  bp_my_reviews:{uz:"⭐ Mening sharhlarim",ru:"⭐ Мои отзывы"},
+  bp_no_reviews:{uz:"Hali sharh qoldirmagansiz",ru:"Вы ещё не оставляли отзывов"},
+  bp_join_code:{uz:"🔑 Kod bilan qo'shilish",ru:"🔑 Присоединиться по коду"},
+  bp_join_hint:{uz:"Do'kon egasi bergan taklif kodini kiriting — xodim sifatida qo'shilasiz (ega tasdiqlagach faollashasiz).",ru:"Введите код-приглашение от владельца магазина — вы присоединитесь как сотрудник (активируетесь после подтверждения)."},
+  bp_join_code_label:{uz:"Taklif kodi",ru:"Код-приглашение"}, bp_join_submit:{uz:"Qo'shilish",ru:"Присоединиться"},
+  bp_join_code_req:{uz:"Kodni kiriting",ru:"Введите код"},
+  bp_join_ok:{uz:"✅ {shop} do'koniga qo'shildingiz — ega tasdig'ini kuting.",ru:"✅ Вы присоединились к магазину {shop} — ждите подтверждения владельца."},
+  bp_join_invalid:{uz:"Kod yaroqsiz yoki allaqachon ishlatilgan.",ru:"Код недействителен или уже использован."},
+  bp_join_owner:{uz:"Siz do'kon egasisiz — boshqa do'konga qo'shila olmaysiz.",ru:"Вы владелец магазина — нельзя присоединиться к другому."},
+  bp_join_already:{uz:"Siz allaqachon shu do'kondasiz.",ru:"Вы уже в этом магазине."},
+  bp_join_admin:{uz:"Admin do'konga xodim bo'lib qo'shila olmaydi.",ru:"Админ не может присоединиться как сотрудник."},
+  bp_all_regions:{uz:"Barcha hududlar",ru:"Все регионы"}, bp_whole_region:{uz:"butun viloyat",ru:"вся область"},
+  bp_region_title:{uz:"🌍 Hudud",ru:"🌍 Регион"},
+  adm_role_all:{uz:"Hammasi",ru:"Все"}, adm_role_buyers:{uz:"Xaridorlar",ru:"Покупатели"}, adm_role_sellers:{uz:"Sotuvchilar",ru:"Продавцы"},
   bp_cancel_failed:{uz:"Bekor qilinmadi: ",ru:"Не отменено: "}, bp_cancel_confirm:{uz:"Buyurtmani bekor qilasizmi?",ru:"Отменить заказ?"}, bp_cancel_q:{uz:"Bekor qilinsinmi?",ru:"Отменить?"},
   bp_name_label:{uz:"Ism",ru:"Имя"}, bp_name_ph:{uz:"Ismingiz",ru:"Ваше имя"}, bp_lang:{uz:"Til",ru:"Язык"}, bp_name_req:{uz:"Ismingizni kiriting.",ru:"Введите ваше имя."},
   bp_link_not_ready:{uz:"Havola tayyor emas, birozdan keyin urinib ko'ring.",ru:"Ссылка не готова, попробуйте позже."},
@@ -696,9 +828,12 @@ function applyStaticI18n(){
     ttl_staffview:'sp_ov_staff',ttl_schedview:'sp_ov_sched',ttl_deliverform:'sp_ov_deliver',
     ttl_checkout:'bp_ov_checkout',ttl_meform:'bp_ov_meform',ttl_cartview:'cart_title',
     ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',
-    ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title'};
+    ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title',
+    ttl_adview:'sp_ov_adview',ttl_regionview:'bp_region_title',ttl_stockview:'sp_ov_stock',
+    ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
+  if(typeof updateRegionBtn==='function') updateRegionBtn();
 }
 
 async function api(path){
@@ -707,6 +842,7 @@ async function api(path){
   return r.json();
 }
 function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,' ') + " " + L('sum'); }
+function fmtThousands(v){ return String(v).replace(/\D/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,' '); }
 function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function rating(p){ return (p.prod_avg_rating || p.avg_rating || 0); }
@@ -776,6 +912,7 @@ async function loadProducts(){
   let url = '/api/products?sort=rating';
   if(q) url += '&q=' + encodeURIComponent(q);
   if(activeCat) url += '&category_id=' + activeCat;
+  if(REGION_ID) url += '&region_id=' + REGION_ID;
   try{
     const items = await api(url);
     CATALOG_ITEMS = items;
@@ -830,6 +967,8 @@ async function openDetail(id){
           </div>
         </div>
         ${p.description?`<div class="dsec"><h4>${L('sp_desc')}</h4><div class="dcard"><div class="ddesc">${esc(p.description)}</div></div></div>`:''}
+        ${(p.attributes&&p.attributes.length)?`<div class="dsec"><h4>${L('sp_q_fields')}</h4><div class="dcard">${p.attributes.map(a=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px"><span style="color:var(--hint)">${esc(a.attr_label||a.attr_key)}</span><b style="text-align:right">${esc(a.attr_value)}</b></div>`).join('')}</div></div>`:''}
+        ${(p.telegram_username||p.phone_number)?`<div class="dsec"><h4>${L('bp_seller_word')}</h4><div class="dcard">${p.telegram_username?`<button class="ocontact" id="dtContact" data-un="${esc(String(p.telegram_username).replace('@',''))}" style="width:100%">${L('bp_contact_seller')}</button>`:`<a class="ocontact" href="tel:${esc(p.phone_number)}" style="width:100%;display:block;text-align:center;box-sizing:border-box">📞 ${esc(p.phone_number)}</a>`}</div></div>`:''}
       </div>
       <div class="buybar">
         ${stockOk?`<div style="display:flex;gap:10px">
@@ -841,6 +980,8 @@ async function openDetail(id){
       document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
       document.getElementById('cartBtn').onclick = ()=>{ cartAdd(p); tg.showAlert && null; };
     }
+    const dtc=document.getElementById('dtContact');
+    if(dtc) dtc.onclick=()=>{ try{ tg.openTelegramLink('https://t.me/'+dtc.dataset.un); }catch(e){ tg.showAlert('@'+dtc.dataset.un); } };
     // dots sinxronlash
     if(imgs.length>1){
       const g = document.getElementById('gallery');
@@ -1198,6 +1339,55 @@ async function openDebts(){
 function closeDebts(){ document.getElementById('debtsview').classList.remove('open'); }
 document.getElementById('dbClose').onclick=closeDebts;
 
+// ---------- #4 MENING SHARHLARIM ----------
+async function openMyReviews(){
+  document.getElementById('myrevview').classList.add('open');
+  const body=document.getElementById('myrevBody');
+  body.innerHTML=`<div class="loading">${L('bp_loading')}</div>`;
+  try{
+    const list=await api('/api/my/reviews');
+    if(!list.length){ body.innerHTML=`<div class="cartempty"><span class="big">⭐</span>${L('bp_no_reviews')}</div>`; return; }
+    body.innerHTML=`<div class="cobody"><div class="olist">`+list.map(r=>`<div class="ocard">
+      <div class="orow1"><span class="stars"><b style="color:var(--star)">★</b> ${r.rating||'-'}${r.product_rating?` · ${L('sp_product_word')} ${r.product_rating}★`:''}</span><span class="odate">${fmtDate(r.created_at)}</span></div>
+      <div class="oname">🏪 ${esc(r.shop_name||r.seller_name||'—')}</div>
+      ${r.product_name?`<div class="ometa">📦 ${esc(r.product_name)}</div>`:''}
+      ${r.comment?`<div class="ometa" style="margin-top:4px">“${esc(r.comment)}”</div>`:''}
+      ${r.reply?`<div class="odebt" style="background:var(--bg);color:var(--text);margin-top:6px">💬 ${esc(r.reply)}</div>`:''}
+    </div>`).join('')+`</div></div>`;
+  }catch(e){ body.innerHTML=`<div class="cartempty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('mrClose').onclick=()=>document.getElementById('myrevview').classList.remove('open');
+
+// ---------- #5 KOD BILAN DO'KONGA QO'SHILISH ----------
+function openJoinCode(){
+  document.getElementById('joincodeview').classList.add('open');
+  const body=document.getElementById('joincodeBody');
+  body.innerHTML=`<div class="cobody">
+    <div class="ometa" style="margin-bottom:10px">${L('bp_join_hint')}</div>
+    <div class="cosec"><div class="lbl">${L('bp_join_code_label')}</div>
+      <input class="coaddr" id="jcInput" style="min-height:auto;text-transform:uppercase" placeholder="ABC123" autocapitalize="characters"></div>
+  </div><div class="cobar"><button id="jcSubmit">${L('bp_join_submit')}</button></div>`;
+  document.getElementById('jcSubmit').onclick=submitJoinCode;
+}
+async function submitJoinCode(){
+  const code=(document.getElementById('jcInput').value||'').trim();
+  if(!code){ tg.showAlert(L('bp_join_code_req')); return; }
+  const btn=document.getElementById('jcSubmit'); btn.disabled=true; btn.textContent=L('sp_saving');
+  try{
+    const r=await apiSend('/api/join-with-code','POST',{code});
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('joincodeview').classList.remove('open');
+    tg.showAlert(L('bp_join_ok').replace('{shop}', r.shop_name||''));
+    ME=null; await loadMe(); switchMode('seller');
+  }catch(e){
+    btn.disabled=false; btn.textContent=L('bp_join_submit');
+    const map={invite_invalid:L('bp_join_invalid'),owner_cannot_join:L('bp_join_owner'),
+      already_in_this_shop:L('bp_join_already'),admin_cannot_join:L('bp_join_admin')};
+    tg.showAlert(map[e.message]||(L('err')+': '+e.message));
+  }
+}
+document.getElementById('jcClose').onclick=()=>document.getElementById('joincodeview').classList.remove('open');
+
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
 tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
@@ -1230,7 +1420,10 @@ async function loadShops(){
   content.innerHTML=skeleton();
   const q=document.getElementById('search').value.trim();
   try{
-    const shops=await api('/api/shops'+(q?('?q='+encodeURIComponent(q)):''));
+    const sp=new URLSearchParams();
+    if(q) sp.set('q', q);
+    if(REGION_ID) sp.set('region_id', REGION_ID);
+    const shops=await api('/api/shops'+(sp.toString()?('?'+sp.toString()):''));
     if(!shops.length){ content.innerHTML=`<div class="empty"><span class="big">🏪</span>${L('bp_no_shops')}</div>`; return; }
     content.innerHTML=`<div class="olist" style="padding:10px 12px">${shops.map(shopCardHtml).join('')}</div>`;
     content.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>openShop(c.dataset.shop, c.dataset.name));
@@ -1252,6 +1445,36 @@ async function openShop(sellerId, name){
 }
 function closeShop(){ document.getElementById('shopview').classList.remove('open'); }
 document.getElementById('shopClose').onclick=closeShop;
+
+// ---------- HUDUD (viloyat → tuman) filtri ----------
+let REGION_ID=null, REGION_LABEL='';
+const _RGI='style="padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer;font-size:15px"';
+function updateRegionBtn(){ const el=document.getElementById('regionLbl'); if(el) el.textContent = REGION_LABEL || L('bp_all_regions'); }
+function closeRegion(){ document.getElementById('regionview').classList.remove('open'); }
+function afterRegionChange(){ updateRegionBtn(); (catMode==='products'?loadProducts():loadShops()); }
+async function openRegionPicker(){ document.getElementById('regionview').classList.add('open'); document.getElementById('regionview').scrollTop=0; await renderRegionPicker(null,''); }
+async function renderRegionPicker(parentId, parentLabel){
+  const body=document.getElementById('regionBody'); body.innerHTML=`<div class="loading" style="padding:30px;text-align:center">⏳</div>`;
+  try{
+    const regs=await api('/api/regions'+(parentId?('?parent_id='+parentId):''));
+    let h='<div>';
+    if(!parentId){ h+=`<div ${_RGI} data-rgall="1">🌍 <b>${L('bp_all_regions')}</b></div>`; }
+    else { h+=`<div ${_RGI} data-rgback="1">⬅️ ${L('bp_back')}</div>
+              <div ${_RGI} data-rgpick="${parentId}" data-rglbl="${esc(parentLabel)}">✅ <b>${esc(parentLabel)}</b> — ${L('bp_whole_region')}</div>`; }
+    regs.forEach(r=>{
+      if(parentId) h+=`<div ${_RGI} data-rgpick="${r.id}" data-rglbl="${esc((parentLabel?parentLabel+' → ':'')+r.name)}">${esc(r.name)}</div>`;
+      else h+=`<div ${_RGI} data-rgopen="${r.id}" data-rglbl="${esc(r.name)}">${esc(r.name)} ›</div>`;
+    });
+    h+='</div>';
+    body.innerHTML=h;
+    body.querySelectorAll('[data-rgall]').forEach(e=>e.onclick=()=>{ REGION_ID=null; REGION_LABEL=''; closeRegion(); afterRegionChange(); });
+    body.querySelectorAll('[data-rgback]').forEach(e=>e.onclick=()=>renderRegionPicker(null,''));
+    body.querySelectorAll('[data-rgopen]').forEach(e=>e.onclick=()=>renderRegionPicker(Number(e.dataset.rgopen), e.dataset.rglbl));
+    body.querySelectorAll('[data-rgpick]').forEach(e=>e.onclick=()=>{ REGION_ID=Number(e.dataset.rgpick); REGION_LABEL=e.dataset.rglbl; closeRegion(); afterRegionChange(); });
+  }catch(e){ body.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('regionBtn').onclick=openRegionPicker;
+document.getElementById('regionClose').onclick=closeRegion;
 
 document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='products'?loadProducts():loadShops(); },350); };
 
@@ -1417,14 +1640,18 @@ async function loadProfile(){
       </div>`:''}
       <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
         <button class="oact ok" id="meEditBtn" style="width:100%">${L('edit_profile')}</button>
-        ${canManage()?`<button class="oact ok" id="modeSwitchBtn" style="width:100%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:none">${appMode==='seller'?L('mode_to_buyer'):L('mode_to_seller')}</button>`:''}
-        ${(me.role!=='seller' && !me.is_approved)?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('become_seller')}</button>`:''}
+        <button class="oact ok" id="myRevBtn" style="width:100%;background:var(--bg);color:var(--accent);box-shadow:none">${L('bp_my_reviews')}</button>
+        ${_modeButtonsHtml()}
+        ${(!canManage())?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('become_seller')}</button>`:''}
+        ${(me.role!=='admin')?`<button class="oact ok" id="joinCodeBtn" style="width:100%;background:var(--bg);color:var(--accent);box-shadow:none">${L('bp_join_code')}</button>`:''}
         <button class="oact no" id="contactAdminBtn" style="width:100%;background:var(--bg);color:var(--accent)">${L('contact_admin')}</button>
       </div>`;
     document.getElementById('meEditBtn').onclick = openProfileEdit;
+    document.getElementById('myRevBtn').onclick = openMyReviews;
+    const jc=document.getElementById('joinCodeBtn'); if(jc) jc.onclick=openJoinCode;
     const rb=document.getElementById('refShareBtn'); if(rb) rb.onclick=()=>shareReferral(me.referral_code);
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
-    const ms=document.getElementById('modeSwitchBtn'); if(ms) ms.onclick=()=>switchMode(appMode==='seller'?'buyer':'seller');
+    v.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>switchMode(b.dataset.mode));
     document.getElementById('contactAdminBtn').onclick=openContact;
   }catch(e){
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
@@ -1550,11 +1777,12 @@ function isAdminUser(){ return !!(ME && ME.role==='admin'); }
 
 function applyMode(){
   const seller = appMode==='seller';
+  const admin = appMode==='admin';
   const vis = {
-    catalog: !seller,
-    orders: !seller,
+    catalog: !seller && !admin,
+    orders: !seller && !admin,
     seller: seller && canManage(),
-    admin: seller && isAdminUser(),
+    admin: admin && isAdminUser(),
     profile: true,
   };
   document.querySelectorAll('#bottomnav .navitem').forEach(n=>{
@@ -1563,10 +1791,26 @@ function applyMode(){
 }
 
 function switchMode(m){
-  appMode = (m==='seller') ? 'seller' : 'buyer';
+  if(m==='admin' && !isAdminUser()) m='buyer';
+  appMode = (m==='seller') ? 'seller' : (m==='admin' ? 'admin' : 'buyer');
   try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
   applyMode();
-  switchTab(appMode==='seller' ? 'seller' : 'catalog');
+  switchTab(appMode==='seller' ? 'seller' : (appMode==='admin' ? 'admin' : 'catalog'));
+}
+
+function _modeButtonsHtml(){
+  const grad='style="width:100%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:none"';
+  const soft='style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none"';
+  if(isAdminUser()){
+    let h='';
+    if(appMode!=='buyer') h+=`<button class="oact ok" data-mode="buyer" ${soft}>${L('mode_to_buyer')}</button>`;
+    if(appMode!=='seller') h+=`<button class="oact ok" data-mode="seller" ${soft}>${L('mode_to_seller')}</button>`;
+    if(appMode!=='admin') h+=`<button class="oact ok" data-mode="admin" ${grad}>${L('mode_to_admin')}</button>`;
+    return h;
+  }
+  if(canManage())
+    return `<button class="oact ok" data-mode="${appMode==='seller'?'buyer':'seller'}" ${grad}>${appMode==='seller'?L('mode_to_buyer'):L('mode_to_seller')}</button>`;
+  return '';
 }
 
 function shareReferral(code){
@@ -1673,21 +1917,21 @@ document.getElementById('aiInp').addEventListener('keydown',e=>{ if(e.key==='Ent
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
-  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">${L('sp_shop')} <span><span id="sellerAiBtn" style="font-size:20px;cursor:pointer;margin-right:9px">🤖</span><span id="schedBtn" style="font-size:20px;cursor:pointer;margin-right:9px">📅</span><span id="staffBtn" style="font-size:20px;cursor:pointer;margin-right:9px">👥</span><span id="chanBtn" style="font-size:20px;cursor:pointer;margin-right:9px">📢</span><span id="shopSetBtn" style="font-size:21px;cursor:pointer">⚙️</span></span></div>
-    <div class="seg" style="margin:0 12px 6px">
-      <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:10px 4px;font-size:11.5px">${L('sp_seg_orders')}</div>
-      <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:10px 4px;font-size:11.5px">${L('sp_seg_products')}</div>
-      <div class="opt ${sellerSub==='stats'?'on':''}" data-sub="stats" style="padding:10px 4px;font-size:11.5px">${L('sp_seg_stats')}</div>
-      <div class="opt ${sellerSub==='reviews'?'on':''}" data-sub="reviews" style="padding:10px 4px;font-size:11.5px">${L('sp_seg_reviews')}</div>
-      <div class="opt ${sellerSub==='customers'?'on':''}" data-sub="customers" style="padding:10px 4px;font-size:11.5px">👥 ${L('s_customers')}</div>
+  // Admin paneldagidek: yorliqli, qatorga o'raluvchi chip'lar.
+  // segs = ichki ko'rinishlar (body), acts = overlay ochuvchi amallar.
+  const segs=[['orders','sp_seg_orders'],['products','sp_seg_products'],['stats','sp_seg_stats'],
+              ['reviews','sp_seg_reviews'],['customers','s_customers']];
+  const acts=[['sched','sp_ov_sched'],['staff','sp_ov_staff'],['chan','sp_ov_chan'],
+              ['ai','sp_ov_ai'],['shop','sp_ov_shop']];
+  v.innerHTML = `<div class="vhead">${L('sp_shop')}</div>
+    <div class="chips" id="sellerSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding:0 12px 6px">
+      ${segs.map(s=>`<div class="chip${sellerSub===s[0]?' active':''}" data-sub="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}
+      ${acts.map(a=>`<div class="chip" data-act="${a[0]}" style="flex:0 0 auto">${L(a[1])}</div>`).join('')}
     </div>
     <div id="sellerBody"></div>`;
-  v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  document.getElementById('shopSetBtn').onclick = openShopSettings;
-  document.getElementById('chanBtn').onclick = openChannels;
-  document.getElementById('staffBtn').onclick = openStaff;
-  document.getElementById('schedBtn').onclick = openScheduled;
-  document.getElementById('sellerAiBtn').onclick = ()=>openAI('seller');
+  v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
+  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller')};
+  v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>actMap[o.dataset.act]());
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else if(sellerSub==='stats') loadSellerStats();
@@ -1767,12 +2011,15 @@ async function loadChannels(){
     const chans=await api('/api/seller/channels');
     const botU = BOT_USERNAME ? '@'+BOT_USERNAME : 'bot';
     const help=`<div class="cosec" style="margin:0 12px"><div style="font-size:13px;line-height:1.55">${L('sp_chan_help').replace('{bot}', esc(botU))}</div></div>`;
+    const addG = BOT_USERNAME ? `<div style="padding:0 12px 8px"><button class="oact ok" id="chanAddGroup" style="width:100%">${L('sp_chan_add_group')}</button></div>` : '';
     const refresh=`<div style="padding:8px 12px"><button class="oact ok" id="chanRefresh" style="width:100%;background:var(--bg);color:var(--accent)">${L('sp_refresh')}</button></div>`;
     if(!chans.length)
-      b.innerHTML=`<div style="padding:8px 0">${refresh}${help}</div><div class="empty"><span class="big">📢</span>${L('sp_no_channels')}</div>`;
+      b.innerHTML=`<div style="padding:8px 0">${addG}${help}${refresh}</div><div class="empty"><span class="big">📢</span>${L('sp_no_channels')}</div>`;
     else
-      b.innerHTML=`<div style="padding:8px 0">${refresh}${help}<div class="olist" style="margin-top:6px">`+chans.map(chanCard).join('')+`</div></div>`;
+      b.innerHTML=`<div style="padding:8px 0">${addG}${help}${refresh}<div class="olist" style="margin-top:6px">`+chans.map(chanCard).join('')+`</div></div>`;
     document.getElementById('chanRefresh').onclick=loadChannels;
+    const ag=document.getElementById('chanAddGroup');
+    if(ag) ag.onclick=()=>{ try{ tg.openTelegramLink('https://t.me/'+BOT_USERNAME+'?startgroup=true'); }catch(e){ tg.showAlert('@'+BOT_USERNAME); } };
     b.querySelectorAll('[data-rmchan]').forEach(btn=>btn.onclick=()=>removeChannel(btn.dataset.rmchan, btn.dataset.title));
   }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
@@ -2019,19 +2266,46 @@ async function loadSellerStats(){
       ${row(L('sp_this_week'), s.week_orders||0, s.week_revenue||0)}
       ${row(L('sp_this_month'), s.month_orders||0, s.month_revenue||0)}
       <div style="display:flex;gap:10px">${card(L('sp_products_count'), s.products_count||0)}${card(L('sp_rating'), '⭐ '+(s.avg_rating||0))}${card(L('sp_open_debt'), money(s.open_debt_total||0), (s.open_debt_total>0?'var(--sale)':''))}</div>
+      <div class="lbl" style="padding:6px 2px 2px">📊 ${L('adm_export')}</div>
+      <div style="display:flex;gap:8px">
+        <button class="oact ok" data-sexp="orders" style="flex:1">${L('sp_exp_orders')}</button>
+        <button class="oact ok" data-sexp="products" style="flex:1">${L('sp_exp_products')}</button>
+      </div>
     </div>`;
+    b.querySelectorAll('[data-sexp]').forEach(x=>x.onclick=()=>sellerExport(x.dataset.sexp, x));
   }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+async function sellerExport(kind, btn){
+  const old=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+  try{
+    const r=await apiSend('/api/seller/export/'+kind,'POST');
+    tg.showAlert(L('adm_exp_sent').replace('{n}', r.rows!=null?r.rows:''));
+  }catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); }
+  if(btn){ btn.disabled=false; btn.textContent=old; }
 }
 
 function sellerOrderCard(o){
   const st = ORDER_STATUS(o.status);
   const dlv = o.delivery_type==='delivery' ? L('sp_delivery') : L('sp_pickup');
   const contact = o.buyer_phone ? `<a class="ocontact" href="tel:${esc(o.buyer_phone)}">📞 ${esc(o.buyer_phone)}</a>` : '';
+  const cs = o.cancel_state||'';
   let actions='';
   if(o.status==='pending')
     actions=`<div class="oactions"><button class="oact ok" data-oid="${o.id}" data-act="confirm">${L('sp_confirm')}</button><button class="oact no" data-oid="${o.id}" data-act="reject">${L('sp_reject')}</button></div>`;
-  else if(o.status==='confirmed')
-    actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">${L('sp_deliver_pay')}</button></div>`;
+  else if(o.status==='confirmed'){
+    if(cs==='disputed')
+      actions=`<div class="odebt" style="background:var(--accent-soft);color:var(--accent)">${L('dispute_note')}</div>`;
+    else if(cs==='requested' && o.cancel_by==='buyer')
+      actions=`<div class="odebt" style="background:var(--bg);color:var(--text)">${L('sp_cancel_incoming')} ${esc(o.cancel_reason||'')}</div>
+        <div class="oactions"><button class="oact ok" data-scragree="${o.id}" style="flex:1">${L('agree_cancel')}</button><button class="oact no" data-scrdeny="${o.id}" style="flex:1">${L('deny_cancel')}</button></div>`;
+    else if(cs==='requested' && o.cancel_by==='seller')
+      actions=`<div class="odebt" style="background:var(--bg);color:var(--hint)">${L('sp_cancel_wait')}</div>`;
+    else if(o.order_group_id)
+      actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">${L('sp_deliver_pay')}</button></div>`;
+    else
+      actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">${L('sp_deliver_pay')}</button></div>
+        <button class="oact no" data-screqcancel="${o.id}" style="width:100%;margin-top:7px;background:var(--bg);color:var(--sale)">${L('req_cancel')}</button>`;
+  }
   if(o.amount_due && o.amount_due>0) actions=`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`+actions;
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
@@ -2056,6 +2330,9 @@ async function loadSellerOrders(){
     b.querySelectorAll('[data-act]').forEach(btn=>btn.onclick=()=>sellerOrderAction(btn.dataset.oid, btn.dataset.act, btn));
     b.querySelectorAll('[data-chat]').forEach(btn=>btn.onclick=()=>openChat(btn.dataset.chat));
     b.querySelectorAll('[data-deliver]').forEach(btn=>btn.onclick=()=>openDeliver(btn.dataset.deliver));
+    b.querySelectorAll('[data-screqcancel]').forEach(btn=>btn.onclick=()=>sellerRequestCancel(btn.dataset.screqcancel));
+    b.querySelectorAll('[data-scragree]').forEach(btn=>btn.onclick=()=>sellerCancelRespond(btn.dataset.scragree,true));
+    b.querySelectorAll('[data-scrdeny]').forEach(btn=>btn.onclick=()=>sellerCancelRespond(btn.dataset.scrdeny,false));
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 
@@ -2072,6 +2349,26 @@ async function sellerOrderAction(oid, action, btn){
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
   }catch(e){ tg.showAlert(L('sp_error')+e.message); }
   loadSellerOrders();
+}
+
+// ---------- SOTUVCHI: NIZO / BEKOR SO'RASH (botdagi cclagree/ccldeny pariteti) ----------
+function sellerRequestCancel(oid){
+  const send=async(reason)=>{
+    try{ await apiSend('/api/seller/order/'+oid+'/request-cancel','POST',{reason:reason||''});
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      tg.showAlert(L('cancel_sent_ok')); loadSellerOrders();
+    }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+  };
+  if(tg.showPopup){ tg.showConfirm(L('req_cancel')+'?', ok=>{ if(ok) send(''); }); }
+  else { const reason=prompt(L('cancel_reason_ph')); if(reason!==null) send(reason); }
+}
+function sellerCancelRespond(oid, agree){
+  const go=async()=>{ try{ await apiSend('/api/seller/order/'+oid+'/cancel-respond','POST',{agree});
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    loadSellerOrders();
+  }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); } };
+  const ask=agree?L('agree_cancel'):L('deny_cancel');
+  if(tg.showConfirm) tg.showConfirm(ask+'?', ok=>{ if(ok) go(); }); else go();
 }
 
 // ---------- BERISH + TO'LOV (settlement) ----------
@@ -2119,16 +2416,18 @@ document.getElementById('dClose').onclick=()=>document.getElementById('deliverfo
 
 function sellerProductCard(p){
   const img = p.image_url ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">` : `<div class="ph">🖼️</div>`;
+  const soldOut = p.stock_count===0;
   const stock = p.stock_count==null ? L('sp_unlimited') : (p.stock_count>0?`${p.stock_count} ${L('sp_dona')}`:L('sp_sold_out'));
   const hidden = p.in_stock ? '' : ` <span class="ostatus st-cancel">${L('sp_hidden')}</span>`;
-  return `<div class="ocard" data-pid="${p.id}" style="display:flex;gap:12px;align-items:center;cursor:pointer">
+  const oldp = (p.old_price && p.old_price>p.price) ? ` <span style="text-decoration:line-through;color:var(--hint);font-size:12px">${money(p.old_price)}</span>` : '';
+  return `<div class="ocard" data-pid="${p.id}" style="display:flex;gap:12px;align-items:center;cursor:pointer${soldOut?';border:1.5px solid #ffd0d0;background:#fff5f5':''}">
     <div class="coprod" style="padding:0;background:none;box-shadow:none;flex:0 0 auto">${img}</div>
     <div style="flex:1;min-width:0">
       <div class="oname" style="font-size:14px">${esc(p.name||'')}</div>
-      <div class="ometa"><b>${money(p.price)}</b></div>
+      <div class="ometa"><b>${money(p.price)}</b>${oldp}</div>
       <div class="oshop">📦 ${stock}${hidden}</div>
     </div>
-    <span style="color:var(--hint);font-size:20px">›</span>
+    <button class="oact ok" data-stock="${p.id}" title="${L('sp_stock')}" style="width:auto;padding:9px 12px;margin:0;flex:0 0 auto;background:var(--accent-soft);color:var(--accent)">${soldOut?'➕':'🔢'}</button>
   </div>`;
 }
 
@@ -2157,6 +2456,7 @@ async function loadSellerProducts(){
       const p = SELLER_PRODUCTS.find(x=>String(x.id)===c.dataset.pid);
       if(p) openProductForm(p);
     });
+    b.querySelectorAll('[data-stock]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); quickStock(btn.dataset.stock); });
     b.querySelectorAll('[data-approve]').forEach(btn=>btn.onclick=()=>approveProduct(btn.dataset.approve, true));
     b.querySelectorAll('[data-reject]').forEach(btn=>btn.onclick=()=>approveProduct(btn.dataset.reject, false));
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
@@ -2177,19 +2477,83 @@ function approveProduct(pid, ok){
 
 // ---------- MAHSULOT FORMASI (qo'shish / tahrirlash) ----------
 function openProductForm(prod){
-  pf = prod ? {
+  const base = {mode:'classic', questions:[], attrs:{}, attrLabels:{}, qLoaded:false, qLoading:false};
+  pf = prod ? Object.assign({
     id: prod.id, name: prod.name||'', price: prod.price||'', category_id: prod.category_id||null,
     description: prod.description||'', stock_count: (prod.stock_count==null?'':prod.stock_count),
+    old_price: prod.old_price||'',
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
-  } : { id:null, name:'', price:'', category_id:null, description:'', stock_count:'', images:[] };
+  }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', images:[] }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
   document.getElementById('prodform').scrollTop = 0;
-  // Tahrirda to'liq galereyani fon'da yuklaymiz (bir nechta rasm bo'lsa)
+  // Tahrirda to'liq galereya + mavjud atributlarni fon'da yuklaymiz
   if(prod) api('/api/products/'+prod.id).then(d=>{
-    if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,4); renderProductForm(); }
+    if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,4); }
+    if(d && Array.isArray(d.attributes) && d.attributes.length){
+      pf.questions = d.attributes.map(a=>({key:a.attr_key, label:a.attr_label||a.attr_key, type:'text', required:false, options:[]}));
+      d.attributes.forEach(a=>{ pf.attrs[a.attr_key]=a.attr_value||''; pf.attrLabels[a.attr_key]=a.attr_label||a.attr_key; });
+      pf.qLoaded = true;
+    }
+    renderProductForm();
   }).catch(()=>{});
+}
+
+function attrFieldHtml(q,i){
+  const val = pf.attrs[q.key]||'';
+  const req = q.required ? ' <span style="color:var(--sale)">*</span>' : '';
+  const ai = q.ai ? ' 🤖' : '';
+  if(q.type==='select' && q.options && q.options.length){
+    return `<div style="margin-bottom:11px"><div class="lbl">${esc(q.label)}${req}${ai}</div>
+      <div class="chips" style="padding:0;flex-wrap:wrap">${q.options.map(o=>`<div class="chip ${val===o?'active':''}" data-qopt="${i}" data-qval="${esc(o)}">${esc(o)}</div>`).join('')}</div></div>`;
+  }
+  return `<div style="margin-bottom:11px"><div class="lbl">${esc(q.label)}${req}${ai}</div>
+    <input class="coaddr" data-qkey="${esc(q.key)}" style="min-height:auto" placeholder="${esc(q.hint||'')}" value="${esc(val)}"></div>`;
+}
+
+function attrSectionHtml(){
+  const isEdit = !!pf.id;
+  let h = '';
+  if(!isEdit){
+    const opt=(m,t,d)=>`<div class="opt ${pf.mode===m?'on':''}" data-qmode="${m}" style="text-align:left;line-height:1.35;display:block;padding:10px 12px">
+      <b>${t}</b><div style="font-size:11.5px;color:var(--hint);font-weight:400;margin-top:2px">${d}</div></div>`;
+    h += `<div class="cosec"><div class="lbl">${L('sp_q_mode')}</div><div class="seg col" style="height:auto">
+      ${opt('classic',L('sp_q_classic'),L('sp_q_classic_d'))}
+      ${opt('ai_guided',L('sp_q_ai'),L('sp_q_ai_d'))}
+      ${opt('ai_smart',L('sp_q_smart'),L('sp_q_smart_d'))}
+    </div>
+    <button class="oact no" id="qLoad" style="width:100%;margin-top:9px">${pf.qLoading?L('sp_q_loading'):L('sp_q_load')}</button></div>`;
+  }
+  if(pf.questions && pf.questions.length){
+    h += `<div class="cosec"><div class="lbl">${L('sp_q_fields')}</div>`+
+      pf.questions.map((q,i)=>attrFieldHtml(q,i)).join('')+`</div>`;
+  } else if(pf.qLoaded && !isEdit){
+    h += `<div class="cosec"><div style="color:var(--hint);font-size:13px">${L('sp_q_none')}</div></div>`;
+  }
+  return h;
+}
+
+async function loadQuestions(){
+  if(pf.mode!=='classic' && !(pf.name||'').trim()){ tg.showAlert(L('sp_q_need_name')); return; }
+  if(pf.mode==='classic' && !pf.category_id){ tg.showAlert(L('sp_q_need_cat')); return; }
+  pf.qLoading=true; renderProductForm();
+  try{
+    const qs = new URLSearchParams({mode:pf.mode, name:(pf.name||''), description:(pf.description||'')});
+    if(pf.category_id) qs.set('category_id', pf.category_id);
+    const d = await api('/api/seller/product-questions?'+qs.toString());
+    pf.questions = d.questions||[];
+    pf.questions.forEach(q=>{ pf.attrLabels[q.key]=q.label; });
+    const known = d.known||{};
+    Object.keys(known).forEach(k=>{
+      pf.attrs[k] = known[k].value||'';
+      pf.attrLabels[k] = known[k].label||k;
+      if(!pf.questions.some(q=>q.key===k))
+        pf.questions.unshift({key:k, label:(known[k].label||k), type:'text', required:false, options:[], ai:true});
+    });
+    pf.qLoaded=true;
+  }catch(e){ tg.showAlert(L('sp_q_failed')+(e.message||e)); }
+  pf.qLoading=false; renderProductForm();
 }
 
 function renderProductForm(){
@@ -2206,22 +2570,35 @@ function renderProductForm(){
     <div class="cosec"><div class="lbl">${L('sp_name')}</div>
       <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
     <div class="cosec"><div class="lbl">${L('sp_price')}</div>
-      <input class="coaddr" id="pfPrice" type="number" inputmode="numeric" style="min-height:auto" placeholder="0" value="${esc(String(pf.price))}"></div>
+      <input class="coaddr" id="pfPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.price?fmtThousands(pf.price):''}"></div>
+    <div class="cosec"><div class="lbl">${L('sp_old_price')}</div>
+      <input class="coaddr" id="pfOldPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_old_price_ph')}" value="${pf.old_price?fmtThousands(pf.old_price):''}"></div>
     <div class="cosec"><div class="lbl">${L('sp_category')}</div>
       <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>
     <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
       <input class="coaddr" id="pfStock" type="number" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_stock_ph')}" value="${esc(String(pf.stock_count))}"></div>
     <div class="cosec"><div class="lbl">${L('sp_desc')}</div>
       <textarea class="coaddr" id="pfDesc" placeholder="${L('sp_desc_ph')}">${esc(pf.description)}</textarea></div>
-    ${isEdit?`<button class="oact no" id="pfToggle" style="width:100%">${pf.in_stock?L('sp_hide'):L('sp_unhide')}</button>
+    ${attrSectionHtml()}
+    ${isEdit?`<button class="oact ok" id="pfAd" style="width:100%">${L('sp_ad_btn')}</button>
+              <button class="oact no" id="pfToggle" style="width:100%">${pf.in_stock?L('sp_hide'):L('sp_unhide')}</button>
               <button class="oact no" id="pfDelete" style="width:100%;background:#fdebef;color:var(--sale)">${L('sp_delete')}</button>`:''}
   </div>
-  <div class="cobar"><button id="pfSave">${isEdit?L('s_save'):L('sp_add')}</button></div>`;
+  <div class="cobar"><button id="pfSave">${isEdit?L('s_save'):L('sp_add_ad')}</button></div>`;
 
   const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ pf.images.splice(Number(x.dataset.rm),1); renderProductForm(); });
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
-  document.getElementById('pfPrice').oninput = e=>pf.price=e.target.value;
+  document.getElementById('pfPrice').oninput = e=>{
+    const digits = e.target.value.replace(/\D/g,'');
+    pf.price = digits ? Number(digits) : '';
+    e.target.value = digits ? fmtThousands(digits) : '';
+  };
+  document.getElementById('pfOldPrice').oninput = e=>{
+    const digits = e.target.value.replace(/\D/g,'');
+    pf.old_price = digits ? Number(digits) : '';
+    e.target.value = digits ? fmtThousands(digits) : '';
+  };
   document.getElementById('pfStock').oninput = e=>pf.stock_count=e.target.value;
   document.getElementById('pfDesc').oninput = e=>pf.description=e.target.value;
   body.querySelectorAll('[data-cid]').forEach(ch=>ch.onclick=()=>{
@@ -2231,6 +2608,16 @@ function renderProductForm(){
   document.getElementById('pfSave').onclick = saveProduct;
   const tgl = document.getElementById('pfToggle'); if(tgl) tgl.onclick = toggleProductVisibility;
   const del = document.getElementById('pfDelete'); if(del) del.onclick = confirmDeleteProduct;
+  const adb = document.getElementById('pfAd'); if(adb) adb.onclick = ()=>openAdView(pf.id);
+  // Savol rejimi + atribut maydonlari
+  body.querySelectorAll('[data-qmode]').forEach(o=>o.onclick=()=>{ pf.mode=o.dataset.qmode; renderProductForm(); });
+  const ql=document.getElementById('qLoad'); if(ql) ql.onclick=loadQuestions;
+  body.querySelectorAll('[data-qkey]').forEach(inp=>inp.oninput=e=>{ pf.attrs[e.target.dataset.qkey]=e.target.value; });
+  body.querySelectorAll('[data-qopt]').forEach(ch=>ch.onclick=()=>{
+    const q=pf.questions[Number(ch.dataset.qopt)]; const v=ch.dataset.qval;
+    pf.attrs[q.key] = (pf.attrs[q.key]===v) ? '' : v;  // qayta bosilsa bekor qilinadi
+    renderProductForm();
+  });
 }
 
 async function onPhotoPick(e){
@@ -2251,23 +2638,34 @@ async function saveProduct(){
   if(!(pf.name||'').trim()){ tg.showAlert(L('sp_name_req')); return; }
   const price = Number(pf.price);
   if(!price || price<=0){ tg.showAlert(L('sp_price_req')); return; }
+  const missing = (pf.questions||[]).filter(q=>q.required && !String(pf.attrs[q.key]||'').trim());
+  if(missing.length){ tg.showAlert(L('sp_q_required').replace('{f}', missing[0].label)); return; }
+  const attributes = Object.keys(pf.attrs||{})
+    .filter(k=>pf.attrs[k] && String(pf.attrs[k]).trim())
+    .map(k=>({key:k, value:String(pf.attrs[k]).trim(), label:(pf.attrLabels&&pf.attrLabels[k])||k}));
   btn.disabled = true; btn.textContent = L('sp_saving');
   const payload = {
     name: pf.name.trim(), price: price,
     category_id: pf.category_id || null,
     description: (pf.description||'').trim() || null,
     stock_count: (pf.stock_count===''||pf.stock_count==null) ? null : Number(pf.stock_count),
+    old_price: (pf.old_price===''||pf.old_price==null) ? 0 : Number(pf.old_price),
     images: pf.images || [],
+    attributes: attributes,
   };
   try{
     const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';
     const method = pf.id ? 'PATCH' : 'POST';
     const r = await fetch(url, {method, headers:{Authorization:AUTH,'Content-Type':'application/json'}, body:JSON.stringify(payload)});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    const res = await r.json().catch(()=>({}));
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    const wasNew = !pf.id, newId = res.product_id;
     closeProductForm(); loadSellerProducts();
+    // Yangi mahsulot — darhol reklama yasash ekraniga o'tamiz (qo'shish = reklama)
+    if(wasNew && newId) openAdView(newId);
   }catch(e){
-    btn.disabled=false; btn.textContent = pf.id?L('s_save'):L('sp_add');
+    btn.disabled=false; btn.textContent = pf.id?L('s_save'):L('sp_add_ad');
     tg.showAlert(L('sp_save_failed')+e.message);
   }
 }
@@ -2295,6 +2693,146 @@ function confirmDeleteProduct(){
 function closeProductForm(){ document.getElementById('prodform').classList.remove('open'); }
 document.getElementById('pfClose').onclick = closeProductForm;
 
+// ---------- TEZ ZAHIRA (kartadan to'g'ridan-to'g'ri yangilash / to'ldirish) ----------
+function quickStock(pid){
+  const p = SELLER_PRODUCTS.find(x=>String(x.id)===String(pid)); if(!p) return;
+  document.getElementById('stockview').classList.add('open');
+  const body = document.getElementById('stockBody');
+  const cur = (p.stock_count==null) ? '' : p.stock_count;
+  const now = (p.stock_count==null) ? L('sp_unlimited') : p.stock_count;
+  body.innerHTML = `<div class="cobody">
+    <div class="ocard"><div class="oname">${esc(p.name||'')}</div><div class="ometa">${L('sp_stock_now')}: <b>${now}</b></div></div>
+    <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
+      <input class="coaddr" id="qsInput" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_stock_ph')}" value="${cur}"></div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+      ${[1,5,10,50].map(n=>`<button class="oact no" data-qsadd="${n}" style="flex:1;min-width:60px">+${n}</button>`).join('')}
+    </div>
+  </div>
+  <div class="cobar"><button id="qsSave">${L('s_save')}</button></div>`;
+  const inp=document.getElementById('qsInput');
+  inp.oninput=e=>{ e.target.value=e.target.value.replace(/\D/g,''); };
+  body.querySelectorAll('[data-qsadd]').forEach(btn=>btn.onclick=()=>{
+    const base=parseInt((inp.value||'').replace(/\D/g,''))|| (p.stock_count>0?p.stock_count:0);
+    inp.value=String(base+Number(btn.dataset.qsadd));
+  });
+  document.getElementById('qsSave').onclick=()=>{
+    const v=(inp.value||'').replace(/\D/g,'');
+    if(v==='') { tg.showAlert(L('sp_stock_req')); return; }
+    saveQuickStock(pid, Number(v));
+  };
+}
+async function saveQuickStock(pid, n){
+  try{
+    await apiSend('/api/seller/product/'+pid,'PATCH',{stock_count:n});
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('stockview').classList.remove('open');
+    loadSellerProducts();
+  }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+}
+document.getElementById('stockClose').onclick=()=>document.getElementById('stockview').classList.remove('open');
+
+// ============================================================
+// REKLAMA GENERATORI (dizayn rasm + AI matn -> kanal/guruhlarga e'lon)
+// ============================================================
+let adState = {pid:null, length:'long', caption:'', image:null, has_design:true, loading:true};
+
+function openAdView(pid){
+  if(!pid) return;
+  adState = {pid, length:'long', caption:'', image:null, has_design:true, loading:true};
+  document.getElementById('adview').classList.add('open');
+  document.getElementById('adview').scrollTop = 0;
+  renderAdView();
+  loadAdPreview();
+}
+
+async function loadAdPreview(){
+  adState.loading = true; renderAdView();
+  try{
+    const d = await api('/api/seller/product/'+adState.pid+'/ad-preview?length='+adState.length);
+    adState.caption = d.caption || '';
+    adState.image = d.image || null;
+    adState.has_design = !!d.has_design;
+  }catch(e){ tg.showAlert(L('sp_ad_failed')+(e.message||e)); }
+  adState.loading = false; renderAdView();
+}
+
+function renderAdView(){
+  const body = document.getElementById('adBody');
+  if(adState.loading){
+    body.innerHTML = `<div class="loading" style="padding:40px;text-align:center">⏳ ${L('sp_ad_loading')}</div>`;
+    return;
+  }
+  const img = adState.image
+    ? `<img src="${adState.image}" style="width:100%;border-radius:14px;display:block">`
+    : `<div style="padding:14px;background:var(--accent-soft);border-radius:12px;color:var(--hint);font-size:13px">${L('sp_ad_no_design')}</div>`;
+  body.innerHTML = `<div class="cobody">
+    <div class="cosec">${img}</div>
+    <div class="cosec"><div class="lbl">${L('sp_ad_length')}</div><div class="seg col">
+      <div class="opt ${adState.length==='long'?'on':''}" data-adlen="long">${L('sp_ad_long')}</div>
+      <div class="opt ${adState.length==='short'?'on':''}" data-adlen="short">${L('sp_ad_short')}</div>
+    </div></div>
+    <div class="cosec"><div class="lbl">${L('sp_ad_caption')}</div>
+      <textarea class="coaddr" id="adCap" style="min-height:150px">${esc(adState.caption)}</textarea></div>
+    <button class="oact no" id="adRegen" style="width:100%">${L('sp_ad_regen')}</button>
+    <div class="cosec" style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">
+      <div class="lbl">${L('sp_ad_more')}</div>
+      <input class="coaddr" id="adSchWhen" type="datetime-local" style="min-height:auto">
+      <button class="oact no" id="adSchedule" style="width:100%;margin-top:7px">${L('sp_schedule_btn')}</button>
+      <div style="display:flex;gap:8px;margin-top:9px;align-items:center">
+        <select id="adRepHour" class="coaddr" style="min-height:auto;flex:0 0 96px">${Array.from({length:24},(_,h)=>`<option value="${h}">${String(h).padStart(2,'0')}:00</option>`).join('')}</select>
+        <button class="oact no" id="adAutorep" style="flex:1;margin:0">${L('sp_ad_autorep')}</button>
+      </div>
+      <button class="oact no" id="adSkip" style="width:100%;margin-top:9px;background:var(--bg);color:var(--accent)">${L('sp_ad_skip')}</button>
+    </div>
+  </div>
+  <div class="cobar"><button id="adPublish">${L('sp_ad_publish')}</button></div>`;
+  document.getElementById('adCap').oninput = e=>adState.caption = e.target.value;
+  body.querySelectorAll('[data-adlen]').forEach(o=>o.onclick=()=>{ adState.length=o.dataset.adlen; loadAdPreview(); });
+  document.getElementById('adRegen').onclick = loadAdPreview;
+  document.getElementById('adPublish').onclick = publishAd;
+  document.getElementById('adSchedule').onclick = adSchedule;
+  document.getElementById('adAutorep').onclick = adAutorep;
+  document.getElementById('adSkip').onclick = ()=>{ closeAdView(); tg.showAlert(L('sp_ad_on_sale')); };
+}
+async function adSchedule(){
+  const v=document.getElementById('adSchWhen').value;
+  if(!v){ tg.showAlert(L('sp_ad_pick_time')); return; }
+  const iso=new Date(v).toISOString();
+  try{
+    await apiSend('/api/seller/product/'+adState.pid+'/schedule','POST',{scheduled_at:iso, caption:adState.caption});
+    closeAdView(); tg.showAlert(L('sp_ad_scheduled'));
+  }catch(e){ const m=(e.message||e); tg.showAlert(L('sp_ad_failed')+(m==='time_in_past'?L('sp_ad_past'):m)); }
+}
+async function adAutorep(){
+  const hour=Number(document.getElementById('adRepHour').value);
+  try{
+    await apiSend('/api/seller/product/'+adState.pid+'/autorepost','POST',{hour, caption:adState.caption});
+    closeAdView(); tg.showAlert(L('sp_ad_autorep_set'));
+  }catch(e){ tg.showAlert(L('sp_ad_failed')+(e.message||e)); }
+}
+
+async function publishAd(){
+  const doPub = async()=>{
+    const btn = document.getElementById('adPublish');
+    if(btn){ btn.disabled = true; btn.textContent = L('sp_ad_publishing'); }
+    try{
+      await apiSend('/api/seller/product/'+adState.pid+'/ad-publish','POST',
+                    {caption: adState.caption, length: adState.length});
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      closeAdView();
+      tg.showAlert(L('sp_ad_published'));
+    }catch(e){
+      if(btn){ btn.disabled=false; btn.textContent=L('sp_ad_publish'); }
+      tg.showAlert(L('sp_ad_failed')+(e.message||e));
+    }
+  };
+  if(tg.showConfirm) tg.showConfirm(L('sp_ad_publish_q'), ok=>{ if(ok) doPub(); });
+  else doPub();
+}
+
+function closeAdView(){ document.getElementById('adview').classList.remove('open'); }
+document.getElementById('adClose').onclick = closeAdView;
+
 // ============================================================
 // ADMIN PANEL
 // ============================================================
@@ -2311,14 +2849,16 @@ let admSeg='stats', admUsersOffset=0, admUsersList=[], DISP_ID=null;
 function loadAdmin(){
   const v=document.getElementById('viewAdmin');
   const segs=[['stats','adm_stats'],['requests','adm_requests'],['disputes','adm_disputes'],
-              ['users','adm_users'],['shops','adm_shops'],['orders','adm_orders'],
-              ['products','adm_products'],['broadcast','adm_broadcast']];
+              ['users','adm_users'],['shops','adm_shops'],['channels','adm_channels'],
+              ['orders','adm_orders'],['products','adm_products'],['deleted','adm_deleted'],
+              ['broadcast','adm_broadcast'],['settings','adm_settings']];
   v.innerHTML=`<div class="vhead">${L('adm_title')}</div>
-    <div class="chips" id="admSeg">${segs.map(s=>`<div class="chip${s[0]===admSeg?' active':''}" data-seg="${s[0]}">${L(s[1])}</div>`).join('')}</div>
+    <div class="chips" id="admSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding-bottom:6px">${segs.map(s=>`<div class="chip${s[0]===admSeg?' active':''}" data-seg="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}</div>
     <div id="admBody"><div class="loading">...</div></div>`;
   v.querySelectorAll('#admSeg .chip').forEach(c=>c.onclick=()=>{ admSeg=c.dataset.seg; loadAdmin(); });
   const fn={stats:admStats,requests:admRequests,disputes:admDisputes,users:admUsers,
-            shops:admShops,orders:admOrders,products:admProducts,broadcast:admBroadcast}[admSeg];
+            shops:admShops,channels:admChannels,orders:admOrders,products:admProducts,
+            deleted:admDeleted,broadcast:admBroadcast,settings:admSettings}[admSeg];
   if(fn) fn();
 }
 
@@ -2338,8 +2878,24 @@ async function admStats(){
         <div class="ometa">${L('adm_today')}: <b>${money(s.today_revenue)}</b></div>
         <div class="ometa">${L('adm_week')}: ${money(s.week_revenue)} · ${L('adm_month')}: ${money(s.month_revenue)}</div>
         <div class="ometa">${L('adm_total')}: <b>${money(s.total_revenue)}</b></div></div>
+      <div class="lbl" style="padding:6px 2px 4px">📊 ${L('adm_export')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="oact ok" data-exp="users" style="flex:1;min-width:90px">${L('adm_exp_users')}</button>
+        <button class="oact ok" data-exp="products" style="flex:1;min-width:90px">${L('adm_exp_products')}</button>
+        <button class="oact ok" data-exp="orders" style="flex:1;min-width:90px">${L('adm_exp_orders')}</button>
+      </div>
     </div>`;
+    b.querySelectorAll('[data-exp]').forEach(x=>x.onclick=()=>exportExcel(x.dataset.exp, x));
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+async function exportExcel(kind, btn){
+  const old = btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+  try{
+    const r=await apiSend('/api/admin/export/'+kind,'POST');
+    tg.showAlert(L('adm_exp_sent').replace('{n}', r.rows!=null?r.rows:''));
+  }catch(e){ tg.showAlert(L('err')+': '+e.message); }
+  if(btn){ btn.disabled=false; btn.textContent=old; }
 }
 
 async function admRequests(){
@@ -2425,10 +2981,14 @@ async function admDisputeSend(){
 }
 document.getElementById('dispClose').onclick=()=>document.getElementById('dispview').classList.remove('open');
 
+let admUserRole='';
 async function admUsers(){
   admUsersOffset=0; admUsersList=[];
   const b=admBox();
-  b.innerHTML=`<div style="padding:0 12px 8px"><input class="search" id="admUserSearch" placeholder="${L('adm_search_user')}" style="box-shadow:none;border:1px solid var(--line)"></div><div id="admUserList"></div>`;
+  const roles=[['','adm_role_all'],['buyer','adm_role_buyers'],['seller','adm_role_sellers']];
+  b.innerHTML=`<div class="chips" id="admURole" style="padding-top:0">${roles.map(r=>`<div class="chip${r[0]===admUserRole?' active':''}" data-urole="${r[0]}">${L(r[1])}</div>`).join('')}</div>
+    <div style="padding:0 12px 8px"><input class="search" id="admUserSearch" placeholder="${L('adm_search_user')}" style="box-shadow:none;border:1px solid var(--line)"></div><div id="admUserList"></div>`;
+  b.querySelectorAll('#admURole .chip').forEach(c=>c.onclick=()=>{ admUserRole=c.dataset.urole; admUsers(); });
   const inp=document.getElementById('admUserSearch');
   let tmr=null;
   inp.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(()=>admUserFetch(inp.value.trim(),true),350); };
@@ -2438,7 +2998,7 @@ async function admUserFetch(q, reset){
   const wrap=document.getElementById('admUserList'); if(!wrap) return;
   if(reset){ admUsersOffset=0; admUsersList=[]; wrap.innerHTML=`<div class="loading">...</div>`; }
   try{
-    const res=await api('/api/admin/users?q='+encodeURIComponent(q||'')+'&offset='+admUsersOffset);
+    const res=await api('/api/admin/users?q='+encodeURIComponent(q||'')+'&offset='+admUsersOffset+(admUserRole?('&role='+admUserRole):''));
     admUsersList=admUsersList.concat(res.users||[]);
     if(!admUsersList.length){ wrap.innerHTML=admEmpty(L('adm_no_requests')); return; }
     const more=(res.total!=null && admUsersList.length<res.total && !q);
@@ -2457,26 +3017,79 @@ function admUserRow(u){
     ${u.shop_name?`<div class="ometa">🏪 ${esc(u.shop_name)}</div>`:''}
   </div>`;
 }
-function openAUser(u){
+async function openAUser(u){
   if(!u) return;
   document.getElementById('auserview').classList.add('open');
+  document.getElementById('auserview').scrollTop=0;
   document.getElementById('auserTitle').textContent='👤 '+(u.name||'—');
   const body=document.getElementById('auserBody');
-  const blocked=!!u.is_blocked;
+  body.innerHTML=`<div class="loading" style="padding:30px;text-align:center">⏳</div>`;
+  let d;
+  try{ d=await api('/api/admin/user/'+u.id); }
+  catch(e){ body.innerHTML=admEmpty(L('err')+': '+e.message); return; }
+  renderAUser(d);
+}
+function _aurow(label,val){ return (val!==''&&val!=null)?`<div class="ometa"><span style="color:var(--hint)">${label}:</span> ${esc(String(val))}</div>`:''; }
+function renderAUser(d){
+  const body=document.getElementById('auserBody');
+  const blocked=!!d.is_blocked;
+  const seller = d.role==='seller' || !!d.shop_name;
+  const ss = d.seller_stats||{};
+  const missing = d.missing||[];
+  document.getElementById('auserTitle').textContent='👤 '+(d.name||'—');
   body.innerHTML=`<div class="cobody">
-    <div class="ocard"><div class="oname">${esc(u.name||'—')} ${blocked?'🚫':''}</div>
-      <div class="ometa">${admRoleLabel(u.role)}</div>
-      ${u.phone_number?`<div class="ometa">📞 ${esc(u.phone_number)}</div>`:''}
-      ${u.telegram_username?`<div class="ometa">✈️ @${esc(u.telegram_username)}</div>`:''}
-      ${u.shop_name?`<div class="ometa">🏪 ${esc(u.shop_name)}</div>`:''}
-      <div class="ometa">🆔 ${esc(u.telegram_id||'')}</div>
-      <div class="ometa">🗓 ${fmtDate(u.created_at)}</div></div>
-    ${u.role==='admin'?'':`<button class="oact ${blocked?'ok':'no'}" id="auBlock" style="width:100%;margin-top:8px">${blocked?L('adm_unblock'):L('adm_block')}</button>`}
+    <div class="ocard"><div class="oname">${esc(d.name||'—')} ${blocked?'🚫':''}</div>
+      ${_aurow(L('adm_u_role'), admRoleLabel(d.role))}
+      ${_aurow(L('adm_u_phone'), d.phone_number)}
+      ${d.telegram_username?_aurow(L('adm_u_username'),'@'+d.telegram_username):''}
+      ${_aurow(L('adm_u_region'), d.region_label)}
+      ${_aurow(L('adm_u_lang'), d.language)}
+      ${_aurow('Telegram ID', d.telegram_id)}
+      ${_aurow(L('adm_u_referral'), d.referral_code)}
+      ${_aurow(L('adm_u_orders'), d.buyer_orders_count)}
+      ${_aurow(L('adm_u_created'), fmtDate(d.created_at))}
+    </div>
+    ${seller?`<div class="ocard"><div class="oname">🏪 ${esc(d.shop_name||'—')}</div>
+      ${_aurow(L('adm_u_approved'), d.is_approved?'✅':'❌')}
+      ${_aurow(L('adm_u_addr'), d.shop_address)}
+      ${_aurow(L('adm_u_landmark'), d.shop_landmark)}
+      ${_aurow(L('adm_u_hours'), d.working_hours)}
+      ${_aurow(L('adm_u_days'), d.working_days)}
+      ${_aurow(L('adm_u_card'), d.card_number)}
+      ${ss.total_orders!=null?_aurow(L('adm_u_sales'), ss.total_orders):''}
+      ${(d.channels&&d.channels.length)?_aurow(L('adm_u_channels'), d.channels.map(c=>c.channel_title||c.channel_id).join(', ')):''}
+    </div>`:''}
+    ${missing.length?`<div class="ocard" style="background:#fff7e6"><div class="ometa" style="color:#a86b00"><b>⚠️ ${L('adm_u_missing')}</b></div><div class="ometa">${esc(missing.join(', '))}</div></div>`:''}
+    ${d.can_askfill?`<button class="oact ok" id="auFill" style="width:100%;margin-top:8px">${L('adm_u_askfill')}</button>`:''}
+    ${d.role==='admin'?'':`<button class="oact ${blocked?'ok':'no'}" id="auBlock" style="width:100%;margin-top:8px">${blocked?L('adm_unblock'):L('adm_block')}</button>`}
   </div>`;
   const bb=document.getElementById('auBlock');
-  if(bb) bb.onclick=async()=>{ try{ await apiSend('/api/admin/user/'+u.id+'/block','POST',{block:!blocked});
-    u.is_blocked=blocked?0:1; document.getElementById('auserview').classList.remove('open'); admUserFetch('',true);
+  if(bb) bb.onclick=async()=>{ try{ await apiSend('/api/admin/user/'+d.id+'/block','POST',{block:!blocked});
+    document.getElementById('auserview').classList.remove('open'); admUserFetch('',true);
   }catch(e){ tg.showAlert(L('err')+': '+e.message); } };
+  const fb=document.getElementById('auFill');
+  if(fb) fb.onclick=()=>askFill(d.id);
+}
+async function askFill(uid){
+  const body=document.getElementById('auserBody');
+  body.innerHTML=`<div class="loading" style="padding:30px;text-align:center">🤖 ${L('adm_u_generating')}</div>`;
+  let d;
+  try{ d=await api('/api/admin/user/'+uid+'/fill-preview'); }
+  catch(e){ tg.showAlert(L('err')+': '+e.message); openAUser({id:uid}); return; }
+  body.innerHTML=`<div class="cobody">
+    <div class="ocard"><div class="ometa"><b>${L('adm_u_missing')}:</b> ${esc((d.missing||[]).join(', '))}</div></div>
+    <div class="cosec"><div class="lbl">${L('adm_u_msg_preview')}</div>
+      <textarea class="coaddr" id="fillMsg" style="min-height:150px">${esc(d.message||'')}</textarea></div>
+    <button class="oact ok" id="fillSend" style="width:100%">${L('adm_u_send')}</button>
+    <button class="oact no" id="fillBack" style="width:100%;margin-top:8px">${L('bp_back')}</button>
+  </div>`;
+  document.getElementById('fillSend').onclick=async()=>{
+    const msg=document.getElementById('fillMsg').value.trim(); if(!msg) return;
+    try{ await apiSend('/api/admin/user/'+uid+'/sendfill','POST',{message:msg});
+      tg.showAlert(L('adm_u_sent')); document.getElementById('auserview').classList.remove('open');
+    }catch(e){ tg.showAlert(L('err')+': '+e.message); }
+  };
+  document.getElementById('fillBack').onclick=()=>openAUser({id:uid});
 }
 document.getElementById('auserClose').onclick=()=>document.getElementById('auserview').classList.remove('open');
 
@@ -2485,10 +3098,111 @@ async function admShops(){
   try{
     const list=await api('/api/admin/shops');
     if(!list.length){ b.innerHTML=admEmpty(L('adm_shops')); return; }
-    b.innerHTML=`<div class="olist">`+list.map(s=>`<div class="ocard">
+    b.innerHTML=`<div class="olist">`+list.map(s=>`<div class="ocard" data-shop="${s.id}" style="cursor:pointer">
       <div class="oname">🏬 ${esc(s.name||s.shop_name||'—')}</div>
       ${s.address?`<div class="ometa">📍 ${esc(s.address)}</div>`:''}
+      <div class="ometa" style="color:var(--accent)">${L('adm_shop_open')} ›</div>
     </div>`).join('')+`</div>`;
+    b.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>openAdminShop(c.dataset.shop));
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+
+// #7 — do'kon detali: moderatsiya toggle + xodimlarni faollashtirish (inline)
+async function openAdminShop(shopId){
+  const b=admBox();
+  b.innerHTML=`<div class="loading">...</div>`;
+  try{
+    const d=await api('/api/admin/shop/'+shopId);
+    const modOwner=d.moderation==='owner_approve';
+    const staff=(d.staff||[]).map(s=>{
+      const owner=s.staff_role==='owner';
+      const mark=owner?'👑':(s.is_active?'✅':'⏳');
+      const act=(!owner)?`<button class="oact ${s.is_active?'no':'ok'}" data-stog="${s.id}" style="margin-top:6px">${s.is_active?L('adm_staff_freeze'):L('adm_staff_activate')}</button>`:'';
+      return `<div class="ocard"><div class="oname">${mark} ${esc(s.name||'—')}</div>
+        <div class="ometa">${esc(s.department||'—')} · ${L('adm_shop_revenue')}: <b>${money(s.revenue||0)}</b></div>${act}</div>`;
+    }).join('')||admEmpty(L('adm_no_staff'));
+    b.innerHTML=`<button class="oact no" id="shBack" style="width:100%;margin-bottom:10px">‹ ${L('adm_shops')}</button>
+      <div class="ocard">
+        <div class="oname">🏬 ${esc((d.shop&&(d.shop.name||d.shop.shop_name))||'—')}</div>
+        <div class="ometa">${L('adm_shop_owner')}: <b>${esc(d.owner_name||'—')}</b></div>
+        <div class="ometa">${L('adm_shop_mod')}: <b>${modOwner?L('adm_mod_owner'):L('adm_mod_direct')}</b></div>
+        <div class="ometa">${L('adm_shop_paymode')}: <b>${d.payment_mode==='staff'?L('adm_pm_staff'):L('adm_pm_shop')}</b></div>
+        <button class="oact ok" id="shTogMod" style="width:100%;margin-top:8px">${L('adm_toggle_mod')}</button>
+      </div>
+      <div style="font-weight:700;margin:6px 12px">${L('adm_shop_staff')}</div>
+      <div class="olist">${staff}</div>`;
+    document.getElementById('shBack').onclick=admShops;
+    document.getElementById('shTogMod').onclick=async()=>{
+      try{ await apiSend('/api/admin/shop/'+shopId+'/toggle-mod','POST');
+        openAdminShop(shopId);
+      }catch(e){ tg.showAlert(L('err')+': '+e.message); }
+    };
+    b.querySelectorAll('[data-stog]').forEach(x=>x.onclick=async()=>{
+      try{ await apiSend('/api/admin/shop/'+shopId+'/staff/'+x.dataset.stog+'/toggle','POST');
+        openAdminShop(shopId);
+      }catch(e){ tg.showAlert(L('err')+': '+e.message); }
+    });
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+
+// #6 — kanallar (sotuvchi bo'yicha guruhlangan)
+async function admChannels(){
+  const b=admBox();
+  try{
+    const rows=await api('/api/admin/channels');
+    if(!rows.length){ b.innerHTML=admEmpty(L('adm_no_channels')); return; }
+    const grouped={}, order=[];
+    rows.forEach(r=>{ if(!grouped[r.seller_id]){ grouped[r.seller_id]=[]; order.push(r.seller_id); } grouped[r.seller_id].push(r); });
+    b.innerHTML=`<div class="olist">`+order.map(sid=>{
+      const cs=grouped[sid], h=cs[0];
+      const approved=h.is_approved?'✅':'⏳';
+      const chans=cs.map(c=>`<div class="ometa">${c.is_active?'📢':'⚠️'} ${esc(c.channel_title||c.channel_id)} <code>${esc(String(c.channel_id))}</code></div>`).join('');
+      return `<div class="ocard"><div class="oname">${approved} ${esc(h.shop_name||h.seller_name||'—')}${h.telegram_username?' (@'+esc(h.telegram_username)+')':''}</div>${chans}</div>`;
+    }).join('')+`</div>`;
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+
+// #8 — o'chirilgan mahsulotlar auditi (faqat ko'rish)
+async function admDeleted(){
+  const b=admBox();
+  try{
+    const list=await api('/api/admin/deleted-products');
+    if(!list.length){ b.innerHTML=admEmpty(L('adm_no_deleted')); return; }
+    b.innerHTML=`<div class="olist">`+list.map(e=>{
+      const icon=e.action==='purged'?'📦':'🗑';
+      const by=e.deleted_by_role==='admin'?L('prof_admin'):(e.deleted_by_role==='seller'?L('bp_seller_word'):'—');
+      return `<div class="ocard"><div class="oname">${icon} ${esc(e.name||'—')}</div>
+        <div class="ometa">🏪 ${esc(e.shop_name||e.seller_name||'—')} · ${money(e.price||0)}</div>
+        <div class="ometa">${esc(by)}: ${esc(e.deleted_by_name||'—')} · ${fmtDate(e.deleted_at)}</div></div>`;
+    }).join('')+`</div>`;
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+
+// #9 — sozlamalar (hisoblar + backup + tozalash; Excel eksport stats segmentida)
+async function admSettings(){
+  const b=admBox();
+  try{
+    const d=await api('/api/admin/settings');
+    b.innerHTML=`<div class="ocard">
+        <div class="ometa">🆔 Admin: <b>${esc(String(d.admin_id||'—'))}</b></div>
+        <div class="ometa">👥 ${L('adm_s_users')}: <b>${d.users}</b></div>
+        <div class="ometa">📦 ${L('adm_s_products')}: <b>${d.products}</b></div>
+        <div class="ometa">🧾 ${L('adm_s_orders')}: <b>${d.orders}</b></div>
+      </div>
+      <button class="oact ok" id="admBackup" style="width:100%;margin-top:10px">${L('adm_backup')}</button>
+      <button class="oact no" id="admClean" style="width:100%;margin-top:8px">${L('adm_clean')}</button>`;
+    document.getElementById('admBackup').onclick=async(ev)=>{
+      const btn=ev.target; const old=btn.textContent; btn.disabled=true; btn.textContent='⏳';
+      try{ await apiSend('/api/admin/backup','POST'); tg.showAlert(L('adm_backup_sent')); }
+      catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); }
+      btn.disabled=false; btn.textContent=old;
+    };
+    document.getElementById('admClean').onclick=()=>{
+      const go=async()=>{ try{ const r=await apiSend('/api/admin/clean-cancelled','POST');
+        tg.showAlert(L('adm_clean_done').replace('{n}', r.deleted!=null?r.deleted:''));
+      }catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); } };
+      if(tg.showConfirm) tg.showConfirm(L('adm_clean')+'?', ok=>{ if(ok) go(); }); else go();
+    };
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 

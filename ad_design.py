@@ -15,6 +15,7 @@ emoji'ni ishonchli chiza olmaydi, shuning uchun rasm ustida emoji ishlatilmaydi
 """
 
 import io
+import re
 import logging
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,16 @@ _REG_CANDIDATES = [
     "C:\\Windows\\Fonts\\arial.ttf",
     "C:\\Windows\\Fonts\\segoeui.ttf",
 ]
+
+# Maxsus (ko'rinmas) bo'shliqlar — ba'zi shriftlarda ular .notdef glifi (□ yoki '#')
+# bo'lib chiqadi. fmt_price minglarni   (uzilmas bo'shliq) bilan ajratadi, shu
+# sababli rasm ustida narx "11 000" emas "11#000" bo'lib ko'rinardi. Oddiy bo'shliqqa
+# aylantiramiz — u har doim to'g'ri chiziladi.
+_SPACE_RE = re.compile("[    ⁠﻿​]")
+
+
+def _norm_spaces(s):
+    return _SPACE_RE.sub(" ", s or "")
 
 
 def is_enabled() -> bool:
@@ -115,6 +126,10 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text=""):
     """
     if not _PIL_OK or not image_bytes:
         return None
+    # Ko'rinmas bo'shliqlarni oddiy bo'shliqqa aylantiramiz (narx "11#000" bug'i)
+    price_text = _norm_spaces(price_text)
+    badge_text = _norm_spaces(badge_text)
+    shop_text = _norm_spaces(shop_text)
     try:
         src = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 

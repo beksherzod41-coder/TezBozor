@@ -690,6 +690,10 @@ class Database:
             cursor.execute("ALTER TABLE products ADD COLUMN created_by INTEGER")
         except Exception:
             pass
+        try:
+            cursor.execute("ALTER TABLE products ADD COLUMN old_price REAL")  # chegirma: eski narx
+        except Exception:
+            pass
         conn.commit()
 
         # Backfill (bir martalik, idempotent): har bir mavjud sotuvchi uchun do'kon yaratamiz
@@ -1790,6 +1794,18 @@ class Database:
         """)
         return [dict(r) for r in cursor.fetchall()]
 
+    def clean_old_cancelled_orders(self, days=30):
+        """Bekor qilingan, `days` kundan eski buyurtmalarni o'chiradi. O'chirilgan sonni qaytaradi
+        (bot admin_clean_cancelled pariteti)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM orders WHERE status='cancelled' "
+            "AND created_at < datetime('now', ?)", (f"-{int(days)} days",))
+        n = cursor.rowcount
+        conn.commit()
+        return n
+
     def update_order_status(self, order_id, status):
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -2071,6 +2087,24 @@ class Database:
         """, (seller_id,))
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
+
+    def get_reviews_by_buyer(self, buyer_id, limit=20):
+        """Xaridor o'zi qoldirgan sharhlar (bot buyer_reviews pariteti)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT r.*, u.shop_name, u.name as seller_name,
+                   COALESCE(po.name, pr.name) as product_name
+            FROM reviews r
+            JOIN users u ON r.seller_id=u.id
+            LEFT JOIN orders o ON r.order_id=o.id
+            LEFT JOIN products po ON o.product_id=po.id
+            LEFT JOIN products pr ON r.product_id=pr.id
+            WHERE r.buyer_id=?
+            ORDER BY r.created_at DESC
+            LIMIT ?
+        """, (buyer_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
 
     def get_seller_avg_rating(self, seller_id):
         conn = self.get_connection()

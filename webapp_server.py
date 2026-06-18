@@ -16,6 +16,8 @@ import os
 import html
 import hashlib
 import logging
+import asyncio
+import base64
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 
@@ -34,8 +36,9 @@ import httpx
 from database import Database
 from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
-from tezbozor_design import fmt_order_id, fmt_price
+from tezbozor_design import fmt_order_id, fmt_price, best_location_text
 import ai_assistant
+import ad_design
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 try:
@@ -98,9 +101,17 @@ def api_products(
 
 
 @app.get("/api/shops")
-def api_shops(authorization: str = Header(None), q: str = Query(None)):
+def api_shops(authorization: str = Header(None), q: str = Query(None),
+              region_id: int = Query(None)):
     require_auth(authorization)
-    return _rows(db.search_shops(query=q))
+    return _rows(db.search_shops(query=q, region_id=region_id))
+
+
+@app.get("/api/regions")
+def api_regions(authorization: str = Header(None), parent_id: int = Query(None)):
+    """Viloyatlar (parent_id yo'q) yoki tumanlar (parent_id=viloyat)."""
+    require_auth(authorization)
+    return _rows(db.get_regions(parent_id))
 
 
 # AI yordamchi — DeepSeek (ai_assistant.ask qayta ishlatiladi). Tarix xotirada (tg_id bo'yicha).
@@ -182,6 +193,76 @@ async def api_become_seller(authorization: str = Header(None)):
     return {"ok": True}
 
 
+class JoinCodeIn(BaseModel):
+    code: str
+
+
+@app.post("/api/join-with-code")
+async def api_join_with_code(body: JoinCodeIn, authorization: str = Header(None)):
+    """#5 — taklif kodi bilan do'konga xodim sifatida qo'shilish (bot _handle_staff_deeplink
+    pariteti, ro'yxatdan o'tgan foydalanuvchi shoxchasi). Egaga tasdiq xabari yuboriladi."""
+    user = dict(_buyer_from_auth(authorization))
+    _rate_limit("join_code", user.get("id"), 5, 600)
+    code = (body.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="empty")
+    if user.get("role") == "admin":
+        raise HTTPException(status_code=409, detail="admin_cannot_join")
+    invite = db.get_invite_by_code(code)
+    if not invite or dict(invite).get("is_used"):
+        raise HTTPException(status_code=404, detail="invite_invalid")
+    invite = dict(invite)
+    shop = db.get_shop_by_id(invite["shop_id"])
+    if not shop:
+        raise HTTPException(status_code=404, detail="invite_invalid")
+    shop = dict(shop)
+    existing = db.get_staff_by_user(user["id"])
+    if existing:
+        existing = dict(existing)
+        if existing.get("staff_role") == "owner":
+            raise HTTPException(status_code=409, detail="owner_cannot_join")
+        if existing.get("shop_id") == shop["id"]:
+            raise HTTPException(status_code=409, detail="already_in_this_shop")
+        # Eski do'kondan chiqarib, yangisiga o'tkazamiz + eski egaga xabar
+        old_shop = db.get_shop_by_id(existing["shop_id"])
+        db.remove_staff(existing["id"])
+        try:
+            if old_shop:
+                old_owner = db.get_user_by_id(dict(old_shop)["owner_user_id"])
+                if old_owner and dict(old_owner).get("telegram_id"):
+                    await _tg_call("sendMessage", {"chat_id": dict(old_owner)["telegram_id"],
+                                   "text": t(get_user_lang(dict(old_owner)), "staff_left_old_shop",
+                                             name=html.escape(user.get("name") or "—")),
+                                   "parse_mode": "HTML"})
+        except Exception as e:
+            logging.warning(f"join-with-code eski egaga xabar xato: {e}")
+    staff_id = db.add_staff(shop["id"], user["id"], staff_role="staff",
+                            department=invite.get("department"), is_active=0,
+                            added_by=invite.get("created_by"))
+    db.update_user(user["id"], role="seller", is_approved=1)
+    db.mark_invite_used(code, user["id"])
+    # Egaga yangi xodim haqida tasdiq xabari (tugmalar bot callback'ida ishlaydi)
+    try:
+        owner = db.get_user_by_id(shop["owner_user_id"])
+        if owner and dict(owner).get("telegram_id"):
+            owner = dict(owner)
+            olang = get_user_lang(owner)
+            await _tg_call("sendMessage", {
+                "chat_id": owner["telegram_id"],
+                "text": t(olang, "owner_new_staff_notify",
+                          name=html.escape(user.get("name") or "—"),
+                          phone=user.get("phone_number") or "—",
+                          dept=html.escape(invite.get("department") or "—")),
+                "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": [
+                    [{"text": t(olang, "btn_staff_activate"), "callback_data": f"staff_toggle_{staff_id}"}],
+                    [{"text": t(olang, "btn_staff_reject"), "callback_data": f"staff_reject_{staff_id}"}],
+                    [{"text": t(olang, "btn_manage_staff"), "callback_data": f"staff_detail_{staff_id}"}]]}})
+    except Exception as e:
+        logging.warning(f"join-with-code egaga xabar xato: {e}")
+    return {"ok": True, "shop_name": shop.get("name")}
+
+
 @app.get("/api/products/{product_id}")
 def api_product_detail(product_id: int, authorization: str = Header(None)):
     require_auth(authorization)
@@ -190,6 +271,11 @@ def api_product_detail(product_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=404, detail="not found")
     product = dict(product)
     product["images"] = db.get_product_images(product_id)  # file_id ro'yxati
+    try:
+        product["attributes"] = _rows(db.get_product_attributes(product_id))
+    except Exception as e:
+        logging.warning(f"product attributes xato (pid {product_id}): {e}")
+        product["attributes"] = []
     return product
 
 
@@ -448,6 +534,13 @@ def api_my_orders(authorization: str = Header(None)):
 def api_my_debts(authorization: str = Header(None)):
     buyer = _buyer_from_auth(authorization)
     return _rows(db.get_buyer_open_debts(buyer["id"]))
+
+
+@app.get("/api/my/reviews")
+def api_my_reviews(authorization: str = Header(None)):
+    """#4 — xaridor o'zi qoldirgan sharhlar (bot buyer_reviews pariteti)."""
+    buyer = _buyer_from_auth(authorization)
+    return _rows(db.get_reviews_by_buyer(buyer["id"], 20))
 
 
 class ReviewIn(BaseModel):
@@ -741,6 +834,79 @@ def api_seller_products(authorization: str = Header(None)):
     return _rows(db.get_products_by_seller(user["id"]))
 
 
+def _build_seller_excel(seller_id, kind, lang):
+    """Sotuvchining buyurtmalari yoki mahsulotlarini Excel'ga yig'adi -> (bytes, fname, n)."""
+    import io as _io
+    import datetime as _dt
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    hf = Font(bold=True, color="FFFFFF")
+    fill = PatternFill("solid", fgColor="1a8a2e")
+    al = Alignment(horizontal="center", vertical="center")
+
+    def header(row):
+        for c in row:
+            c.font = hf; c.fill = fill; c.alignment = al
+
+    n = 0
+    if kind == "products":
+        ws.title = "Mahsulotlar"
+        ws.append(["ID", "Nom", "Narx", "Eski narx", "Holat", "Zahira", "Sotuvda", "Sana"])
+        header(ws[1])
+        for p in db.get_products_by_seller(seller_id):
+            p = dict(p)
+            ws.append([p.get("id"), p.get("name") or "", p.get("price") or 0,
+                       p.get("old_price") or "", p.get("status") or "",
+                       p.get("stock_count") if p.get("stock_count") is not None else "∞",
+                       "✓" if p.get("in_stock") else "—", str(p.get("created_at") or "")[:10]])
+            n += 1
+        fn = "mahsulotlar"
+    else:  # orders
+        ws.title = "Buyurtmalar"
+        ws.append(["ID", "Xaridor", "Mahsulot", "Jami", "Holat", "Yetkazish",
+                   "To'lov holati", "To'langan", "Qarz", "Sana"])
+        header(ws[1])
+        for o in db.get_seller_orders_list(seller_id):
+            o = dict(o)
+            ws.append([o.get("id"), o.get("buyer_name") or "", o.get("product_name") or "",
+                       o.get("total_price") or o.get("price") or 0, o.get("status") or "",
+                       o.get("delivery_type") or "", o.get("settlement_type") or "",
+                       o.get("paid_amount") or 0, o.get("debt_amount") or 0,
+                       str(o.get("created_at") or "")[:16]])
+            n += 1
+        fn = "buyurtmalar"
+    for col in ws.columns:
+        ml = max((len(str(c.value or "")) for c in col), default=0)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(ml + 4, 40)
+    buf = _io.BytesIO()
+    wb.save(buf)
+    fname = f"tezbozor_{fn}_{_dt.datetime.now().strftime('%Y%m%d')}.xlsx"
+    return buf.getvalue(), fname, n
+
+
+@app.post("/api/seller/export/{kind}")
+async def api_seller_export(kind: str, authorization: str = Header(None)):
+    """orders|products -> Excel yasaydi va sotuvchining Telegram chatiga yuboradi."""
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    if kind not in ("orders", "products"):
+        raise HTTPException(status_code=400, detail="bad_kind")
+    _rate_limit("seller_export", user["id"], 10, 600)
+    lang = get_user_lang(user) or DEFAULT_LANG
+    content, fname, n = await asyncio.to_thread(_build_seller_excel, user["id"], kind, lang)
+    if not user.get("telegram_id"):
+        raise HTTPException(status_code=400, detail="no_telegram")
+    res = await _tg_send_document(user["telegram_id"], fname, content,
+                                  caption=f"📊 {kind} — {n} ta · TezBozor")
+    if not (res and res.get("ok")):
+        raise HTTPException(status_code=502, detail="send_failed")
+    return {"ok": True, "rows": n}
+
+
 @app.get("/api/seller/reviews")
 def api_seller_reviews(authorization: str = Header(None)):
     user = _buyer_from_auth(authorization)
@@ -844,6 +1010,7 @@ def _parse_dt(raw):
 
 class ScheduleIn(BaseModel):
     scheduled_at: str
+    caption: Optional[str] = None
 
 
 @app.get("/api/seller/scheduled")
@@ -866,8 +1033,11 @@ def api_schedule_product(product_id: int, body: ScheduleIn, authorization: str =
     if dt <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="time_in_past")
     sa = dt.strftime("%Y-%m-%d %H:%M:%S")
+    caption = (body.caption or "").strip() or None
+    # image_id=None -> bot post vaqtida reklama DIZAYNINI o'zi quradi (narx/badge/do'kon)
     db.create_scheduled_post(product_id, prod["seller_id"], sa,
-                             created_by=user["id"], image_id=prod.get("image_url"))
+                             created_by=user["id"], caption=caption,
+                             parse_mode=None, image_id=None)
     db.set_product_status(product_id, "scheduled")  # belgilangan vaqtgacha yashiriladi
     return {"ok": True}
 
@@ -895,6 +1065,7 @@ def api_seller_autoreposts(authorization: str = Header(None)):
 
 class AutoRepostIn(BaseModel):
     hour: int
+    caption: Optional[str] = None
 
 
 @app.post("/api/seller/product/{product_id}/autorepost")
@@ -903,8 +1074,11 @@ def api_set_autorepost(product_id: int, body: AutoRepostIn, authorization: str =
     prod = _own_product_or_403(user, product_id)
     if not isinstance(body.hour, int) or not (0 <= body.hour <= 23):
         raise HTTPException(status_code=400, detail="bad_hour")
+    caption = (body.caption or "").strip() or None
+    # image_id=None -> bot har post'da reklama DIZAYNINI yangidan quradi
     rid = db.upsert_auto_repost(product_id, prod["seller_id"], body.hour,
-                                created_by=user["id"], image_id=prod.get("image_url"))
+                                created_by=user["id"], caption=caption,
+                                parse_mode=None, image_id=None)
     return {"ok": True, "id": rid}
 
 
@@ -912,6 +1086,165 @@ def api_set_autorepost(product_id: int, body: AutoRepostIn, authorization: str =
 def api_cancel_autorepost(repost_id: int, authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     db.cancel_auto_repost(repost_id, user["id"])
+    return {"ok": True}
+
+
+# ============================================================
+# REKLAMA GENERATORI (bot _build_ad_caption / _build_ad_design_bytes parite)
+# Sotuvchi mahsulot uchun reklama matni + dizayn rasmni app ichida ko'radi,
+# tahrirlaydi va kanal/guruhlariga darhol e'lon qiladi.
+# ============================================================
+_AD_BADGES = ["YANGI", "ORIGINAL", "SIFATLI", "TOP TANLOV", "OMMABOP"]
+
+
+async def _fetch_image_bytes(file_id):
+    """Telegram file_id -> rasm baytlari (disk-cache bilan). Xato bo'lsa None."""
+    if not (file_id and BOT_TOKEN):
+        return None
+    safe = hashlib.sha256(file_id.encode()).hexdigest()
+    cache_path = os.path.join(IMG_CACHE_DIR, safe + ".jpg")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            meta = await client.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+                params={"file_id": file_id})
+            data = meta.json()
+            if not data.get("ok"):
+                return None
+            path = data["result"]["file_path"]
+            img = await client.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
+            img.raise_for_status()
+            content = img.content
+        try:
+            with open(cache_path, "wb") as f:
+                f.write(content)
+        except Exception:
+            pass
+        return content
+    except Exception as e:
+        logging.warning(f"ad image fetch xato ({str(file_id)[:12]}...): {e}")
+        return None
+
+
+def _region_label(product):
+    try:
+        return db.get_region_label(product.get("seller_region_id")) or ""
+    except Exception:
+        return ""
+
+
+async def _build_ad_caption_web(product, length, lang):
+    """Reklama matnini qaytaradi: (matn, parse_mode). Avval AI takrorlanmas matn yozadi;
+    bo'lmasa — tuzilgan HTML matn. Bot _build_ad_caption bilan bir xil mantiq."""
+    cat = product.get("category_name") or product.get("category")
+    cat_emoji = product.get("category_emoji") or "📂"
+    cat_line = f"\n{cat_emoji} {html.escape(str(cat))}" if cat else ""
+    shop_name = product.get("shop_name")
+    shop_line = f"\n🏪 {html.escape(str(shop_name))}" if shop_name else ""
+    region_lbl = _region_label(product)
+    region_line = f"\n🌍 {html.escape(region_lbl)}" if region_lbl else ""
+    loc = best_location_text(product.get("shop_address"), product.get("shop_landmark"))
+    loc_line = f"\n📍 {html.escape(loc)}" if loc else ""
+    prod_rating = product.get("prod_avg_rating") or 0
+    prod_cnt = product.get("prod_review_count") or 0
+    rating_line = f"\n⭐ {prod_rating:.1f} ({prod_cnt})" if prod_cnt else ""
+    desc = (product.get("description") or "").strip()
+    if len(desc) > 300:
+        desc = desc[:300].rstrip() + "…"
+    desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
+
+    caption = (
+        f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
+        f"\n💵 {fmt_price(product.get('price'))}"
+        f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}")
+    parse_mode = "HTML"
+    try:
+        ad_text = await ai_assistant.generate_ad_caption(
+            name=product.get("name") or "",
+            price_text=fmt_price(product.get("price")),
+            category=str(cat) if cat else "",
+            description=(product.get("description") or ""),
+            shop=str(shop_name) if shop_name else "",
+            region=region_lbl or "",
+            location=loc or "",
+            lang=lang,
+            length=length)
+    except Exception as e:
+        logging.warning(f"reklama matni (web) olinmadi: {e}")
+        ad_text = None
+    if ad_text:
+        return ad_text, None  # AI matni oddiy matn (HTML emas)
+    return caption, parse_mode
+
+
+async def _build_ad_design_web(product):
+    """Mahsulot rasmiga reklama dizayni qo'yib JPEG bytes qaytaradi (yoki None)."""
+    photo = product.get("image_url")
+    if not (photo and ad_design.is_enabled()):
+        return None
+    raw = await _fetch_image_bytes(photo)
+    if not raw:
+        return None
+    badge = _AD_BADGES[(product.get("id") or 0) % len(_AD_BADGES)]
+    shop_name = product.get("shop_name")
+    region_lbl = _region_label(product)
+    try:
+        return await asyncio.to_thread(
+            ad_design.build_ad_image, raw,
+            price_text=fmt_price(product.get("price")),
+            badge_text=badge,
+            shop_text=(str(shop_name) if shop_name else (region_lbl or "")))
+    except Exception as e:
+        logging.warning(f"reklama dizayni (web) yasalmadi: {e}")
+        return None
+
+
+@app.get("/api/seller/product/{product_id}/ad-preview")
+async def api_ad_preview(product_id: int, length: str = Query("long"),
+                         authorization: str = Header(None)):
+    """Reklama ko'rinishi: dizayn rasm (base64) + AI reklama matni. Faqat ko'rish."""
+    user = dict(_buyer_from_auth(authorization))
+    prod = _own_product_or_403(user, product_id)
+    length = length if length in ("long", "short") else "long"
+    lang = get_user_lang(user) or DEFAULT_LANG
+    caption, parse_mode = await _build_ad_caption_web(prod, length, lang)
+    design = await _build_ad_design_web(prod)
+    image = None
+    if design:
+        image = "data:image/jpeg;base64," + base64.b64encode(design).decode("ascii")
+    return {"caption": caption, "parse_mode": parse_mode,
+            "image": image, "has_design": bool(design)}
+
+
+class AdPublishIn(BaseModel):
+    caption: Optional[str] = None
+    length: Optional[str] = "long"
+
+
+@app.post("/api/seller/product/{product_id}/ad-publish")
+def api_ad_publish(product_id: int, body: AdPublishIn, authorization: str = Header(None)):
+    """Reklamani DARHOL kanal/guruhlarga e'lon qiladi. Mavjud rejalashtirilgan-post
+    mexanizmidan foydalanadi: hozirgi vaqtga 'pending' post yaratiladi, bot
+    webapp_scheduled_scan_job (har ~30s) uni topib post_product_to_channel'ni
+    ishga tushiradi. image_id=None -> bot reklama DIZAYNINI o'zi quradi."""
+    user = dict(_buyer_from_auth(authorization))
+    prod = _own_product_or_403(user, product_id)
+    if prod.get("status") in ("deleted", "purged"):
+        raise HTTPException(status_code=409, detail="product_unavailable")
+    _rate_limit("ad_publish", user.get("id"), 10, 3600)
+    caption = (body.caption or "").strip() or None
+    # Sotuvchi tahrir qilgan matn — oddiy matn sifatida yuboriladi (parse_mode yo'q,
+    # buzilgan HTML xavfi yo'q). Bo'sh bo'lsa caption=None -> bot AI matnini quradi.
+    sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scheduled_post(product_id, prod["seller_id"], sa,
+                             created_by=user["id"], caption=caption,
+                             parse_mode=None, image_id=None)
     return {"ok": True}
 
 
@@ -1128,6 +1461,92 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
     return {"ok": True, "status": new_status}
 
 
+class CancelReqIn2(BaseModel):
+    reason: str = ""
+
+
+@app.post("/api/seller/order/{order_id}/request-cancel")
+async def api_seller_request_cancel(order_id: int, body: CancelReqIn2, authorization: str = Header(None)):
+    """Sotuvchi TASDIQLANGAN buyurtmani bekor qilishni so'raydi (nizo oqimi).
+    Xaridorga rozilik so'rovi (rozi/rad tugmalari) yuboriladi — bot ularni ham ushlaydi."""
+    user = dict(_buyer_from_auth(authorization))
+    _rate_limit("cancel_req", user["id"], 10, 60)
+    reason = (body.reason or "").strip() or ("—")
+    if len(reason) > 500:
+        raise HTTPException(status_code=400, detail="too_long")
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not (order.get("seller_id") == user.get("id") or user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("status") != "confirmed" or (order.get("cancel_state") or ""):
+        raise HTTPException(status_code=409, detail="cancel_not_available")
+    if not db.request_order_cancel(order_id, "seller", reason):
+        raise HTTPException(status_code=409, detail="cancel_not_available")
+    try:
+        buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
+        blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+        if order.get("buyer_tg"):
+            await _tg_call("sendMessage", {
+                "chat_id": order["buyer_tg"],
+                "text": t(blang, "cancel_request_notify", oid=fmt_order_id(order_id),
+                          pname=html.escape(order.get("product_name") or ""),
+                          reason=html.escape(reason)),
+                "parse_mode": "HTML",
+                "reply_markup": {"inline_keyboard": [
+                    [{"text": t(blang, "btn_cancel_agree"), "callback_data": f"cclagree_{order_id}"}],
+                    [{"text": t(blang, "btn_cancel_deny"), "callback_data": f"ccldeny_{order_id}"}]]}})
+    except Exception as e:
+        logging.warning(f"seller request-cancel notify xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
+@app.post("/api/seller/order/{order_id}/cancel-respond")
+async def api_seller_cancel_respond(order_id: int, body: CancelRespondIn, authorization: str = Header(None)):
+    """Sotuvchi XARIDOR boshlagan bekor so'roviga javob beradi: rozi (bekor) yoki rad (nizo)."""
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not (order.get("seller_id") == user.get("id") or user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("cancel_state") != "requested":
+        raise HTTPException(status_code=409, detail="cancel_already_handled")
+    if order.get("cancel_by") == "seller":
+        raise HTTPException(status_code=409, detail="cancel_wait_other")  # o'zi so'ragan
+    oid = fmt_order_id(order_id)
+    pname = html.escape(order.get("product_name") or "")
+    buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
+    blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+    if body.agree:
+        if db.agree_order_cancel(order_id):
+            try:
+                db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
+            except Exception as e:
+                logging.warning(f"seller cancel-respond restock xato (order {order_id}): {e}")
+        if order.get("buyer_tg"):
+            await _tg_call("sendMessage", {"chat_id": order["buyer_tg"],
+                           "text": t(blang, "cancel_agreed_notify", oid=oid, pname=pname),
+                           "parse_mode": "HTML"})
+        return {"ok": True, "cancelled": True}
+    # rad — admin hakamligiga
+    db.dispute_order_cancel(order_id)
+    if order.get("buyer_tg"):
+        await _tg_call("sendMessage", {"chat_id": order["buyer_tg"],
+                       "text": t(blang, "cancel_denied_notify", oid=oid, pname=pname),
+                       "parse_mode": "HTML"})
+    try:
+        if ADMIN_ID:
+            await _tg_call("sendMessage", {"chat_id": ADMIN_ID,
+                           "text": t(DEFAULT_LANG, "admin_dispute_notify", oid=oid, pname=pname,
+                                     by=html.escape(user.get("name") or "sotuvchi"),
+                                     reason=html.escape(order.get("cancel_reason") or "—")),
+                           "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"seller cancel-respond admin notify xato (order {order_id}): {e}")
+    return {"ok": True, "disputed": True}
+
+
 class DeliverIn(BaseModel):
     settlement_type: str  # 'paid' | 'debt' | 'installment'
     paid: float = 0
@@ -1248,14 +1667,42 @@ async def api_product_photo(file: UploadFile = File(...), authorization: str = H
     return {"file_id": file_id}
 
 
+class AttrItem(BaseModel):
+    key: str
+    value: Optional[str] = None
+    label: Optional[str] = None
+
+
 class ProductIn(BaseModel):
     name: str
     price: float
     category_id: Optional[int] = None
     description: Optional[str] = None
     stock_count: Optional[int] = None
+    old_price: Optional[float] = None  # chegirma: eski (chizilgan) narx
     image_url: Optional[str] = None  # eski: bitta file_id (moslik uchun)
     images: Optional[List[str]] = None  # galereya: file_id ro'yxati (1-chi = asosiy)
+    attributes: Optional[List[AttrItem]] = None  # mahsulot atributlari (klassik/AI)
+
+
+def _save_attrs(product_id, attributes):
+    """AttrItem ro'yxatini DB'ga saqlaydi (key->value, key->label)."""
+    if not attributes:
+        return
+    attrs, labels = {}, {}
+    for a in attributes:
+        key = (a.key or "").strip()
+        val = (a.value or "").strip() if a.value is not None else ""
+        if not key or not val:
+            continue
+        attrs[key] = val
+        if a.label:
+            labels[key] = a.label.strip()
+    if attrs:
+        try:
+            db.save_product_attributes(product_id, attrs, labels=labels)
+        except Exception as e:
+            logging.warning(f"save_product_attributes xato (pid {product_id}): {e}")
 
 
 def _images_list(p):
@@ -1291,10 +1738,13 @@ def api_create_product(p: ProductIn, authorization: str = Header(None)):
     fields = {"in_stock": 1, "status": "active"}
     if user.get("region_id"):
         fields["region_id"] = user["region_id"]
+    if p.old_price and p.old_price > 0:
+        fields["old_price"] = float(p.old_price)
     try:
         db.update_product_fields(pid, **fields)
     except Exception as e:
         logging.warning(f"product post-fields xato (pid {pid}): {e}")
+    _save_attrs(pid, p.attributes)
     return {"ok": True, "product_id": pid}
 
 
@@ -1303,8 +1753,10 @@ class ProductEdit(BaseModel):
     price: Optional[float] = None
     description: Optional[str] = None
     stock_count: Optional[int] = None
+    old_price: Optional[float] = None
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
+    attributes: Optional[List[AttrItem]] = None
 
 
 @app.patch("/api/seller/product/{product_id}")
@@ -1327,6 +1779,9 @@ def api_edit_product(product_id: int, p: ProductEdit, authorization: str = Heade
         if p.stock_count < 0:
             raise HTTPException(status_code=400, detail="bad_stock")
         fields["stock_count"] = p.stock_count
+    if p.old_price is not None:
+        # 0/bo'sh -> chegirmani olib tashlaydi (NULL)
+        fields["old_price"] = float(p.old_price) if p.old_price and p.old_price > 0 else None
     if fields:
         db.update_product_fields(product_id, **fields)
     # Rasmlar (galereya) — berilgan bo'lsa to'liq almashtiramiz (image_url ham sinxronlanadi)
@@ -1334,6 +1789,7 @@ def api_edit_product(product_id: int, p: ProductEdit, authorization: str = Heade
         db.set_product_images(product_id, [f for f in p.images if f][:4])
     elif p.image_url is not None:
         db.update_product_fields(product_id, image_url=p.image_url)
+    _save_attrs(product_id, p.attributes)
     return {"ok": True}
 
 
@@ -1350,6 +1806,78 @@ def api_delete_product(product_id: int, authorization: str = Header(None)):
     _own_product_or_403(user, product_id)
     db.delete_product(product_id, deleted_by=user.get("id"), deleted_by_role=user.get("role"))
     return {"ok": True}
+
+
+# ============================================================
+# MAHSULOT SAVOLLARI (atribut shablonlari) — 3 rejim:
+#   classic   — kategoriyaning statik savollari (db shablonlari)
+#   ai_guided — AI mahsulotga mos savollar tuzadi
+#   ai_smart  — AI tavsifdan ajratadi (known) + qolganini so'raydi (questions)
+# AI o'chiq/xato bo'lsa — klassik shablonlarga qaytadi (bot bilan bir xil xulq).
+# ============================================================
+def _norm_question(q):
+    """db/AI shablonini frontend uchun barqaror shaklga keltiradi."""
+    typ = q.get("attr_type") or "text"
+    hint = q.get("hint") or ""
+    options = []
+    if typ == "select" and hint:
+        options = [o.strip() for o in str(hint).split("/") if o.strip()]
+    return {"key": q.get("attr_key"), "label": q.get("attr_label") or q.get("attr_key"),
+            "type": typ, "required": bool(q.get("is_required")),
+            "hint": hint, "options": options}
+
+
+def _category_name(category_id, lang):
+    if not category_id:
+        return ""
+    try:
+        for c in db.get_all_categories():
+            if c[0] == category_id:
+                return c[1]
+    except Exception:
+        pass
+    return ""
+
+
+@app.get("/api/seller/product-questions")
+async def api_product_questions(category_id: Optional[int] = Query(None),
+                                name: str = Query(""), description: str = Query(""),
+                                mode: str = Query("classic"),
+                                authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    mode = mode if mode in ("classic", "ai_guided", "ai_smart") else "classic"
+    lang = get_user_lang(user) or DEFAULT_LANG
+
+    def _classic():
+        try:
+            tmpls = db.get_category_templates(category_id) if category_id else []
+        except Exception as e:
+            logging.warning(f"category templates xato (cat {category_id}): {e}")
+            tmpls = []
+        return [_norm_question(dict(t)) for t in tmpls]
+
+    if mode == "classic" or not ai_assistant.is_enabled():
+        return {"questions": _classic(), "known": {}, "source": "classic"}
+
+    try:
+        result = await ai_assistant.generate_product_questions(
+            name=name or "", category=_category_name(category_id, lang),
+            description=description or "", lang=lang, smart=(mode == "ai_smart"))
+    except Exception as e:
+        logging.warning(f"AI savollar (web) xato: {e}")
+        result = None
+    if not result:
+        return {"questions": _classic(), "known": {}, "source": "classic_fallback"}
+
+    questions = [_norm_question(q) for q in (result.get("questions") or [])]
+    # known: {key: {value, label}} — frontend oldindan to'ldiradi
+    known = {}
+    for k, v in (result.get("known") or {}).items():
+        if isinstance(v, dict):
+            known[k] = {"value": v.get("value"), "label": v.get("label") or k}
+    return {"questions": questions, "known": known, "source": mode}
 
 
 @app.get("/api/image/{file_id}")
@@ -1491,11 +2019,17 @@ async def api_admin_seller_decide(user_id: int, body: SellerReqDecision,
 
 @app.get("/api/admin/users")
 def api_admin_users(authorization: str = Header(None), q: str = Query(None),
-                    offset: int = Query(0)):
+                    offset: int = Query(0), role: str = Query(None)):
     _admin_from_auth(authorization)
     q = (q or "").strip()
     if q:
         return {"total": None, "offset": 0, "users": _rows(db.search_users(q, limit=30))}
+    role = role if role in ("buyer", "seller", "admin") else None
+    if role:
+        allr = db.get_all_users(role=role)
+        total = len(allr)
+        page = allr[max(0, offset):max(0, offset) + ADMIN_PAGE]
+        return {"total": total, "offset": offset, "users": _rows(page), "role": role}
     total, rows = db.get_users_paginated(limit=ADMIN_PAGE, offset=max(0, offset))
     return {"total": total, "offset": offset, "users": _rows(rows)}
 
@@ -1517,6 +2051,216 @@ def api_admin_block_user(user_id: int, body: UserBlockIn, authorization: str = H
         raise HTTPException(status_code=400, detail="cant_block_admin")
     db.update_user(user_id, is_blocked=1 if body.block else 0)
     return {"ok": True, "is_blocked": 1 if body.block else 0}
+
+
+# ---- FOYDALANUVCHI TO'LIQ MA'LUMOT + AI askfill (bot parite) ----
+def _profile_missing_fields(user, lang):
+    """Profildagi to'ldirilmagan muhim maydonlar (bot _profile_missing_fields bilan bir xil)."""
+    ru = (lang == "ru")
+    def empty(v):
+        return v is None or (isinstance(v, str) and not v.strip())
+    m = []
+    if empty(user.get("name")): m.append("Имя" if ru else "Ism")
+    if empty(user.get("telegram_username")): m.append("Username (@...)")
+    if empty(user.get("phone_number")): m.append("Номер телефона" if ru else "Telefon raqami")
+    if user.get("region_id") is None: m.append("Регион (область/район)" if ru else "Hudud (viloyat/tuman)")
+    is_seller = bool(user.get("shop_name")) or user.get("role") == "seller"
+    if is_seller:
+        if empty(user.get("shop_name")): m.append("Название магазина" if ru else "Do'kon nomi")
+        if empty(user.get("shop_address")): m.append("Адрес магазина" if ru else "Do'kon manzili")
+        if empty(user.get("shop_landmark")): m.append("Ориентир" if ru else "Mo'ljal (orientir)")
+        if empty(user.get("working_hours")): m.append("Часы работы" if ru else "Ish vaqti")
+        if empty(user.get("working_days")): m.append("Рабочие дни" if ru else "Ish kunlari")
+        if empty(user.get("card_number")): m.append("Карта для оплаты" if ru else "To'lov kartasi")
+    return m
+
+
+@app.get("/api/admin/user/{user_id}")
+def api_admin_user_detail(user_id: int, authorization: str = Header(None)):
+    """Foydalanuvchining TO'LIQ ma'lumoti (bot admin_user_details parite)."""
+    _admin_from_auth(authorization)
+    u = db.get_user_by_id(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    u = dict(u)
+    lang = u.get("language") or DEFAULT_LANG
+    out = dict(u)
+    try:
+        out["region_label"] = db.get_region_label(u.get("region_id"))
+    except Exception:
+        out["region_label"] = None
+    out["missing"] = _profile_missing_fields(u, lang)
+    out["can_askfill"] = bool(out["missing"]) and ai_assistant.is_enabled()
+    try:
+        out["buyer_orders_count"] = len(db.get_orders_by_buyer(user_id) or [])
+    except Exception:
+        out["buyer_orders_count"] = 0
+    is_seller = bool(u.get("shop_name")) or u.get("role") == "seller"
+    if is_seller:
+        try:
+            out["seller_stats"] = dict(db.get_seller_stats(user_id) or {})
+        except Exception:
+            out["seller_stats"] = {}
+        try:
+            out["channels"] = _rows(db.get_seller_channels(user_id))
+        except Exception:
+            out["channels"] = []
+    return out
+
+
+@app.get("/api/admin/user/{user_id}/fill-preview")
+async def api_admin_fill_preview(user_id: int, authorization: str = Header(None)):
+    """AI yetishmagan maydonlar bo'yicha foydalanuvchiga yuboriladigan xabarni TAKLIF qiladi."""
+    _admin_from_auth(authorization)
+    u = db.get_user_by_id(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    u = dict(u)
+    lang = u.get("language") or DEFAULT_LANG
+    missing = _profile_missing_fields(u, lang)
+    if not missing:
+        raise HTTPException(status_code=409, detail="nothing_missing")
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    is_seller = bool(u.get("shop_name")) or u.get("role") == "seller"
+    msg = await ai_assistant.generate_profile_completion_message(
+        name=u.get("name") or "", missing_fields=missing, is_seller=is_seller, lang=lang)
+    if not msg:
+        raise HTTPException(status_code=502, detail="ai_error")
+    return {"missing": missing, "message": msg}
+
+
+class FillSendIn(BaseModel):
+    message: str
+
+
+@app.post("/api/admin/user/{user_id}/sendfill")
+async def api_admin_sendfill(user_id: int, body: FillSendIn, authorization: str = Header(None)):
+    """AI taklif qilgan (admin tasdiqlagan) xabarni foydalanuvchiga yuboradi."""
+    _admin_from_auth(authorization)
+    u = db.get_user_by_id(user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    u = dict(u)
+    txt = (body.message or "").strip()
+    if not txt:
+        raise HTTPException(status_code=400, detail="empty")
+    if not u.get("telegram_id"):
+        raise HTTPException(status_code=400, detail="no_telegram")
+    await _tg_call("sendMessage", {"chat_id": u["telegram_id"], "text": txt})
+    return {"ok": True}
+
+
+# ---- EXCEL EKSPORT (bot admin_export_excel parite) — fayl Telegram'ga yuboriladi ----
+async def _tg_send_document(chat_id, filename, content, caption=""):
+    if not BOT_TOKEN:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=40) as client:
+            files = {"document": (filename, content,
+                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+            data = {"chat_id": str(chat_id), "caption": caption[:1000]}
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendDocument", data=data, files=files)
+            return r.json()
+    except Exception as e:
+        logging.warning(f"sendDocument xato: {e}")
+        return None
+
+
+def _build_excel(kind, lang):
+    """users|products|orders|seller_orders -> (bytes, filename, rows). openpyxl bilan."""
+    import io as _io
+    import datetime as _dt
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+    ru = (lang == "ru")
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    hf = Font(bold=True, color="FFFFFF")
+    fill = PatternFill("solid", fgColor="1a8a2e")
+    al = Alignment(horizontal="center", vertical="center")
+
+    def header(row):
+        for c in row:
+            c.font = hf; c.fill = fill; c.alignment = al
+
+    def autow():
+        for col in ws.columns:
+            ml = max((len(str(c.value or "")) for c in col), default=0)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(ml + 4, 40)
+
+    n = 0
+    if kind == "users":
+        ws.title = "Пользователи" if ru else "Foydalanuvchilar"
+        ws.append(["ID", "Telegram ID", "Ism/Имя", "Telefon", "Rol", "Do'kon", "Hudud",
+                   "Buyurtmalar", "Sana"])
+        header(ws[1])
+        for u in db.get_all_users():
+            u = dict(u)
+            try:
+                oc = len(db.get_orders_by_buyer(u["id"]) or [])
+            except Exception:
+                oc = 0
+            ws.append([u.get("id"), u.get("telegram_id"), u.get("name") or "",
+                       u.get("phone_number") or "", u.get("role") or "",
+                       u.get("shop_name") or "", db.get_region_label(u.get("region_id")) or "",
+                       oc, str(u.get("created_at") or "")[:10]])
+            n += 1
+        fn = "users"
+    elif kind == "products":
+        ws.title = "Товары" if ru else "Mahsulotlar"
+        ws.append(["ID", "Sotuvchi", "Kategoriya", "Nom", "Narx", "Holat", "Zahira", "Sana"])
+        header(ws[1])
+        for p in db.get_all_products():
+            p = dict(p)
+            ws.append([p.get("id"), p.get("seller_name") or p.get("seller_id") or "",
+                       p.get("category_name") or "", p.get("name") or "", p.get("price") or 0,
+                       p.get("status") or "", p.get("stock_count") if p.get("stock_count") is not None else "∞",
+                       str(p.get("created_at") or "")[:10]])
+            n += 1
+        fn = "products"
+    elif kind in ("orders", "seller_orders"):
+        ws.title = "Заказы" if ru else "Buyurtmalar"
+        ws.append(["ID", "Xaridor", "Sotuvchi", "Mahsulot", "Jami", "Holat", "To'lov",
+                   "Yetkazish", "Sana", "To'lov holati", "To'langan", "Qarz"])
+        header(ws[1])
+        for o in db.get_all_orders():
+            o = dict(o)
+            ws.append([o.get("id"), o.get("buyer_name") or "", o.get("seller_name") or "",
+                       o.get("product_name") or "", o.get("total_price") or o.get("price") or 0,
+                       o.get("status") or "", o.get("payment_method") or "",
+                       o.get("delivery_type") or "", str(o.get("created_at") or "")[:16],
+                       o.get("settlement_type") or "", o.get("paid_amount") or 0,
+                       o.get("debt_amount") or 0])
+            n += 1
+        fn = "orders"
+    else:
+        raise HTTPException(status_code=400, detail="bad_kind")
+    autow()
+    buf = _io.BytesIO()
+    wb.save(buf)
+    fname = f"tezbozor_{fn}_{_dt.datetime.now().strftime('%Y%m%d')}.xlsx"
+    return buf.getvalue(), fname, n
+
+
+@app.post("/api/admin/export/{kind}")
+async def api_admin_export(kind: str, authorization: str = Header(None)):
+    """users|products|orders -> Excel yasaydi va adminning Telegram chatiga yuboradi."""
+    admin = _admin_from_auth(authorization)
+    if kind not in ("users", "products", "orders"):
+        raise HTTPException(status_code=400, detail="bad_kind")
+    _rate_limit("admin_export", admin["id"], 10, 600)
+    lang = get_user_lang(admin) or DEFAULT_LANG
+    content, fname, n = await asyncio.to_thread(_build_excel, kind, lang)
+    if not admin.get("telegram_id"):
+        raise HTTPException(status_code=400, detail="no_telegram")
+    res = await _tg_send_document(admin["telegram_id"], fname, content,
+                                  caption=f"📊 {kind} — {n} ta · TezBozor")
+    if not (res and res.get("ok")):
+        raise HTTPException(status_code=502, detail="send_failed")
+    return {"ok": True, "rows": n}
 
 
 @app.get("/api/admin/disputes")
@@ -1664,6 +2408,121 @@ async def api_admin_broadcast(body: BroadcastIn, authorization: str = Header(Non
         else:
             failed += 1
     return {"ok": True, "sent": sent, "failed": failed, "total": len(users)}
+
+
+# ---- #6 KANALLAR (bot admin_channels pariteti) ----
+@app.get("/api/admin/channels")
+def api_admin_channels(authorization: str = Header(None)):
+    """Barcha sotuvchi kanal/guruhlari — frontend sotuvchi bo'yicha guruhlaydi."""
+    _admin_from_auth(authorization)
+    return _rows(db.get_all_seller_channels())
+
+
+# ---- #7 DO'KON DETALI + MODERATSIYA TOGGLE (bot admin_shop_detail/shopmod) ----
+@app.get("/api/admin/shop/{shop_id}")
+def api_admin_shop_detail(shop_id: int, authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    shop = db.get_shop_by_id(shop_id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="shop_not_found")
+    shop = dict(shop)
+    owner = db.get_user_by_id(shop.get("owner_user_id")) if shop.get("owner_user_id") else None
+    perf = {r["user_id"]: dict(r) for r in db.get_shop_staff_performance(shop_id)}
+    staff = []
+    for s in db.get_shop_staff(shop_id):
+        s = dict(s)
+        s["revenue"] = (perf.get(s["user_id"], {}) or {}).get("revenue", 0)
+        staff.append(s)
+    return {"shop": shop, "owner_name": (dict(owner).get("name") if owner else None),
+            "moderation": shop.get("moderation") or "direct",
+            "payment_mode": shop.get("payment_mode") or "shop", "staff": staff}
+
+
+@app.post("/api/admin/shop/{shop_id}/toggle-mod")
+def api_admin_shop_toggle_mod(shop_id: int, authorization: str = Header(None)):
+    """Moderatsiya siyosatini almashtiradi: direct ↔ owner_approve."""
+    _admin_from_auth(authorization)
+    shop = db.get_shop_by_id(shop_id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="shop_not_found")
+    new_mod = "owner_approve" if (dict(shop).get("moderation") or "direct") == "direct" else "direct"
+    db.update_shop(shop_id, moderation=new_mod)
+    return {"ok": True, "moderation": new_mod}
+
+
+@app.post("/api/admin/shop/{shop_id}/staff/{staff_id}/toggle")
+async def api_admin_staff_toggle(shop_id: int, staff_id: int, authorization: str = Header(None)):
+    """Admin xodimni faollashtiradi/muzlatadi (bot admin_staff_toggle pariteti)."""
+    _admin_from_auth(authorization)
+    target = next((dict(s) for s in db.get_shop_staff(shop_id, include_owner=False)
+                   if dict(s).get("id") == staff_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="staff_not_found")
+    new_active = 0 if target.get("is_active") else 1
+    db.set_staff_active(staff_id, new_active)
+    try:
+        su = db.get_user_by_id(target.get("user_id"))
+        if su and dict(su).get("telegram_id"):
+            slang = get_user_lang(dict(su))
+            await _tg_call("sendMessage", {"chat_id": dict(su)["telegram_id"],
+                           "text": t(slang, "staff_you_activated" if new_active else "staff_you_frozen")})
+    except Exception as e:
+        logging.warning(f"admin staff toggle notify xato (staff {staff_id}): {e}")
+    return {"ok": True, "is_active": new_active}
+
+
+# ---- #8 O'CHIRILGAN MAHSULOTLAR AUDITI (bot admin_deleted_products — faqat ko'rish) ----
+@app.get("/api/admin/deleted-products")
+def api_admin_deleted_products(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return _rows(db.get_product_audit(limit=50))
+
+
+# ---- #9 SOZLAMALAR (bot admin_settings — hisoblar + backup + tozalash) ----
+@app.get("/api/admin/settings")
+def api_admin_settings(authorization: str = Header(None)):
+    _admin_from_auth(authorization)
+    return {"admin_id": ADMIN_ID,
+            "users": len(db.get_all_users()),
+            "products": len(db.get_all_products(include_hidden=False)),
+            "orders": len(db.get_all_orders())}
+
+
+@app.post("/api/admin/clean-cancelled")
+def api_admin_clean_cancelled(authorization: str = Header(None)):
+    """30 kundan eski bekor qilingan buyurtmalarni tozalaydi."""
+    _admin_from_auth(authorization)
+    n = db.clean_old_cancelled_orders(30)
+    return {"ok": True, "deleted": n}
+
+
+@app.post("/api/admin/backup")
+async def api_admin_backup(authorization: str = Header(None)):
+    """DB backup faylini adminning Telegram chatiga yuboradi (SQLite). PG'da no-op → 400."""
+    admin = _admin_from_auth(authorization)
+    _rate_limit("admin_backup", admin["id"], 5, 600)
+    if not admin.get("telegram_id"):
+        raise HTTPException(status_code=400, detail="no_telegram")
+    import datetime as _dt
+    import tempfile
+    ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(tempfile.gettempdir(), f"marketplace_backup_{ts}.db")
+    ok = await asyncio.to_thread(db.backup, path)
+    if not ok:
+        raise HTTPException(status_code=400, detail="backup_unavailable")
+    try:
+        with open(path, "rb") as f:
+            content = f.read()
+        res = await _tg_send_document(admin["telegram_id"], f"marketplace_backup_{ts}.db",
+                                      content, caption=f"💾 Backup · {ts}")
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if not (res and res.get("ok")):
+        raise HTTPException(status_code=502, detail="send_failed")
+    return {"ok": True}
 
 
 # ============================================================
