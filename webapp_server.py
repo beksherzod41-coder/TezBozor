@@ -114,6 +114,7 @@ class AiAsk(BaseModel):
 @app.post("/api/ai")
 async def api_ai(body: AiAsk, authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
+    _rate_limit("ai", user.get("id"), 20, 60)
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="empty")
@@ -135,6 +136,7 @@ class ContactIn(BaseModel):
 @app.post("/api/contact-admin")
 async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
+    _rate_limit("contact", user.get("id"), 5, 600)
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="empty")
@@ -154,6 +156,7 @@ async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
 @app.post("/api/become-seller")
 async def api_become_seller(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
+    _rate_limit("become_seller", user.get("id"), 3, 3600)
     if user.get("role") in ("seller", "admin") or user.get("is_approved"):
         raise HTTPException(status_code=409, detail="already_seller")
     existing = db.get_seller_request_by_user(user["id"])
@@ -210,6 +213,7 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
     buyer = db.get_user_by_telegram_id(tg_id)
     if not buyer:
         raise HTTPException(status_code=403, detail="not_registered")
+    _rate_limit("order", buyer["id"], 15, 60)
 
     if order.quantity < 1 or order.quantity > 999:
         raise HTTPException(status_code=400, detail="bad_quantity")
@@ -267,6 +271,7 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
     """Savat (bitta sotuvchi, ko'p mahsulot) -> guruh buyurtma. Bot fon job'i sotuvchiga
     BITTA guruh bildirishnomasi yuboradi."""
     buyer = dict(_buyer_from_auth(authorization))
+    _rate_limit("cart", buyer["id"], 10, 60)
     if not co.items:
         raise HTTPException(status_code=400, detail="empty_cart")
     if co.delivery_type not in _VALID_DELIVERY:
@@ -315,6 +320,26 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
     for oid in created:
         db.mark_order_notify_pending(oid)
     return {"ok": True, "group_id": group_id, "count": len(created), "total": grand}
+
+
+import time as _time
+_RATE = {}  # (bucket, user_id) -> [timestamps]
+
+
+def _rate_limit(bucket, user_id, max_calls, window):
+    """Oddiy xotira-ichi throttle (jarayon bo'yicha). Limitdan oshsa 429.
+    Spam/cost himoyasi: AI (DeepSeek puli), admin/seller spam, buyurtma toshqini."""
+    now = _time.time()
+    key = (bucket, user_id)
+    arr = [t for t in _RATE.get(key, ()) if now - t < window]
+    if len(arr) >= max_calls:
+        raise HTTPException(status_code=429, detail="too_many_requests")
+    arr.append(now)
+    _RATE[key] = arr
+    # vaqti-vaqti bilan eski kalitlarni tozalaymiz (xotira o'smasin)
+    if len(_RATE) > 5000:
+        for k in [k for k, v in list(_RATE.items()) if not any(now - t < window for t in v)]:
+            _RATE.pop(k, None)
 
 
 def _buyer_from_auth(authorization):
