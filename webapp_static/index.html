@@ -1461,11 +1461,39 @@ async function loadScheduled(){
       <button class="oact ok" id="schAdd" style="width:100%;margin-top:9px">📅 Rejalashtirish</button>
       <div style="font-size:11.5px;color:var(--hint);margin-top:6px">Mahsulot belgilangan vaqtgacha yashirin turadi, keyin avtomatik sotuvga chiqadi.</div>
     </div>`;
-    const listHtml = list.length ? `<div class="olist" style="margin-top:6px">${list.map(schedItem).join('')}</div>` : `<div class="empty"><span class="big">📅</span>Faol reja yo'q</div>`;
-    b.innerHTML=`<div style="padding:8px 0">${form}</div>`+listHtml;
+    const listHtml = list.length ? `<div class="olist" style="margin-top:6px">${list.map(schedItem).join('')}</div>` : '';
+    let reposts=[]; try{ reposts=await api('/api/seller/autoreposts'); }catch(e){}
+    const hourOpts=Array.from({length:24},(_,h)=>`<option value="${h}">${String(h).padStart(2,'0')}:00</option>`).join('');
+    const arForm=`<div class="cosec" style="margin:12px 12px 0">
+      <div class="lbl">♻️ Avto qayta-post (har kuni kanalga)</div>
+      <select class="coaddr" id="arProd" style="min-height:auto">${opts || "<option value=''>Mahsulot yo'q</option>"}</select>
+      <select class="coaddr" id="arHour" style="min-height:auto;margin-top:8px">${hourOpts}</select>
+      <button class="oact ok" id="arAdd" style="width:100%;margin-top:9px">♻️ Yoqish</button>
+      <div style="font-size:11.5px;color:var(--hint);margin-top:6px">Mahsulot har kuni shu soatda kanal/guruhlaringizga qayta post bo'ladi.</div>
+    </div>`;
+    const arList = reposts.length ? `<div class="olist" style="margin-top:6px">${reposts.map(r=>`<div class="ocard" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div style="min-width:0"><div class="oname" style="font-size:14px">♻️ ${esc(r.product_name||('#'+r.product_id))}</div><div style="font-size:12px;color:var(--hint)">Har kuni ${String(r.hour).padStart(2,'0')}:00</div></div><button class="oact no" data-arcancel="${r.id}" style="width:auto;padding:9px 13px;background:#fdebef;color:var(--sale)">❌</button></div>`).join('')}</div>` : '';
+    b.innerHTML=`<div style="padding:8px 0">${form}</div>`+listHtml+`<div style="padding:4px 0">${arForm}</div>`+arList;
     document.getElementById('schAdd').onclick=addSchedule;
+    document.getElementById('arAdd').onclick=addAutoRepost;
     b.querySelectorAll('[data-cancelsched]').forEach(btn=>btn.onclick=()=>cancelSchedule(btn.dataset.cancelsched));
+    b.querySelectorAll('[data-arcancel]').forEach(btn=>btn.onclick=()=>cancelAutoRepost(btn.dataset.arcancel));
   }catch(e){ b.innerHTML = e.message==='not_owner'?`<div class="empty"><span class="big">🔒</span>Faqat sotuvchi uchun.</div>`:`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+async function addAutoRepost(){
+  const pid=document.getElementById('arProd').value;
+  const hour=parseInt(document.getElementById('arHour').value,10);
+  if(!pid){ tg.showAlert("Mahsulot tanlang."); return; }
+  const btn=document.getElementById('arAdd'); btn.disabled=true; btn.textContent='...';
+  try{
+    const r=await fetch('/api/seller/product/'+pid+'/autorepost',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({hour})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    loadScheduled();
+  }catch(e){ btn.disabled=false; btn.textContent='♻️ Yoqish'; tg.showAlert("Xatolik: "+e.message); }
+}
+function cancelAutoRepost(rid){
+  const doIt=async()=>{ try{ const r=await fetch('/api/seller/autorepost/'+rid+'/cancel',{method:'POST',headers:{Authorization:AUTH}}); if(!r.ok) throw new Error('HTTP '+r.status); loadScheduled(); }catch(e){ tg.showAlert("Xatolik: "+e.message); } };
+  if(tg.showConfirm) tg.showConfirm("Avto qayta-post o'chirilsinmi?", ok=>{ if(ok) doIt(); }); else if(confirm("O'chirilsinmi?")) doIt();
 }
 async function addSchedule(){
   const pid=document.getElementById('schProd').value;
@@ -1498,6 +1526,7 @@ async function openShopSettings(){
     shopForm={ shop_name:s.shop_name||'', shop_address:s.shop_address||'', shop_landmark:s.shop_landmark||'',
       working_days:s.working_days||'', working_hours:s.working_hours||'', phone:s.phone_number||'',
       card_number:s.card_number||'', card_owner:s.card_owner||'', card_type:s.card_type||'',
+      payment_mode:s.payment_mode||'shop', is_owner:!!s.is_owner,
       lat:s.shop_lat||null, lon:s.shop_lon||null };
     renderShopSettings();
   }catch(e){ document.getElementById('shopFormBody').innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
@@ -1519,6 +1548,10 @@ function renderShopSettings(){
     <div class="cosec"><div class="lbl">Karta turi</div><div class="seg col">
       ${CARD_TYPES.map(([k,l])=>`<div class="opt ${shopForm.card_type===k?'on':''}" data-ct="${k}">${l}</div>`).join('')}
     </div></div>
+    ${shopForm.is_owner?`<div class="cosec"><div class="lbl">To'lov (P2P) kartasi yo'nalishi</div><div class="seg">
+      <div class="opt ${shopForm.payment_mode==='shop'?'on':''}" data-pm="shop">🏪 Do'kon kartasi</div>
+      <div class="opt ${shopForm.payment_mode==='staff'?'on':''}" data-pm="staff">👤 Har xodim kartasi</div>
+    </div><div style="font-size:11.5px;color:var(--hint);margin-top:6px">Xodim joylagan mahsulotga to'lov kim kartasiga tushishini belgilaydi.</div></div>`:''}
   </div>
   <div class="cobar"><button id="sfSave">💾 Saqlash</button></div>`;
   const bind=(id,key)=>{ const el=document.getElementById(id); if(el) el.oninput=()=>{ shopForm[key]=el.value; }; };
@@ -1526,6 +1559,7 @@ function renderShopSettings(){
   bind('sfDays','working_days'); bind('sfHours','working_hours'); bind('sfPhone','phone');
   bind('sfCard','card_number'); bind('sfCardOwner','card_owner');
   b.querySelectorAll('[data-ct]').forEach(o=>o.onclick=()=>{ shopForm.card_type = shopForm.card_type===o.dataset.ct?'':o.dataset.ct; renderShopSettings(); });
+  b.querySelectorAll('[data-pm]').forEach(o=>o.onclick=()=>{ shopForm.payment_mode=o.dataset.pm; renderShopSettings(); });
   const lb=document.getElementById('sfLocBtn'); if(lb) lb.onclick=async()=>{ await captureLocation(l=>{ shopForm.lat=l.lat; shopForm.lon=l.lon; }, 'sfLocBtn'); renderShopSettings(); };
   document.getElementById('sfSave').onclick=saveShopSettings;
 }
@@ -1539,7 +1573,8 @@ async function saveShopSettings(){
         shop_landmark:shopForm.shop_landmark.trim(), working_days:shopForm.working_days.trim(),
         working_hours:shopForm.working_hours.trim(), phone:(shopForm.phone||'').trim(),
         card_number:(shopForm.card_number||'').trim(), card_owner:(shopForm.card_owner||'').trim(),
-        card_type:shopForm.card_type||'', lat:shopForm.lat, lon:shopForm.lon})});
+        card_type:shopForm.card_type||'', payment_mode:shopForm.payment_mode||'shop',
+        lat:shopForm.lat, lon:shopForm.lon})});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     document.getElementById('shopform').classList.remove('open');

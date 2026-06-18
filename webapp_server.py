@@ -725,6 +725,35 @@ def api_cancel_scheduled(sched_id: int, authorization: str = Header(None)):
     return {"ok": True}
 
 
+# ---- Avto qayta-reklama (har kuni belgilangan soatda kanal/guruhga qayta post) ----
+@app.get("/api/seller/autoreposts")
+def api_seller_autoreposts(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_auto_reposts(user["id"]))
+
+
+class AutoRepostIn(BaseModel):
+    hour: int
+
+
+@app.post("/api/seller/product/{product_id}/autorepost")
+def api_set_autorepost(product_id: int, body: AutoRepostIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    prod = _own_product_or_403(user, product_id)
+    if not isinstance(body.hour, int) or not (0 <= body.hour <= 23):
+        raise HTTPException(status_code=400, detail="bad_hour")
+    rid = db.upsert_auto_repost(product_id, prod["seller_id"], body.hour,
+                                created_by=user["id"], image_id=prod.get("image_url"))
+    return {"ok": True, "id": rid}
+
+
+@app.post("/api/seller/autorepost/{repost_id}/cancel")
+def api_cancel_autorepost(repost_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    db.cancel_auto_repost(repost_id, user["id"])
+    return {"ok": True}
+
+
 class ReplyIn(BaseModel):
     text: str
 
@@ -805,7 +834,11 @@ _VALID_CARD = {"uzcard", "humo", "visa", "mastercard"}
 @app.get("/api/seller/shop")
 def api_get_shop(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
-    return {k: user.get(k) for k in _SHOP_FIELDS}
+    out = {k: user.get(k) for k in _SHOP_FIELDS}
+    shop = db.get_shop_by_owner(user["id"])
+    out["payment_mode"] = (dict(shop).get("payment_mode") if shop else None) or "shop"
+    out["is_owner"] = bool(shop)
+    return out
 
 
 class ShopEdit(BaseModel):
@@ -818,6 +851,7 @@ class ShopEdit(BaseModel):
     card_number: Optional[str] = None
     card_owner: Optional[str] = None
     card_type: Optional[str] = None
+    payment_mode: Optional[str] = None   # 'shop' | 'staff' (multivendor karta yo'nalishi)
     lat: Optional[float] = None
     lon: Optional[float] = None
 
@@ -863,6 +897,11 @@ def api_edit_shop(p: ShopEdit, authorization: str = Header(None)):
         fields["shop_lon"] = p.lon
     if fields:
         db.update_user(user["id"], **fields)
+    # payment_mode shops jadvalida (faqat ega)
+    if p.payment_mode is not None and p.payment_mode in ("shop", "staff"):
+        shop = db.get_shop_by_owner(user["id"])
+        if shop:
+            db.update_shop(dict(shop)["id"], payment_mode=p.payment_mode)
     return {"ok": True}
 
 

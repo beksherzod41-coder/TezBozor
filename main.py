@@ -14465,6 +14465,29 @@ async def webapp_scheduled_scan_job(context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"Mini App rejalashtirilgan post ulandi: sched {sp['id']} ({when:.0f}s)")
 
 
+async def webapp_autorepost_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Mini App yaratgan avto qayta-reklamalarga kunlik jobni ulaydi (idempotent).
+    Webapp alohida jarayon — bot job-queue'siga avtomatik ulanmaydi; har ~60s skanlaydi."""
+    try:
+        reposts = db.get_active_auto_reposts()
+    except Exception as e:
+        logging.error(f"webapp_autorepost_scan_job: {e}")
+        return
+    jq = context.application.job_queue
+    if not jq:
+        return
+    for rp in reposts:
+        name = f"autorep_{rp['id']}"
+        if jq.get_jobs_by_name(name):
+            continue
+        try:
+            hour = int(rp.get('hour') or 0)
+        except Exception:
+            continue
+        _schedule_autorepost_job(jq, rp['id'], hour)
+        logging.info(f"Mini App auto-repost ulandi: {rp['id']} (soat {hour})")
+
+
 def main():
     _validate_env()
     # Persistence — bot qayta ishga tushganda foydalanuvchi sessiyalari saqlanadi
@@ -14872,6 +14895,10 @@ def main():
         # Mini App yaratgan rejalashtirilgan postlarga publish jobini ulash (har 30s)
         app.job_queue.run_repeating(webapp_scheduled_scan_job, interval=30, first=20)
         logging.info("Mini App rejalashtirilgan post scan job rejalashtirildi (har 30s)")
+
+        # Mini App yaratgan avto qayta-reklamalarga kunlik jobni ulash (har 60s)
+        app.job_queue.run_repeating(webapp_autorepost_scan_job, interval=60, first=25)
+        logging.info("Mini App auto-repost scan job rejalashtirildi (har 60s)")
 
         # Avtomatik backup — har kuni ertalab 06:00 (UTC) = 11:00 Toshkent
         from datetime import time as dt_time
