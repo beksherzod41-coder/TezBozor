@@ -569,6 +569,76 @@ def api_seller_stats(authorization: str = Header(None)):
     return stats
 
 
+_SHOP_FIELDS = ("shop_name", "shop_address", "shop_landmark", "working_days",
+                "working_hours", "phone_number", "card_number", "card_owner",
+                "card_type", "shop_lat", "shop_lon")
+_VALID_CARD = {"uzcard", "humo", "visa", "mastercard"}
+
+
+@app.get("/api/seller/shop")
+def api_get_shop(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    return {k: user.get(k) for k in _SHOP_FIELDS}
+
+
+class ShopEdit(BaseModel):
+    shop_name: Optional[str] = None
+    shop_address: Optional[str] = None
+    shop_landmark: Optional[str] = None
+    working_days: Optional[str] = None
+    working_hours: Optional[str] = None
+    phone: Optional[str] = None
+    card_number: Optional[str] = None
+    card_owner: Optional[str] = None
+    card_type: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+@app.patch("/api/seller/shop")
+def api_edit_shop(p: ShopEdit, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    fields = {}
+    if p.shop_name is not None:
+        nm = p.shop_name.strip()
+        if not nm:
+            raise HTTPException(status_code=400, detail="name_required")
+        fields["shop_name"] = nm
+    for attr, col in (("shop_address", "shop_address"), ("shop_landmark", "shop_landmark"),
+                      ("working_days", "working_days"), ("working_hours", "working_hours"),
+                      ("card_owner", "card_owner")):
+        v = getattr(p, attr)
+        if v is not None:
+            fields[col] = v.strip() or None
+    if p.phone is not None and p.phone.strip():
+        ph = p.phone.strip()
+        digits = ph.lstrip("+")
+        if not digits.isdigit() or not (7 <= len(digits) <= 15):
+            raise HTTPException(status_code=400, detail="bad_phone")
+        fields["phone_number"] = ph
+    if p.card_number is not None:
+        cn = p.card_number.replace(" ", "").strip()
+        if cn:
+            if not cn.isdigit() or not (12 <= len(cn) <= 19):
+                raise HTTPException(status_code=400, detail="bad_card")
+            fields["card_number"] = cn
+        else:
+            fields["card_number"] = None
+    if p.card_type is not None:
+        if p.card_type and p.card_type not in _VALID_CARD:
+            raise HTTPException(status_code=400, detail="bad_card_type")
+        fields["card_type"] = p.card_type or None
+    if p.lat is not None:
+        fields["shop_lat"] = p.lat
+    if p.lon is not None:
+        fields["shop_lon"] = p.lon
+    if fields:
+        db.update_user(user["id"], **fields)
+    return {"ok": True}
+
+
 class OrderAction(BaseModel):
     action: str  # 'confirm' | 'reject'
 

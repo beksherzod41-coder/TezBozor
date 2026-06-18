@@ -400,6 +400,11 @@
     <div id="deliverBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="shopform">
+    <div class="cohead"><span>⚙️ Do'kon sozlamalari</span><span class="x" id="shopFormClose">✕</span></div>
+    <div id="shopFormBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1241,7 +1246,7 @@ document.getElementById('aiInp').addEventListener('keydown',e=>{ if(e.key==='Ent
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
-  v.innerHTML = `<div class="vhead">Do'konim</div>
+  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></div>
     <div class="seg" style="margin:0 12px 6px">
       <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:11px 6px;font-size:12.5px">📥 Buyurtma</div>
       <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:11px 6px;font-size:12.5px">📦 Mahsulot</div>
@@ -1249,10 +1254,73 @@ function loadSeller(){
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('[data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
+  document.getElementById('shopSetBtn').onclick = openShopSettings;
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else loadSellerStats();
 }
+
+// ---------- DO'KON SOZLAMALARI ----------
+let shopForm={};
+const CARD_TYPES=[['uzcard','🟦 Uzcard'],['humo','🟩 Humo'],['visa','🔵 Visa'],['mastercard','🔴 Mastercard']];
+async function openShopSettings(){
+  document.getElementById('shopform').classList.add('open');
+  document.getElementById('shopFormBody').innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const s=await api('/api/seller/shop');
+    shopForm={ shop_name:s.shop_name||'', shop_address:s.shop_address||'', shop_landmark:s.shop_landmark||'',
+      working_days:s.working_days||'', working_hours:s.working_hours||'', phone:s.phone_number||'',
+      card_number:s.card_number||'', card_owner:s.card_owner||'', card_type:s.card_type||'',
+      lat:s.shop_lat||null, lon:s.shop_lon||null };
+    renderShopSettings();
+  }catch(e){ document.getElementById('shopFormBody').innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+function _fld(label,id,val,ph){ return `<div class="cosec"><div class="lbl">${label}</div><input class="coaddr" id="${id}" style="min-height:auto" placeholder="${ph||''}" value="${esc(val||'')}"></div>`; }
+function renderShopSettings(){
+  const b=document.getElementById('shopFormBody');
+  b.innerHTML=`<div class="cobody">
+    ${_fld("Do'kon nomi","sfName",shopForm.shop_name,"Do'kon nomi")}
+    ${_fld("Manzil","sfAddr",shopForm.shop_address,"Ko'cha, uy")}
+    ${_fld("Mo'ljal","sfLand",shopForm.shop_landmark,"Yaqin mo'ljal")}
+    ${_fld("Ish kunlari","sfDays",shopForm.working_days,"Du-Sha")}
+    ${_fld("Ish soatlari","sfHours",shopForm.working_hours,"09:00-18:00")}
+    ${_fld("Telefon","sfPhone",shopForm.phone,"998901234567")}
+    <div class="cosec"><div class="lbl">Do'kon joylashuvi</div>
+      <button class="oact ok" id="sfLocBtn" style="width:100%;${shopForm.lat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${shopForm.lat?'✓ Joylashuv saqlangan (qayta olish)':'📍 Joylashuvni belgilash'}</button></div>
+    ${_fld("Karta raqami (P2P)","sfCard",shopForm.card_number,"8600 ...")}
+    ${_fld("Karta egasi","sfCardOwner",shopForm.card_owner,"F.I.Sh")}
+    <div class="cosec"><div class="lbl">Karta turi</div><div class="seg col">
+      ${CARD_TYPES.map(([k,l])=>`<div class="opt ${shopForm.card_type===k?'on':''}" data-ct="${k}">${l}</div>`).join('')}
+    </div></div>
+  </div>
+  <div class="cobar"><button id="sfSave">💾 Saqlash</button></div>`;
+  const bind=(id,key)=>{ const el=document.getElementById(id); if(el) el.oninput=()=>{ shopForm[key]=el.value; }; };
+  bind('sfName','shop_name'); bind('sfAddr','shop_address'); bind('sfLand','shop_landmark');
+  bind('sfDays','working_days'); bind('sfHours','working_hours'); bind('sfPhone','phone');
+  bind('sfCard','card_number'); bind('sfCardOwner','card_owner');
+  b.querySelectorAll('[data-ct]').forEach(o=>o.onclick=()=>{ shopForm.card_type = shopForm.card_type===o.dataset.ct?'':o.dataset.ct; renderShopSettings(); });
+  const lb=document.getElementById('sfLocBtn'); if(lb) lb.onclick=async()=>{ await captureLocation(l=>{ shopForm.lat=l.lat; shopForm.lon=l.lon; }, 'sfLocBtn'); renderShopSettings(); };
+  document.getElementById('sfSave').onclick=saveShopSettings;
+}
+async function saveShopSettings(){
+  const btn=document.getElementById('sfSave');
+  if(!(shopForm.shop_name||'').trim()){ tg.showAlert("Do'kon nomini kiriting."); return; }
+  btn.disabled=true; btn.textContent='Saqlanmoqda...';
+  try{
+    const r=await fetch('/api/seller/shop',{method:'PATCH',headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body:JSON.stringify({shop_name:shopForm.shop_name.trim(), shop_address:shopForm.shop_address.trim(),
+        shop_landmark:shopForm.shop_landmark.trim(), working_days:shopForm.working_days.trim(),
+        working_hours:shopForm.working_hours.trim(), phone:(shopForm.phone||'').trim(),
+        card_number:(shopForm.card_number||'').trim(), card_owner:(shopForm.card_owner||'').trim(),
+        card_type:shopForm.card_type||'', lat:shopForm.lat, lon:shopForm.lon})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('shopform').classList.remove('open');
+    tg.showAlert("✅ Saqlandi.");
+  }catch(e){ btn.disabled=false; btn.textContent='💾 Saqlash';
+    tg.showAlert(e.message==='bad_card'?"Karta raqami noto'g'ri.":e.message==='bad_phone'?"Telefon noto'g'ri.":("Xatolik: "+e.message)); }
+}
+document.getElementById('shopFormClose')?.addEventListener('click',()=>document.getElementById('shopform').classList.remove('open'));
 
 async function loadSellerStats(){
   const b=document.getElementById('sellerBody');
