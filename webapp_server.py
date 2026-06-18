@@ -193,6 +193,36 @@ def api_my_orders(authorization: str = Header(None)):
     return _rows(db.get_buyer_orders_list(buyer["id"]))
 
 
+class MeEdit(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    language: Optional[str] = None
+
+
+@app.patch("/api/me")
+def api_edit_me(p: MeEdit, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    fields = {}
+    if p.name is not None:
+        nm = p.name.strip()
+        if not nm or len(nm) > 60:
+            raise HTTPException(status_code=400, detail="bad_name")
+        fields["name"] = nm
+    if p.phone is not None and p.phone.strip():
+        ph = p.phone.strip()
+        digits = ph.lstrip("+")
+        if not digits.isdigit() or not (7 <= len(digits) <= 15):
+            raise HTTPException(status_code=400, detail="bad_phone")
+        fields["phone_number"] = ph
+    if p.language is not None:
+        if p.language not in ("uz", "ru"):
+            raise HTTPException(status_code=400, detail="bad_language")
+        fields["language"] = p.language
+    if fields:
+        db.update_user(user["id"], **fields)
+    return {"ok": True}
+
+
 # ============================================================
 # SOTUVCHI PANELI (D bo'lagi)
 # ============================================================

@@ -287,6 +287,11 @@
     <div id="prodformBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="meform">
+    <div class="cohead"><span>Profilni tahrirlash</span><span class="x" id="meClose">✕</span></div>
+    <div id="meformBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -622,8 +627,10 @@ async function loadProfile(){
   v.innerHTML = `<div class="vhead">Profil</div><div class="loading">Yuklanmoqda...</div>`;
   try{
     const me = await api('/api/me');
+    ME = me;
     const initial = (me.name||'?').trim().charAt(0).toUpperCase() || '👤';
     const roleLabel = me.role==='seller'?'Sotuvchi':(me.role==='admin'?'Administrator':'Xaridor');
+    const langLabel = me.language==='ru'?'Русский':'O‘zbekcha';
     v.innerHTML = `<div class="vhead">Profil</div>
       <div class="pcard">
         <div class="pava">${esc(initial)}</div>
@@ -633,12 +640,56 @@ async function loadProfile(){
       <div class="pinfo">
         <div class="prow"><span>📞 Telefon</span><b>${esc(me.phone||'—')}</b></div>
         ${me.username?`<div class="prow"><span>🔗 Username</span><b>@${esc(String(me.username).replace('@',''))}</b></div>`:''}
+        <div class="prow"><span>🌐 Til</span><b>${langLabel}</b></div>
         <div class="prow"><span>🗓 Ro'yxatdan</span><b>${fmtDate(me.created_at)}</b></div>
-      </div>`;
+      </div>
+      <div style="padding:12px"><button class="oact ok" id="meEditBtn" style="width:100%">✏️ Profilni tahrirlash</button></div>`;
+    document.getElementById('meEditBtn').onclick = openProfileEdit;
   }catch(e){
     v.innerHTML = `<div class="vhead">Profil</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
   }
 }
+
+// ---------- PROFILNI TAHRIRLASH ----------
+let meForm = {};
+function openProfileEdit(){
+  meForm = { name: (ME&&ME.name)||'', phone: (ME&&ME.phone)||'', language: (ME&&ME.language)||'uz' };
+  renderProfileEdit();
+  document.getElementById('meform').classList.add('open');
+}
+function renderProfileEdit(){
+  const body = document.getElementById('meformBody');
+  body.innerHTML = `<div class="cobody">
+    <div class="cosec"><div class="lbl">Ism</div>
+      <input class="coaddr" id="meName" style="min-height:auto" placeholder="Ismingiz" value="${esc(meForm.name)}"></div>
+    <div class="cosec"><div class="lbl">Telefon</div>
+      <input class="coaddr" id="mePhone" type="tel" inputmode="tel" style="min-height:auto" placeholder="998901234567" value="${esc(meForm.phone)}"></div>
+    <div class="cosec"><div class="lbl">Til</div>
+      <div class="seg">
+        <div class="opt ${meForm.language==='uz'?'on':''}" data-lng="uz">🇺🇿 O‘zbekcha</div>
+        <div class="opt ${meForm.language==='ru'?'on':''}" data-lng="ru">🇷🇺 Русский</div>
+      </div></div>
+  </div>
+  <div class="cobar"><button id="meSave">💾 Saqlash</button></div>`;
+  document.getElementById('meName').oninput = e=>meForm.name=e.target.value;
+  document.getElementById('mePhone').oninput = e=>meForm.phone=e.target.value;
+  body.querySelectorAll('[data-lng]').forEach(o=>o.onclick=()=>{ meForm.language=o.dataset.lng; renderProfileEdit(); });
+  document.getElementById('meSave').onclick = saveProfile;
+}
+async function saveProfile(){
+  const btn = document.getElementById('meSave');
+  if(!(meForm.name||'').trim()){ tg.showAlert("Ismingizni kiriting."); return; }
+  btn.disabled = true; btn.textContent = 'Saqlanmoqda...';
+  try{
+    const r = await fetch('/api/me', {method:'PATCH', headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body: JSON.stringify({name: meForm.name.trim(), phone: (meForm.phone||'').trim(), language: meForm.language})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    closeProfileEdit(); loadProfile();
+  }catch(e){ btn.disabled=false; btn.textContent='💾 Saqlash'; tg.showAlert("Saqlanmadi: "+e.message); }
+}
+function closeProfileEdit(){ document.getElementById('meform').classList.remove('open'); }
+document.getElementById('meClose').onclick = closeProfileEdit;
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
 let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {};
