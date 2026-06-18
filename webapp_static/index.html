@@ -433,12 +433,73 @@ try{ tg.setHeaderColor('#f2f3f5'); tg.setBackgroundColor('#f2f3f5'); }catch(e){}
 const AUTH = "tma " + (tg.initData || "");
 let activeCat = null, searchTimer = null, botUsername = null;
 
+// ---------- TIL (i18n: uz/ru) ----------
+let LANG = (function(){ try{ const lc=((tg.initDataUnsafe||{}).user||{}).language_code||''; return String(lc).startsWith('ru')?'ru':'uz'; }catch(e){ return 'uz'; } })();
+const I18N = {
+  nav_catalog:{uz:"Katalog",ru:"Каталог"}, nav_orders:{uz:"Buyurtmalar",ru:"Заказы"},
+  nav_shop:{uz:"Do'kon",ru:"Магазин"}, nav_profile:{uz:"Profil",ru:"Профиль"},
+  search_products:{uz:"Mahsulot qidirish...",ru:"Поиск товаров..."},
+  search_shops:{uz:"Do'kon qidirish...",ru:"Поиск магазинов..."},
+  tab_products:{uz:"🛍 Mahsulotlar",ru:"🛍 Товары"}, tab_shops:{uz:"🏪 Do'konlar",ru:"🏪 Магазины"},
+  all:{uz:"Hammasi",ru:"Все"}, loading:{uz:"Yuklanmoqda...",ru:"Загрузка..."},
+  nothing_found:{uz:"Hech narsa topilmadi",ru:"Ничего не найдено"},
+  try_other:{uz:"Boshqa so'rov yoki kategoriyani sinab ko'ring",ru:"Попробуйте другой запрос или категорию"},
+  new_badge:{uz:"YANGI",ru:"НОВЫЙ"}, sale_badge:{uz:"СКИДКА",ru:"СКИДКА"},
+  rating_new:{uz:"Yangi",ru:"Новый"}, add_to_cart:{uz:"➕ Savatga",ru:"➕ В корзину"},
+  buy_now:{uz:"🛒 Buyurtma berish",ru:"🛒 Заказать"}, out_of_stock:{uz:"Hozircha mavjud emas",ru:"Нет в наличии"},
+  available_n:{uz:"Mavjud",ru:"В наличии"}, sold_out:{uz:"Tugagan",ru:"Закончился"},
+  reviews_word:{uz:"sharh",ru:"отзыв"}, sum:{uz:"so'm",ru:"сум"},
+  // checkout
+  co_title:{uz:"Buyurtma berish",ru:"Оформление заказа"}, qty:{uz:"Miqdor",ru:"Количество"},
+  delivery:{uz:"Yetkazib berish",ru:"Доставка"}, pickup:{uz:"🚶 Olib ketaman",ru:"🚶 Самовывоз"},
+  courier:{uz:"🚚 Yetkazib berish",ru:"🚚 Доставка"}, address_ph:{uz:"Manzil: ko'cha, uy, mo'ljal...",ru:"Адрес: улица, дом, ориентир..."},
+  send_location:{uz:"📍 Joylashuvni yuborish",ru:"📍 Отправить геолокацию"}, loc_got:{uz:"✓ Joylashuv olindi (qayta olish)",ru:"✓ Геолокация получена (заново)"},
+  payment:{uz:"To'lov usuli",ru:"Способ оплаты"}, pay_cash:{uz:"💵 Naqd pul",ru:"💵 Наличные"},
+  pay_terminal:{uz:"💳 Terminal (karta)",ru:"💳 Терминал (карта)"}, pay_p2p:{uz:"📲 Karta raqamiga (P2P)",ru:"📲 На карту (P2P)"},
+  total:{uz:"Jami",ru:"Итого"}, confirm_order:{uz:"✅ Buyurtmani tasdiqlash",ru:"✅ Подтвердить заказ"},
+  sending:{uz:"Yuborilmoqda...",ru:"Отправка..."}, need_address:{uz:"Yetkazib berish uchun manzilni kiriting.",ru:"Укажите адрес для доставки."},
+  order_ok:{uz:"Buyurtma qabul qilindi!",ru:"Заказ принят!"}, order_num:{uz:"Raqamingiz",ru:"Ваш номер"},
+  seller_contacts:{uz:"Sotuvchi tez orada bog'lanadi.",ru:"Продавец скоро свяжется."}, back_to_catalog:{uz:"Katalogga qaytish",ru:"Вернуться в каталог"},
+  // cart
+  cart_title:{uz:"🛒 Savat",ru:"🛒 Корзина"}, cart_empty:{uz:"Savat bo'sh",ru:"Корзина пуста"},
+  cart_add_hint:{uz:"Katalogdan mahsulot qo'shing",ru:"Добавьте товары из каталога"},
+  // orders
+  my_orders:{uz:"Buyurtmalarim",ru:"Мои заказы"}, my_debts:{uz:"💳 Qarzlarim",ru:"💳 Мои долги"},
+  no_orders:{uz:"Hali buyurtmangiz yo'q",ru:"У вас пока нет заказов"}, pick_from_catalog:{uz:"Katalogdan mahsulot tanlang",ru:"Выберите товар из каталога"},
+  st_pending:{uz:"⏳ Yangi",ru:"⏳ Новый"}, st_confirmed:{uz:"✅ Tasdiqlangan",ru:"✅ Подтверждён"},
+  st_delivered:{uz:"🚚 Yetkazildi",ru:"🚚 Доставлен"}, st_cancelled:{uz:"❌ Bekor qilindi",ru:"❌ Отменён"},
+  pcs:{uz:"dona",ru:"шт"}, debt:{uz:"Qarz",ru:"Долг"}, write_msg:{uz:"💬 Xabar yozish",ru:"💬 Написать"},
+  cancel_order:{uz:"❌ Bekor qilish",ru:"❌ Отменить"}, rate_order:{uz:"⭐ Baholash",ru:"⭐ Оценить"},
+  // profile
+  prof_buyer:{uz:"Xaridor",ru:"Покупатель"}, prof_seller:{uz:"Sotuvchi",ru:"Продавец"}, prof_admin:{uz:"Administrator",ru:"Администратор"},
+  phone:{uz:"📞 Telefon",ru:"📞 Телефон"}, lang_label:{uz:"🌐 Til",ru:"🌐 Язык"}, registered:{uz:"🗓 Ro'yxatdan",ru:"🗓 Регистрация"},
+  edit_profile:{uz:"✏️ Profilni tahrirlash",ru:"✏️ Редактировать профиль"}, become_seller:{uz:"🏪 Sotuvchi bo'lish",ru:"🏪 Стать продавцом"},
+  contact_admin:{uz:"📞 Admin bilan bog'lanish",ru:"📞 Связь с админом"}, invite_friends:{uz:"🎁 Do'stlarni taklif qiling",ru:"🎁 Пригласите друзей"},
+  invited:{uz:"Taklif qilingan",ru:"Приглашено"}, share_link:{uz:"📨 Havolani ulashish",ru:"📨 Поделиться ссылкой"},
+  // ai / chat
+  ai_title:{uz:"🤖 AI yordamchi",ru:"🤖 AI-помощник"}, ai_ph:{uz:"Nima qidiryapsiz?...",ru:"Что вы ищете?..."},
+  chat_ph:{uz:"Xabar yozing...",ru:"Напишите сообщение..."}, no_msgs:{uz:"Hali xabar yo'q.",ru:"Сообщений пока нет."},
+  first_write:{uz:"Birinchi bo'lib yozing 👇",ru:"Напишите первым 👇"},
+  err:{uz:"Xatolik",ru:"Ошибка"}, open_in_tg:{uz:"Mini App'ni Telegram orqali oching.",ru:"Откройте Mini App через Telegram."},
+};
+function L(k){ const e=I18N[k]; return e ? (e[LANG]||e.uz) : k; }
+function activeCatModeShops(){ try{ return document.querySelector('#catMode .opt[data-mode=shops]').classList.contains('on'); }catch(e){ return false; } }
+function applyStaticI18n(){
+  try{ document.getElementById('search').placeholder = activeCatModeShops()?L('search_shops'):L('search_products'); }catch(e){}
+  try{ document.querySelector('#catMode .opt[data-mode=products]').textContent = L('tab_products'); }catch(e){}
+  try{ document.querySelector('#catMode .opt[data-mode=shops]').textContent = L('tab_shops'); }catch(e){}
+  const navmap={catalog:'nav_catalog',orders:'nav_orders',seller:'nav_shop',profile:'nav_profile'};
+  document.querySelectorAll('.navitem').forEach(n=>{ const s=n.querySelector('small'); if(s&&navmap[n.dataset.tab]) s.textContent=L(navmap[n.dataset.tab]); });
+  try{ document.getElementById('aiInp').placeholder = L('ai_ph'); }catch(e){}
+  try{ document.getElementById('chatInp').placeholder = L('chat_ph'); }catch(e){}
+}
+
 async function api(path){
   const r = await fetch(path, {headers:{Authorization: AUTH}});
   if(!r.ok) throw new Error("HTTP "+r.status);
   return r.json();
 }
-function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,' ') + " so'm"; }
+function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,' ') + " " + L('sum'); }
 function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function rating(p){ return (p.prod_avg_rating || p.avg_rating || 0); }
@@ -452,7 +513,7 @@ function isNew(p){
 
 function starHtml(p){
   const r = rating(p);
-  if(!r) return `<span class="stars" style="color:var(--hint)">Yangi</span>`;
+  if(!r) return `<span class="stars" style="color:var(--hint)">${L('rating_new')}</span>`;
   return `<span class="stars"><b>★</b> ${r.toFixed(1)}</span>`;
 }
 
@@ -462,15 +523,15 @@ function cardHtml(p){
     ? `<img src="${imgUrl(p.image_url)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>🖼️</div>'">`
     : `<div class="ph">🖼️</div>`;
   let tag = '';
-  if(op) tag = `<span class="tag sale">CHEGIRMA</span>`;
-  else if(isNew(p)) tag = `<span class="tag new">YANGI</span>`;
+  if(op) tag = `<span class="tag sale">${L('sale_badge')}</span>`;
+  else if(isNew(p)) tag = `<span class="tag new">${L('new_badge')}</span>`;
   return `<div class="card" data-id="${p.id}">
       <div class="imgwrap">${img}${tag}</div>
       <div class="body">
         <div><span class="price">${money(p.price)}</span>${op?`<span class="oldprice">${money(op)}</span>`:''}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${starHtml(p)} <span class="shopname">${esc(p.shop_name||'')}</span></div>
-        <button class="buy" data-cart="${p.id}">➕ Savatga</button>
+        <button class="buy" data-cart="${p.id}">${L('add_to_cart')}</button>
       </div>
     </div>`;
 }
@@ -489,7 +550,7 @@ async function loadCategories(){
     const cats = await api('/api/categories');
     CATS = cats;
     const chips = document.getElementById('chips');
-    chips.innerHTML = `<div class="chip active" data-cat="">Hammasi</div>` +
+    chips.innerHTML = `<div class="chip active" data-cat="">${L('all')}</div>` +
       cats.map(c=>`<div class="chip" data-cat="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('');
     chips.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
       chips.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
@@ -512,7 +573,7 @@ async function loadProducts(){
     const items = await api(url);
     CATALOG_ITEMS = items;
     if(!items.length){
-      content.innerHTML = `<div class="empty"><span class="big">🔍</span>Hech narsa topilmadi<br><small>Boshqa so'rov yoki kategoriyani sinab ko'ring</small></div>`;
+      content.innerHTML = `<div class="empty"><span class="big">🔍</span>${L('nothing_found')}<br><small>${L('try_other')}</small></div>`;
       return;
     }
     content.innerHTML = `<div class="grid">${items.map(cardHtml).join('')}</div>`;
@@ -523,7 +584,7 @@ async function loadProducts(){
       if(p) cartAdd(p);
     });
   }catch(e){
-    content.innerHTML = `<div class="empty"><span class="big">⚠️</span>Xatolik: ${esc(e.message)}<br><small>Mini App'ni Telegram orqali oching.</small></div>`;
+    content.innerHTML = `<div class="empty"><span class="big">⚠️</span>${L('err')}: ${esc(e.message)}<br><small>${L('open_in_tg')}</small></div>`;
   }
 }
 
@@ -614,7 +675,7 @@ async function captureLocation(setter, btnId){
 
 // ---------- CHECKOUT (to'liq app ichida) ----------
 let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='', coLat=null, coLon=null;
-const PAYMENTS = [['cash',"💵 Naqd pul"],['terminal',"💳 Terminal (karta)"],['p2p',"📲 Karta raqamiga (P2P)"]];
+function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
 
 async function openCheckout(id){
   const co = document.getElementById('checkout');
@@ -642,35 +703,35 @@ function renderCheckout(){
     <div class="cobody">
       <div class="coprod">${img}<div><div class="nm">${esc(p.name)}</div><div class="pr">${money(p.price)}</div></div></div>
       <div class="cosec">
-        <div class="lbl">Miqdor</div>
+        <div class="lbl">${L('qty')}</div>
         <div class="stepper">
           <button class="stepbtn" id="qMinus" ${coQty<=1?'disabled':''}>−</button>
           <div class="qv">${coQty}</div>
           <button class="stepbtn" id="qPlus" ${coQty>=max?'disabled':''}>+</button>
         </div>
-        ${p.stock_count!=null?`<div class="stockhint">Mavjud: ${p.stock_count} dona</div>`:''}
+        ${p.stock_count!=null?`<div class="stockhint">${L('available_n')}: ${p.stock_count} ${L('pcs')}</div>`:''}
       </div>
       <div class="cosec">
-        <div class="lbl">Yetkazib berish</div>
+        <div class="lbl">${L('delivery')}</div>
         <div class="seg">
-          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">🚶 Olib ketaman</div>
-          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">🚚 Yetkazib berish</div>
+          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">${L('pickup')}</div>
+          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">${L('courier')}</div>
         </div>
         <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
-          <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;${coLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${coLat?'✓ Joylashuv olindi (qayta olish)':'📍 Joylashuvni yuborish'}</button>
-          <textarea class="coaddr" id="coAddr" placeholder="Manzil: ko'cha, uy raqami, mo'ljal...">${esc(coAddrText)}</textarea>
+          <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;${coLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${coLat?L('loc_got'):L('send_location')}</button>
+          <textarea class="coaddr" id="coAddr" placeholder="${L('address_ph')}">${esc(coAddrText)}</textarea>
         </div>
       </div>
       <div class="cosec">
-        <div class="lbl">To'lov usuli</div>
+        <div class="lbl">${L('payment')}</div>
         <div class="seg col">
-          ${PAYMENTS.map(([k,l])=>`<div class="opt ${coPayment===k?'on':''}" data-pay="${k}">${l}</div>`).join('')}
+          ${PAYMENTS().map(([k,l])=>`<div class="opt ${coPayment===k?'on':''}" data-pay="${k}">${l}</div>`).join('')}
         </div>
       </div>
     </div>
     <div class="cobar">
-      <div class="cototal"><span class="t1">Jami (${coQty} dona)</span><span class="t2">${money(total)}</span></div>
-      <button id="coSubmit">✅ Buyurtmani tasdiqlash</button>
+      <div class="cototal"><span class="t1">${L('total')} (${coQty} ${L('pcs')})</span><span class="t2">${money(total)}</span></div>
+      <button id="coSubmit">${L('confirm_order')}</button>
     </div>`;
   body.querySelector('#qMinus').onclick=()=>{ if(coQty>1){coQty--; renderCheckout();} };
   body.querySelector('#qPlus').onclick=()=>{ if(coQty<coMaxStock()){coQty++; renderCheckout();} };
@@ -686,7 +747,7 @@ function renderCheckout(){
 async function submitOrder(){
   const btn = document.getElementById('coSubmit');
   if(coDelivery==='delivery' && !(coAddrText||'').trim()){
-    tg.showAlert("Yetkazib berish uchun manzilni kiriting."); return;
+    tg.showAlert(L("need_address")); return;
   }
   btn.disabled = true; btn.textContent = 'Yuborilmoqda...';
   try{
@@ -715,10 +776,10 @@ function showOrderSuccess(oid){
   document.getElementById('checkoutBody').innerHTML = `
     <div class="cosuccess">
       <div class="ico">🎉</div>
-      <h3>Buyurtma qabul qilindi!</h3>
-      <p>Raqamingiz: <span class="oid">#${oid}</span><br>Sotuvchi tez orada siz bilan bog'lanadi.</p>
+      <h3>${L('order_ok')}</h3>
+      <p>${L('order_num')}: <span class="oid">#${oid}</span><br>${L('seller_contacts')}</p>
       <div style="width:100%;margin-top:26px">
-        <button class="stepbtn" style="width:100%;height:auto;padding:15px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:16px;font-weight:700;box-shadow:0 6px 18px rgba(112,0,255,.32)" onclick="closeCheckout(); closeDetail();">Katalogga qaytish</button>
+        <button class="stepbtn" style="width:100%;height:auto;padding:15px;border-radius:14px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-size:16px;font-weight:700;box-shadow:0 6px 18px rgba(112,0,255,.32)" onclick="closeCheckout(); closeDetail();">${L('back_to_catalog')}</button>
       </div>
     </div>`;
 }
@@ -769,7 +830,7 @@ function closeCart(){ document.getElementById('cartview').classList.remove('open
 function renderCart(){
   const body=document.getElementById('cartBody');
   const items=Object.entries(CART.items);
-  if(!items.length){ body.innerHTML=`<div class="cartempty"><span class="big">🛒</span>Savat bo'sh<br><small>Katalogdan mahsulot qo'shing</small></div>`; return; }
+  if(!items.length){ body.innerHTML=`<div class="cartempty"><span class="big">🛒</span>${L('cart_empty')}<br><small>${L('cart_add_hint')}</small></div>`; return; }
   const rows=items.map(([pid,it])=>{
     const img=it.image?`<img src="${imgUrl(it.image)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`:`<div class="ph">🖼️</div>`;
     return `<div class="citem">${img}
@@ -784,23 +845,23 @@ function renderCart(){
   body.innerHTML=`<div class="cobody">
     <div style="font-size:13px;color:var(--hint)">🏪 ${esc(CART.seller_name||'')}</div>
     ${rows}
-    <div class="cosec"><div class="lbl">Yetkazib berish</div>
+    <div class="cosec"><div class="lbl">${L('delivery')}</div>
       <div class="seg">
-        <div class="opt ${kDlv==='pickup'?'on':''}" data-kdlv="pickup">🚶 Olib ketaman</div>
-        <div class="opt ${kDlv==='delivery'?'on':''}" data-kdlv="delivery">🚚 Yetkazib berish</div>
+        <div class="opt ${kDlv==='pickup'?'on':''}" data-kdlv="pickup">${L('pickup')}</div>
+        <div class="opt ${kDlv==='delivery'?'on':''}" data-kdlv="delivery">${L('courier')}</div>
       </div>
       <div style="${kDlv==='delivery'?'':'display:none'}">
-        <button class="oact ok" id="kLocBtn" style="width:100%;margin-top:10px;${kLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${kLat?'✓ Joylashuv olindi (qayta olish)':'📍 Joylashuvni yuborish'}</button>
-        <textarea class="coaddr" id="kAddrInp" placeholder="Manzil: ko'cha, uy, mo'ljal...">${esc(kAddr)}</textarea>
+        <button class="oact ok" id="kLocBtn" style="width:100%;margin-top:10px;${kLat?'background:#e8f8f0;color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${kLat?L('loc_got'):L('send_location')}</button>
+        <textarea class="coaddr" id="kAddrInp" placeholder="${L('address_ph')}">${esc(kAddr)}</textarea>
       </div>
     </div>
-    <div class="cosec"><div class="lbl">To'lov usuli</div>
-      <div class="seg col">${PAYMENTS.map(([k,l])=>`<div class="opt ${kPay===k?'on':''}" data-kpay="${k}">${l}</div>`).join('')}</div>
+    <div class="cosec"><div class="lbl">${L('payment')}</div>
+      <div class="seg col">${PAYMENTS().map(([k,l])=>`<div class="opt ${kPay===k?'on':''}" data-kpay="${k}">${l}</div>`).join('')}</div>
     </div>
   </div>
   <div class="cobar">
-    <div class="cototal"><span class="t1">Jami (${cartCount()} dona)</span><span class="t2">${money(cartTotal())}</span></div>
-    <button id="kSubmit">✅ Buyurtma berish</button>
+    <div class="cototal"><span class="t1">${L('total')} (${cartCount()} ${L('pcs')})</span><span class="t2">${money(cartTotal())}</span></div>
+    <button id="kSubmit">${L('confirm_order')}</button>
   </div>`;
   body.querySelectorAll('[data-dec]').forEach(b=>b.onclick=()=>cartSetQty(b.dataset.dec,-1));
   body.querySelectorAll('[data-inc]').forEach(b=>b.onclick=()=>cartSetQty(b.dataset.inc,1));
@@ -815,7 +876,7 @@ function renderCart(){
 
 async function cartCheckout(){
   const btn=document.getElementById('kSubmit');
-  if(kDlv==='delivery' && !(kAddr||'').trim()){ tg.showAlert("Yetkazib berish uchun manzilni kiriting."); return; }
+  if(kDlv==='delivery' && !(kAddr||'').trim()){ tg.showAlert(L("need_address")); return; }
   const items=Object.entries(CART.items).map(([pid,it])=>({product_id:Number(pid), quantity:it.qty}));
   if(!items.length) return;
   btn.disabled=true; btn.textContent='Yuborilmoqda...';
@@ -827,7 +888,7 @@ async function cartCheckout(){
     const res=await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     CART={seller_id:null,seller_name:'',items:{}}; _saveCart();
-    document.getElementById('cartBody').innerHTML=`<div class="cosuccess"><div class="ico">🎉</div><h3>Buyurtma qabul qilindi!</h3><p>Raqamingiz: <span class="oid">#${res.group_id}</span> · ${res.count} ta mahsulot<br>Sotuvchi tez orada bog'lanadi.</p><div style="width:100%;margin-top:24px"><button class="oact ok" style="width:100%" onclick="closeCart()">Katalogga qaytish</button></div></div>`;
+    document.getElementById('cartBody').innerHTML=`<div class="cosuccess"><div class="ico">🎉</div><h3>${L('order_ok')}</h3><p>${L('order_num')}: <span class="oid">#${res.group_id}</span> · ${res.count} ${L('pcs')}<br>${L('seller_contacts')}</p><div style="width:100%;margin-top:24px"><button class="oact ok" style="width:100%" onclick="closeCart()">${L('back_to_catalog')}</button></div></div>`;
   }catch(e){ btn.disabled=false; btn.textContent='✅ Buyurtma berish'; tg.showAlert("Buyurtma berilmadi: "+e.message); }
 }
 
@@ -852,7 +913,7 @@ async function loadChat(){
     chatMe=d.me;
     document.getElementById('chatTitle').textContent='💬 '+(d.counterparty||'Xabarlar');
     const wrap=document.getElementById('chatWrap');
-    if(!d.messages.length){ wrap.innerHTML=`<div class="chatempty">Hali xabar yo'q.<br>Birinchi bo'lib yozing 👇</div>`; return; }
+    if(!d.messages.length){ wrap.innerHTML=`<div class="chatempty">${L('no_msgs')}<br>${L('first_write')}</div>`; return; }
     wrap.innerHTML=d.messages.map(m=>{
       const me=m.sender_id===chatMe;
       const tm=fmtDate(m.created_at); const hm=tm.length>=5?tm.slice(-5):tm;
@@ -943,7 +1004,7 @@ document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
   document.querySelectorAll('#catMode .opt').forEach(x=>x.classList.toggle('on',x.dataset.mode===catMode));
   document.getElementById('chips').style.display = catMode==='products'?'':'none';
   document.getElementById('search').value='';
-  document.getElementById('search').placeholder = catMode==='products'?'Mahsulot qidirish...':"Do'kon qidirish...";
+  document.getElementById('search').placeholder = L(catMode==='products'?'search_products':'search_shops');
   document.getElementById('cartFab').style.display = catMode==='products'? (cartCount()>0?'flex':'none') : 'none';
   if(catMode==='products') loadProducts(); else loadShops();
 });
@@ -1004,12 +1065,11 @@ document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
   switchTab(n.dataset.tab);
 });
 
-const ORDER_STATUS = {
-  pending:  ["⏳ Yangi","st-pending"],
-  confirmed:["✅ Tasdiqlangan","st-ok"],
-  delivered:["🚚 Yetkazildi","st-done"],
-  cancelled:["❌ Bekor qilindi","st-cancel"],
-};
+function ORDER_STATUS(s){
+  const m={pending:['st_pending','st-pending'],confirmed:['st_confirmed','st-ok'],
+           delivered:['st_delivered','st-done'],cancelled:['st_cancelled','st-cancel']};
+  const e=m[s]; return e?[L(e[0]),e[1]]:[esc(s||'?'),'st-pending'];
+}
 function fmtDate(s){
   if(!s) return '';
   const d = new Date(String(s).replace(' ','T')+'Z');
@@ -1018,7 +1078,7 @@ function fmtDate(s){
 }
 
 function orderCardHtml(o){
-  const st = ORDER_STATUS[o.status] || [esc(o.status||'?'),"st-pending"];
+  const st = ORDER_STATUS(o.status);
   let contact = '';
   if(o.seller_username)
     contact = `<button class="ocontact" data-un="${esc(String(o.seller_username).replace('@',''))}">💬 Sotuvchi bilan bog'lanish</button>`;
@@ -1027,27 +1087,27 @@ function orderCardHtml(o){
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
     <div class="oname">${esc(o.product_name||'')}</div>
-    <div class="ometa">${o.quantity} dona · <b>${money(o.total_price)}</b></div>
+    <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     <div class="oshop">🏪 ${esc(o.shop_name||'')}</div>
-    ${(o.amount_due && o.amount_due>0)?`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`:''}
+    ${(o.amount_due && o.amount_due>0)?`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`:''}
     ${contact}
-    <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">💬 Xabar yozish</button>
-    ${(o.status==='pending' && !o.order_group_id)?`<button class="oact no" data-cancel="${o.id}" style="width:100%;margin-top:8px">❌ Bekor qilish</button>`:''}
-    ${o.status==='delivered'?`<button class="oact ok" data-review="${o.id}" style="width:100%;margin-top:8px">⭐ Baholash</button>`:''}
+    <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">${L('write_msg')}</button>
+    ${(o.status==='pending' && !o.order_group_id)?`<button class="oact no" data-cancel="${o.id}" style="width:100%;margin-top:8px">${L('cancel_order')}</button>`:''}
+    ${o.status==='delivered'?`<button class="oact ok" data-review="${o.id}" style="width:100%;margin-top:8px">${L('rate_order')}</button>`:''}
   </div>`;
 }
 
 let MY_ORDERS = [];
 async function loadMyOrders(){
   const v = document.getElementById('viewOrders');
-  const head = `<div class="vhead">Buyurtmalarim</div><div style="padding:0 12px 4px"><button class="oact ok" id="debtsBtn" style="width:100%;background:var(--bg);color:var(--accent)">💳 Qarzlarim</button></div>`;
+  const head = `<div class="vhead">${L('my_orders')}</div><div style="padding:0 12px 4px"><button class="oact ok" id="debtsBtn" style="width:100%;background:var(--bg);color:var(--accent)">${L('my_debts')}</button></div>`;
   v.innerHTML = head + `<div class="loading">Yuklanmoqda...</div>`;
   document.getElementById('debtsBtn').onclick = openDebts;
   try{
     const orders = await api('/api/my/orders');
     MY_ORDERS = orders;
     if(!orders.length){
-      v.innerHTML = head + `<div class="empty"><span class="big">📦</span>Hali buyurtmangiz yo'q<br><small>Katalogdan mahsulot tanlang</small></div>`;
+      v.innerHTML = head + `<div class="empty"><span class="big">📦</span>${L('no_orders')}<br><small>${L('pick_from_catalog')}</small></div>`;
       document.getElementById('debtsBtn').onclick = openDebts;
       return;
     }
@@ -1083,7 +1143,7 @@ async function loadProfile(){
     const me = await api('/api/me');
     ME = me;
     const initial = (me.name||'?').trim().charAt(0).toUpperCase() || '👤';
-    const roleLabel = me.role==='seller'?'Sotuvchi':(me.role==='admin'?'Administrator':'Xaridor');
+    const roleLabel = me.role==='seller'?L('prof_seller'):(me.role==='admin'?L('prof_admin'):L('prof_buyer'));
     const langLabel = me.language==='ru'?'Русский':'O‘zbekcha';
     v.innerHTML = `<div class="vhead">Profil</div>
       <div class="pcard">
@@ -1092,20 +1152,20 @@ async function loadProfile(){
         <div class="prole">${roleLabel}</div>
       </div>
       <div class="pinfo">
-        <div class="prow"><span>📞 Telefon</span><b>${esc(me.phone||'—')}</b></div>
+        <div class="prow"><span>${L('phone')}</span><b>${esc(me.phone||'—')}</b></div>
         ${me.username?`<div class="prow"><span>🔗 Username</span><b>@${esc(String(me.username).replace('@',''))}</b></div>`:''}
-        <div class="prow"><span>🌐 Til</span><b>${langLabel}</b></div>
-        <div class="prow"><span>🗓 Ro'yxatdan</span><b>${fmtDate(me.created_at)}</b></div>
+        <div class="prow"><span>${L('lang_label')}</span><b>${langLabel}</b></div>
+        <div class="prow"><span>${L('registered')}</span><b>${fmtDate(me.created_at)}</b></div>
       </div>
       ${me.referral_code?`<div class="pinfo" style="padding:14px">
-        <div style="font-size:12px;color:var(--hint);font-weight:600;text-transform:uppercase">🎁 Do'stlarni taklif qiling</div>
-        <div style="font-size:13px;margin:6px 0 10px">Taklif qilingan: <b>${me.referral_count||0}</b></div>
-        <button class="oact ok" id="refShareBtn" style="width:100%">📨 Havolani ulashish</button>
+        <div style="font-size:12px;color:var(--hint);font-weight:600;text-transform:uppercase">${L('invite_friends')}</div>
+        <div style="font-size:13px;margin:6px 0 10px">${L('invited')}: <b>${me.referral_count||0}</b></div>
+        <button class="oact ok" id="refShareBtn" style="width:100%">${L('share_link')}</button>
       </div>`:''}
       <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
-        <button class="oact ok" id="meEditBtn" style="width:100%">✏️ Profilni tahrirlash</button>
-        ${(me.role!=='seller' && !me.is_approved)?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">🏪 Sotuvchi bo'lish</button>`:''}
-        <button class="oact no" id="contactAdminBtn" style="width:100%;background:var(--bg);color:var(--accent)">📞 Admin bilan bog'lanish</button>
+        <button class="oact ok" id="meEditBtn" style="width:100%">${L('edit_profile')}</button>
+        ${(me.role!=='seller' && !me.is_approved)?`<button class="oact ok" id="becomeSellerBtn" style="width:100%;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('become_seller')}</button>`:''}
+        <button class="oact no" id="contactAdminBtn" style="width:100%;background:var(--bg);color:var(--accent)">${L('contact_admin')}</button>
       </div>`;
     document.getElementById('meEditBtn').onclick = openProfileEdit;
     const rb=document.getElementById('refShareBtn'); if(rb) rb.onclick=()=>shareReferral(me.referral_code);
@@ -1163,8 +1223,11 @@ let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, B
 async function loadMe(){
   try{ ME = await api('/api/me'); }catch(e){ ME = null; }
   try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
+  // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz
+  if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); if(catMode==='products') loadProducts(); }
   if(ME && (ME.role==='seller' || ME.role==='admin'))
     document.getElementById('navSeller').style.display = '';
+  applyStaticI18n();
 }
 
 function shareReferral(code){
@@ -1602,7 +1665,7 @@ async function loadSellerStats(){
 }
 
 function sellerOrderCard(o){
-  const st = ORDER_STATUS[o.status] || [esc(o.status||'?'),'st-pending'];
+  const st = ORDER_STATUS(o.status);
   const dlv = o.delivery_type==='delivery' ? '🚚 Yetkazib berish' : '🚶 Olib ketish';
   const contact = o.buyer_phone ? `<a class="ocontact" href="tel:${esc(o.buyer_phone)}">📞 ${esc(o.buyer_phone)}</a>` : '';
   let actions='';
@@ -1610,11 +1673,11 @@ function sellerOrderCard(o){
     actions=`<div class="oactions"><button class="oact ok" data-oid="${o.id}" data-act="confirm">✅ Tasdiqlash</button><button class="oact no" data-oid="${o.id}" data-act="reject">❌ Rad etish</button></div>`;
   else if(o.status==='confirmed')
     actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">📦 Berildi (to'lov)</button></div>`;
-  if(o.amount_due && o.amount_due>0) actions=`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`+actions;
+  if(o.amount_due && o.amount_due>0) actions=`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`+actions;
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
     <div class="oname">${esc(o.product_name||'')}</div>
-    <div class="ometa">${o.quantity} dona · <b>${money(o.total_price)}</b></div>
+    <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
     ${o.delivery_address?`<div class="oshop">📍 ${esc(o.delivery_address)}</div>`:''}
     ${contact}
@@ -1873,6 +1936,7 @@ function confirmDeleteProduct(){
 function closeProductForm(){ document.getElementById('prodform').classList.remove('open'); }
 document.getElementById('pfClose').onclick = closeProductForm;
 
+applyStaticI18n();
 loadMe();
 loadCategories();
 loadProducts();
