@@ -25,7 +25,7 @@ try:
 except Exception:
     pass
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, File, UploadFile
 from fastapi.responses import Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -282,6 +282,143 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
         logging.warning(f"sotuvchi xabarini tahrirlash xato (order {order_id}): {e}")
 
     return {"ok": True, "status": new_status}
+
+
+# ---- Mahsulot boshqaruvi (D2) ----
+MAX_PHOTO_BYTES = 6 * 1024 * 1024
+
+
+def _own_product_or_403(user, product_id):
+    prod = db.get_product_by_id(product_id)
+    if not prod:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not (prod.get("seller_id") == user.get("id") or user.get("role") == "admin"):
+        raise HTTPException(status_code=403, detail="not_your_product")
+    return prod
+
+
+@app.post("/api/seller/product/photo")
+async def api_product_photo(file: UploadFile = File(...), authorization: str = Header(None)):
+    """Rasmni Telegram'ga yuborib file_id oladi (so'ng xabarni o'chiradi — file_id amal qiladi).
+    Shunday qilib web upload (baytlar) bot ishlatadigan Telegram file_id'ga aylanadi."""
+    user = dict(_buyer_from_auth(authorization))
+    seller_tg = user.get("telegram_id")
+    if not seller_tg:
+        raise HTTPException(status_code=400, detail="no_chat")
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="no_token")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                data={"chat_id": str(seller_tg)},
+                files={"photo": (file.filename or "photo.jpg", data,
+                                 file.content_type or "image/jpeg")},
+            )
+            res = r.json()
+    except Exception as e:
+        logging.error(f"sendPhoto xato: {e}")
+        raise HTTPException(status_code=502, detail="upload_failed")
+    if not res.get("ok") or not (res.get("result") or {}).get("photo"):
+        raise HTTPException(status_code=502, detail="telegram_rejected")
+    msg = res["result"]
+    file_id = msg["photo"][-1]["file_id"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                              json={"chat_id": seller_tg, "message_id": msg["message_id"]})
+    except Exception:
+        pass
+    return {"file_id": file_id}
+
+
+class ProductIn(BaseModel):
+    name: str
+    price: float
+    category_id: Optional[int] = None
+    description: Optional[str] = None
+    stock_count: Optional[int] = None
+    image_url: Optional[str] = None  # Telegram file_id
+
+
+@app.post("/api/seller/product")
+def api_create_product(p: ProductIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    name = (p.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name_required")
+    if p.price is None or p.price <= 0:
+        raise HTTPException(status_code=400, detail="bad_price")
+    if p.stock_count is not None and p.stock_count < 0:
+        raise HTTPException(status_code=400, detail="bad_stock")
+    pid = db.create_product(
+        seller_id=user["id"], name=name, price=float(p.price),
+        category_id=p.category_id, description=(p.description or "").strip() or None,
+        image_url=p.image_url, stock_count=p.stock_count, created_by=user["id"],
+    )
+    fields = {"in_stock": 1, "status": "active"}
+    if user.get("region_id"):
+        fields["region_id"] = user["region_id"]
+    try:
+        db.update_product_fields(pid, **fields)
+    except Exception as e:
+        logging.warning(f"product post-fields xato (pid {pid}): {e}")
+    return {"ok": True, "product_id": pid}
+
+
+class ProductEdit(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    description: Optional[str] = None
+    stock_count: Optional[int] = None
+    image_url: Optional[str] = None
+
+
+@app.patch("/api/seller/product/{product_id}")
+def api_edit_product(product_id: int, p: ProductEdit, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    _own_product_or_403(user, product_id)
+    fields = {}
+    if p.name is not None:
+        nm = p.name.strip()
+        if not nm:
+            raise HTTPException(status_code=400, detail="name_required")
+        fields["name"] = nm
+    if p.price is not None:
+        if p.price <= 0:
+            raise HTTPException(status_code=400, detail="bad_price")
+        fields["price"] = float(p.price)
+    if p.description is not None:
+        fields["description"] = p.description.strip() or None
+    if p.stock_count is not None:
+        if p.stock_count < 0:
+            raise HTTPException(status_code=400, detail="bad_stock")
+        fields["stock_count"] = p.stock_count
+    if p.image_url is not None:
+        fields["image_url"] = p.image_url
+    if fields:
+        db.update_product_fields(product_id, **fields)
+    return {"ok": True}
+
+
+@app.post("/api/seller/product/{product_id}/toggle")
+def api_toggle_product(product_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    _own_product_or_403(user, product_id)
+    return {"ok": True, "in_stock": db.toggle_product_in_stock(product_id)}
+
+
+@app.delete("/api/seller/product/{product_id}")
+def api_delete_product(product_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    _own_product_or_403(user, product_id)
+    db.delete_product(product_id, deleted_by=user.get("id"), deleted_by_role=user.get("role"))
+    return {"ok": True}
 
 
 @app.get("/api/image/{file_id}")

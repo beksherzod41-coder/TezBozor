@@ -240,6 +240,12 @@
            box-shadow:0 4px 12px rgba(112,0,255,.25);}
   .oact.no{background:#fdebef; color:var(--sale);}
   .oact:active{transform:scale(.97);} .oact:disabled{opacity:.5;}
+  /* mahsulot forma rasm tanlash */
+  .pfphoto{display:flex; align-items:center; justify-content:center; width:100%; height:190px;
+           border-radius:14px; background:var(--card); box-shadow:var(--shadow); overflow:hidden;
+           cursor:pointer; border:1.5px dashed #d3d3da;}
+  .pfphoto img{width:100%; height:100%; object-fit:cover;}
+  .pfedit-hint{font-size:11px; color:var(--hint); margin-top:6px; text-align:center;}
 </style>
 </head>
 <body>
@@ -274,6 +280,11 @@
   <div class="checkout" id="checkout">
     <div class="cohead"><span>Buyurtma berish</span><span class="x" id="coClose">✕</span></div>
     <div id="checkoutBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="prodform">
+    <div class="cohead"><span id="pfTitle">Mahsulot</span><span class="x" id="pfClose">✕</span></div>
+    <div id="prodformBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
 <script>
@@ -338,6 +349,7 @@ function skeleton(){
 async function loadCategories(){
   try{
     const cats = await api('/api/categories');
+    CATS = cats;
     const chips = document.getElementById('chips');
     chips.innerHTML = `<div class="chip active" data-cat="">Hammasi</div>` +
       cats.map(c=>`<div class="chip" data-cat="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('');
@@ -629,7 +641,7 @@ async function loadProfile(){
 }
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
-let ME = null, sellerSub = 'orders';
+let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {};
 
 async function loadMe(){
   try{ ME = await api('/api/me'); }catch(e){ ME = null; }
@@ -698,13 +710,14 @@ function sellerProductCard(p){
   const img = p.image_url ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">` : `<div class="ph">🖼️</div>`;
   const stock = p.stock_count==null ? 'Cheksiz zahira' : (p.stock_count>0?`${p.stock_count} dona`:'Tugagan');
   const hidden = p.in_stock ? '' : ` <span class="ostatus st-cancel">Yashirin</span>`;
-  return `<div class="ocard" style="display:flex;gap:12px;align-items:center">
+  return `<div class="ocard" data-pid="${p.id}" style="display:flex;gap:12px;align-items:center;cursor:pointer">
     <div class="coprod" style="padding:0;background:none;box-shadow:none;flex:0 0 auto">${img}</div>
     <div style="flex:1;min-width:0">
       <div class="oname" style="font-size:14px">${esc(p.name||'')}</div>
       <div class="ometa"><b>${money(p.price)}</b></div>
       <div class="oshop">📦 ${stock}${hidden}</div>
     </div>
+    <span style="color:var(--hint);font-size:20px">›</span>
   </div>`;
 }
 
@@ -713,10 +726,135 @@ async function loadSellerProducts(){
   b.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
   try{
     const prods = await api('/api/seller/products');
-    if(!prods.length){ b.innerHTML = `<div class="empty"><span class="big">📦</span>Hali mahsulot yo'q</div>`; return; }
-    b.innerHTML = `<div class="olist">${prods.map(sellerProductCard).join('')}</div>`;
+    SELLER_PRODUCTS = prods;
+    const addBtn = `<div style="padding:8px 12px 4px"><button class="oact ok" id="pfAddBtn" style="width:100%">➕ Mahsulot qo'shish</button></div>`;
+    if(!prods.length){
+      b.innerHTML = addBtn + `<div class="empty"><span class="big">📦</span>Hali mahsulot yo'q</div>`;
+    }else{
+      b.innerHTML = addBtn + `<div class="olist">${prods.map(sellerProductCard).join('')}</div>`;
+    }
+    document.getElementById('pfAddBtn').onclick = ()=>openProductForm(null);
+    b.querySelectorAll('.ocard[data-pid]').forEach(c=>c.onclick=()=>{
+      const p = SELLER_PRODUCTS.find(x=>String(x.id)===c.dataset.pid);
+      if(p) openProductForm(p);
+    });
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
+
+// ---------- MAHSULOT FORMASI (qo'shish / tahrirlash) ----------
+function openProductForm(prod){
+  pf = prod ? {
+    id: prod.id, name: prod.name||'', price: prod.price||'', category_id: prod.category_id||null,
+    description: prod.description||'', stock_count: (prod.stock_count==null?'':prod.stock_count),
+    image_url: prod.image_url||null, in_stock: prod.in_stock
+  } : { id:null, name:'', price:'', category_id:null, description:'', stock_count:'', image_url:null };
+  document.getElementById('pfTitle').textContent = pf.id ? 'Mahsulotni tahrirlash' : 'Yangi mahsulot';
+  renderProductForm();
+  document.getElementById('prodform').classList.add('open');
+  document.getElementById('prodform').scrollTop = 0;
+}
+
+function renderProductForm(){
+  const body = document.getElementById('prodformBody');
+  const isEdit = !!pf.id;
+  const imgInner = pf.image_url
+    ? `<img src="${imgUrl(pf.image_url)}">`
+    : `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--hint)"><span style="font-size:34px">📷</span><span style="font-size:12.5px">Rasm qo'shish</span></div>`;
+  body.innerHTML = `<div class="cobody">
+    <div>
+      <label class="pfphoto">${imgInner}<input type="file" id="pfFile" accept="image/*" style="display:none"></label>
+      ${pf.image_url?`<div class="pfedit-hint">Rasmni o'zgartirish uchun bosing</div>`:''}
+    </div>
+    <div class="cosec"><div class="lbl">Nomi</div>
+      <input class="coaddr" id="pfName" style="min-height:auto" placeholder="Mahsulot nomi" value="${esc(pf.name)}"></div>
+    <div class="cosec"><div class="lbl">Narxi (so'm)</div>
+      <input class="coaddr" id="pfPrice" type="number" inputmode="numeric" style="min-height:auto" placeholder="0" value="${esc(String(pf.price))}"></div>
+    <div class="cosec"><div class="lbl">Kategoriya</div>
+      <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>
+    <div class="cosec"><div class="lbl">Zahira (bo'sh = cheksiz)</div>
+      <input class="coaddr" id="pfStock" type="number" inputmode="numeric" style="min-height:auto" placeholder="Cheksiz" value="${esc(String(pf.stock_count))}"></div>
+    <div class="cosec"><div class="lbl">Tavsif</div>
+      <textarea class="coaddr" id="pfDesc" placeholder="Mahsulot haqida...">${esc(pf.description)}</textarea></div>
+    ${isEdit?`<button class="oact no" id="pfToggle" style="width:100%">${pf.in_stock?'🙈 Sotuvdan yashirish':'👁 Sotuvga qaytarish'}</button>
+              <button class="oact no" id="pfDelete" style="width:100%;background:#fdebef;color:var(--sale)">🗑 O'chirish</button>`:''}
+  </div>
+  <div class="cobar"><button id="pfSave">${isEdit?'💾 Saqlash':'➕ Qo\\'shish'}</button></div>`;
+
+  document.getElementById('pfFile').onchange = onPhotoPick;
+  document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
+  document.getElementById('pfPrice').oninput = e=>pf.price=e.target.value;
+  document.getElementById('pfStock').oninput = e=>pf.stock_count=e.target.value;
+  document.getElementById('pfDesc').oninput = e=>pf.description=e.target.value;
+  body.querySelectorAll('[data-cid]').forEach(ch=>ch.onclick=()=>{
+    pf.category_id = Number(ch.dataset.cid);
+    body.querySelectorAll('#pfCats .chip').forEach(x=>x.classList.toggle('active', x.dataset.cid==pf.category_id));
+  });
+  document.getElementById('pfSave').onclick = saveProduct;
+  const tgl = document.getElementById('pfToggle'); if(tgl) tgl.onclick = toggleProductVisibility;
+  const del = document.getElementById('pfDelete'); if(del) del.onclick = confirmDeleteProduct;
+}
+
+async function onPhotoPick(e){
+  const f = e.target.files[0]; if(!f) return;
+  const box = document.querySelector('.pfphoto');
+  box.innerHTML = `<div class="loading" style="padding:0">⏳ Yuklanmoqda...</div>`;
+  const fd = new FormData(); fd.append('file', f);
+  try{
+    const r = await fetch('/api/seller/product/photo', {method:'POST', headers:{Authorization:AUTH}, body:fd});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    pf.image_url = (await r.json()).file_id;
+  }catch(err){ tg.showAlert("Rasm yuklanmadi: "+err.message); }
+  renderProductForm();
+}
+
+async function saveProduct(){
+  const btn = document.getElementById('pfSave');
+  if(!(pf.name||'').trim()){ tg.showAlert("Mahsulot nomini kiriting."); return; }
+  const price = Number(pf.price);
+  if(!price || price<=0){ tg.showAlert("To'g'ri narx kiriting."); return; }
+  btn.disabled = true; btn.textContent = 'Saqlanmoqda...';
+  const payload = {
+    name: pf.name.trim(), price: price,
+    category_id: pf.category_id || null,
+    description: (pf.description||'').trim() || null,
+    stock_count: (pf.stock_count===''||pf.stock_count==null) ? null : Number(pf.stock_count),
+    image_url: pf.image_url || null,
+  };
+  try{
+    const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';
+    const method = pf.id ? 'PATCH' : 'POST';
+    const r = await fetch(url, {method, headers:{Authorization:AUTH,'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    closeProductForm(); loadSellerProducts();
+  }catch(e){
+    btn.disabled=false; btn.textContent = pf.id?'💾 Saqlash':"➕ Qo'shish";
+    tg.showAlert("Saqlanmadi: "+e.message);
+  }
+}
+
+async function toggleProductVisibility(){
+  try{
+    const r = await fetch('/api/seller/product/'+pf.id+'/toggle', {method:'POST', headers:{Authorization:AUTH}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    closeProductForm(); loadSellerProducts();
+  }catch(e){ tg.showAlert("Xatolik: "+e.message); }
+}
+
+function confirmDeleteProduct(){
+  const doDel = async()=>{
+    try{
+      const r = await fetch('/api/seller/product/'+pf.id, {method:'DELETE', headers:{Authorization:AUTH}});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      closeProductForm(); loadSellerProducts();
+    }catch(e){ tg.showAlert("O'chirilmadi: "+e.message); }
+  };
+  if(tg.showConfirm) tg.showConfirm("Mahsulot butunlay o'chirilsinmi?", ok=>{ if(ok) doDel(); });
+  else if(confirm("O'chirilsinmi?")) doDel();
+}
+
+function closeProductForm(){ document.getElementById('prodform').classList.remove('open'); }
+document.getElementById('pfClose').onclick = closeProductForm;
 
 loadMe();
 loadCategories();
