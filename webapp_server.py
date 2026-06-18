@@ -109,6 +109,7 @@ AI_SESSIONS = {}
 
 class AiAsk(BaseModel):
     text: str
+    mode: str = "buyer"   # 'buyer' | 'seller'
 
 
 @app.post("/api/ai")
@@ -122,10 +123,16 @@ async def api_ai(body: AiAsk, authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail="too_long")
     if not ai_assistant.is_enabled():
         raise HTTPException(status_code=503, detail="ai_disabled")
-    ud = AI_SESSIONS.setdefault(user.get("telegram_id"), {})
+    # Sotuvchi rejimi — faqat seller/admin uchun; AI sotuvchi vositalarini (mahsulot
+    # qo'shish/tahrirlash va h.k.) ishlatadi. Aks holda xaridor rejimi.
+    if body.mode == "seller" and user.get("role") in ("seller", "admin"):
+        role, seller_id = "seller", user.get("id")
+    else:
+        role, seller_id = "buyer", None
+    ud = AI_SESSIONS.setdefault((user.get("telegram_id"), role), {})
     lang = user.get("language") or "uz"
-    res = await ai_assistant.ask(db, lang, "buyer", text, ud,
-                                 user_name=user.get("name") or "")
+    res = await ai_assistant.ask(db, lang, role, text, ud,
+                                 seller_id=seller_id, user_name=user.get("name") or "")
     return {"text": res.get("text"), "products": _rows(res.get("products") or []) or None}
 
 
@@ -746,6 +753,31 @@ async def api_review_reply(review_id: int, body: ReplyIn, authorization: str = H
                                            "parse_mode": "HTML"})
     except Exception as e:
         logging.warning(f"review reply notify xato (review {review_id}): {e}")
+    return {"ok": True}
+
+
+@app.get("/api/seller/pending")
+def api_seller_pending(authorization: str = Header(None)):
+    """Ega tasdig'ini kutayotgan (xodim joylagan) mahsulotlar."""
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_products_by_status(user["id"], "pending_owner"))
+
+
+class ApproveIn(BaseModel):
+    approve: bool = True
+
+
+@app.post("/api/seller/product/{product_id}/approve")
+def api_approve_product(product_id: int, body: ApproveIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    prod = db.get_product_by_id(product_id)
+    if not prod:
+        raise HTTPException(status_code=404, detail="not_found")
+    if prod.get("seller_id") != user.get("id") and user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="not_owner")
+    if prod.get("status") != "pending_owner":
+        raise HTTPException(status_code=409, detail="not_pending")
+    db.set_product_status(product_id, "active" if body.approve else "deleted")
     return {"ok": True}
 
 
