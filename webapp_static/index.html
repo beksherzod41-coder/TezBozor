@@ -778,7 +778,7 @@ function renderProductForm(){
     ${isEdit?`<button class="oact no" id="pfToggle" style="width:100%">${pf.in_stock?'🙈 Sotuvdan yashirish':'👁 Sotuvga qaytarish'}</button>
               <button class="oact no" id="pfDelete" style="width:100%;background:#fdebef;color:var(--sale)">🗑 O'chirish</button>`:''}
   </div>
-  <div class="cobar"><button id="pfSave">${isEdit?'💾 Saqlash':'➕ Qo\\'shish'}</button></div>`;
+  <div class="cobar"><button id="pfSave">${isEdit?'💾 Saqlash':"➕ Qo'shish"}</button></div>`;
 
   document.getElementById('pfFile').onchange = onPhotoPick;
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
