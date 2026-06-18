@@ -633,6 +633,66 @@ def api_staff_remove(staff_id: int, authorization: str = Header(None)):
     return {"ok": True}
 
 
+# ---- Rejalashtirilgan postlar ----
+def _parse_dt(raw):
+    from datetime import datetime, timezone
+    raw = (raw or "").strip()
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        try:
+            return datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+
+class ScheduleIn(BaseModel):
+    scheduled_at: str
+
+
+@app.get("/api/seller/scheduled")
+def api_seller_scheduled(authorization: str = Header(None)):
+    user = _buyer_from_auth(authorization)
+    return _rows(db.get_seller_scheduled_posts(user["id"]))
+
+
+@app.post("/api/seller/product/{product_id}/schedule")
+def api_schedule_product(product_id: int, body: ScheduleIn, authorization: str = Header(None)):
+    from datetime import datetime, timezone
+    user = dict(_buyer_from_auth(authorization))
+    prod = _own_product_or_403(user, product_id)
+    if prod.get("status") in ("deleted", "purged"):
+        raise HTTPException(status_code=409, detail="product_unavailable")
+    dt = _parse_dt(body.scheduled_at)
+    if not dt:
+        raise HTTPException(status_code=400, detail="bad_time")
+    dt = dt.astimezone(timezone.utc)
+    if dt <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="time_in_past")
+    sa = dt.strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scheduled_post(product_id, prod["seller_id"], sa,
+                             created_by=user["id"], image_id=prod.get("image_url"))
+    db.set_product_status(product_id, "scheduled")  # belgilangan vaqtgacha yashiriladi
+    return {"ok": True}
+
+
+@app.post("/api/seller/scheduled/{sched_id}/cancel")
+def api_cancel_scheduled(sched_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    sp = db.cancel_scheduled_post(sched_id, user["id"])
+    if not sp:
+        raise HTTPException(status_code=404, detail="not_found")
+    try:
+        if sp.get("product_id"):
+            db.set_product_status(sp["product_id"], "active")  # bekor -> mahsulot jonli bo'ladi
+    except Exception as e:
+        logging.warning(f"cancel schedule status xato: {e}")
+    return {"ok": True}
+
+
 class ReplyIn(BaseModel):
     text: str
 

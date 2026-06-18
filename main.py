@@ -14437,6 +14437,34 @@ async def webapp_order_dispatch_job(context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 
+async def webapp_scheduled_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Mini App yaratgan rejalashtirilgan postlarga publish jobini ulaydi (idempotent).
+    Webapp alohida jarayon — uning yaratgan rejasiga bot job-queue'si avtomatik ulanmaydi;
+    shu job har ~30s skanlaydi va jobi yo'qlariga run_once qo'yadi."""
+    from datetime import datetime, timezone
+    try:
+        pend = db.get_pending_scheduled_posts()
+    except Exception as e:
+        logging.error(f"webapp_scheduled_scan_job: ro'yxat olinmadi: {e}")
+        return
+    jq = context.application.job_queue
+    if not jq:
+        return
+    now = datetime.now(timezone.utc)
+    for sp in pend:
+        name = f"sched_post_{sp['id']}"
+        if jq.get_jobs_by_name(name):
+            continue  # allaqachon rejalashtirilgan (bot yoki avvalgi skan)
+        try:
+            target = datetime.strptime(str(sp.get('scheduled_at'))[:19],
+                                       "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        when = max(1, (target - now).total_seconds())
+        jq.run_once(scheduled_post_job, when=when, data={'sched_id': sp['id']}, name=name)
+        logging.info(f"Mini App rejalashtirilgan post ulandi: sched {sp['id']} ({when:.0f}s)")
+
+
 def main():
     _validate_env()
     # Persistence — bot qayta ishga tushganda foydalanuvchi sessiyalari saqlanadi
@@ -14840,6 +14868,10 @@ def main():
         # Mini App (webapp) yaratgan buyurtmalarga sotuvchi bildirishnomasi (har 12s)
         app.job_queue.run_repeating(webapp_order_dispatch_job, interval=12, first=15)
         logging.info("Mini App buyurtma dispatch job rejalashtirildi (har 12s)")
+
+        # Mini App yaratgan rejalashtirilgan postlarga publish jobini ulash (har 30s)
+        app.job_queue.run_repeating(webapp_scheduled_scan_job, interval=30, first=20)
+        logging.info("Mini App rejalashtirilgan post scan job rejalashtirildi (har 30s)")
 
         # Avtomatik backup — har kuni ertalab 06:00 (UTC) = 11:00 Toshkent
         from datetime import time as dt_time

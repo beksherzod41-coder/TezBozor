@@ -420,6 +420,11 @@
     <div id="staffBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="schedview">
+    <div class="cohead"><span>📅 Rejalashtirilgan postlar</span><span class="x" id="schedClose">✕</span></div>
+    <div id="schedBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
@@ -1261,7 +1266,7 @@ document.getElementById('aiInp').addEventListener('keydown',e=>{ if(e.key==='Ent
 
 function loadSeller(){
   const v = document.getElementById('viewSeller');
-  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span><span id="staffBtn" style="font-size:22px;cursor:pointer;margin-right:10px">👥</span><span id="chanBtn" style="font-size:22px;cursor:pointer;margin-right:10px">📢</span><span id="shopSetBtn" style="font-size:23px;cursor:pointer">⚙️</span></span></div>
+  v.innerHTML = `<div class="vhead" style="display:flex;justify-content:space-between;align-items:center">Do'konim <span><span id="schedBtn" style="font-size:21px;cursor:pointer;margin-right:9px">📅</span><span id="staffBtn" style="font-size:21px;cursor:pointer;margin-right:9px">👥</span><span id="chanBtn" style="font-size:21px;cursor:pointer;margin-right:9px">📢</span><span id="shopSetBtn" style="font-size:22px;cursor:pointer">⚙️</span></span></div>
     <div class="seg" style="margin:0 12px 6px">
       <div class="opt ${sellerSub==='orders'?'on':''}" data-sub="orders" style="padding:10px 4px;font-size:11.5px">📥 Buyurtma</div>
       <div class="opt ${sellerSub==='products'?'on':''}" data-sub="products" style="padding:10px 4px;font-size:11.5px">📦 Mahsulot</div>
@@ -1273,6 +1278,7 @@ function loadSeller(){
   document.getElementById('shopSetBtn').onclick = openShopSettings;
   document.getElementById('chanBtn').onclick = openChannels;
   document.getElementById('staffBtn').onclick = openStaff;
+  document.getElementById('schedBtn').onclick = openScheduled;
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else if(sellerSub==='stats') loadSellerStats();
@@ -1420,6 +1426,60 @@ function staffRemove(sid){
   if(tg.showConfirm) tg.showConfirm("Xodimni do'kondan chiqarasizmi?", ok=>{ if(ok) doIt(); }); else if(confirm("Chiqarilsinmi?")) doIt();
 }
 document.getElementById('staffClose').onclick=()=>document.getElementById('staffview').classList.remove('open');
+
+// ---------- REJALASHTIRILGAN POSTLAR ----------
+async function openScheduled(){ document.getElementById('schedview').classList.add('open'); await loadScheduled(); }
+function schedFmt(utc){
+  const d=new Date(String(utc).replace(' ','T')+'Z');
+  if(isNaN(d.getTime())) return String(utc).slice(0,16);
+  return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function schedItem(sp){
+  return `<div class="ocard" style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+    <div style="min-width:0"><div class="oname" style="font-size:14px">${esc(sp.product_name||('#'+sp.product_id))}</div><div style="font-size:12px;color:var(--hint)">📅 ${schedFmt(sp.scheduled_at)}</div></div>
+    <button class="oact no" data-cancelsched="${sp.id}" style="width:auto;padding:9px 13px;background:#fdebef;color:var(--sale)">❌ Bekor</button>
+  </div>`;
+}
+async function loadScheduled(){
+  const b=document.getElementById('schedBody');
+  b.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const list=await api('/api/seller/scheduled');
+    const prods=await api('/api/seller/products');
+    const opts=prods.filter(p=>p.status!=='deleted' && p.status!=='scheduled')
+      .map(p=>`<option value="${p.id}">${esc(p.name||('#'+p.id))}</option>`).join('');
+    const form=`<div class="cosec" style="margin:0 12px">
+      <div class="lbl">➕ Mahsulotni belgilangan vaqtga qo'yish</div>
+      <select class="coaddr" id="schProd" style="min-height:auto">${opts || "<option value=''>Mahsulot yo'q</option>"}</select>
+      <input class="coaddr" id="schWhen" type="datetime-local" style="min-height:auto;margin-top:8px">
+      <button class="oact ok" id="schAdd" style="width:100%;margin-top:9px">📅 Rejalashtirish</button>
+      <div style="font-size:11.5px;color:var(--hint);margin-top:6px">Mahsulot belgilangan vaqtgacha yashirin turadi, keyin avtomatik sotuvga chiqadi.</div>
+    </div>`;
+    const listHtml = list.length ? `<div class="olist" style="margin-top:6px">${list.map(schedItem).join('')}</div>` : `<div class="empty"><span class="big">📅</span>Faol reja yo'q</div>`;
+    b.innerHTML=`<div style="padding:8px 0">${form}</div>`+listHtml;
+    document.getElementById('schAdd').onclick=addSchedule;
+    b.querySelectorAll('[data-cancelsched]').forEach(btn=>btn.onclick=()=>cancelSchedule(btn.dataset.cancelsched));
+  }catch(e){ b.innerHTML = e.message==='not_owner'?`<div class="empty"><span class="big">🔒</span>Faqat sotuvchi uchun.</div>`:`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+async function addSchedule(){
+  const pid=document.getElementById('schProd').value;
+  const when=document.getElementById('schWhen').value;
+  if(!pid){ tg.showAlert("Mahsulot tanlang."); return; }
+  if(!when){ tg.showAlert("Sana va vaqtni tanlang."); return; }
+  const iso=new Date(when).toISOString();
+  const btn=document.getElementById('schAdd'); btn.disabled=true; btn.textContent='...';
+  try{
+    const r=await fetch('/api/seller/product/'+pid+'/schedule',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({scheduled_at:iso})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail==='time_in_past'?"Vaqt o'tmishda — kelajakni tanlang.":(d.detail||('HTTP '+r.status))); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    loadScheduled();
+  }catch(e){ btn.disabled=false; btn.textContent='📅 Rejalashtirish'; tg.showAlert("Xatolik: "+e.message); }
+}
+function cancelSchedule(sid){
+  const doIt=async()=>{ try{ const r=await fetch('/api/seller/scheduled/'+sid+'/cancel',{method:'POST',headers:{Authorization:AUTH}}); if(!r.ok) throw new Error('HTTP '+r.status); loadScheduled(); }catch(e){ tg.showAlert("Xatolik: "+e.message); } };
+  if(tg.showConfirm) tg.showConfirm("Rejani bekor qilasizmi? (mahsulot darhol sotuvga chiqadi)", ok=>{ if(ok) doIt(); }); else if(confirm("Bekor qilinsinmi?")) doIt();
+}
+document.getElementById('schedClose').onclick=()=>document.getElementById('schedview').classList.remove('open');
 
 // ---------- DO'KON SOZLAMALARI ----------
 let shopForm={};
