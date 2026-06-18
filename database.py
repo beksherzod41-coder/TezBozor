@@ -2045,6 +2045,14 @@ class Database:
         conn.commit()
         return rid
 
+    def order_review_exists(self, order_id, buyer_id):
+        """Shu buyurtmaga shu xaridor allaqachon baho qoldirganmi (dublikat oldini olish)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM reviews WHERE order_id=? AND buyer_id=? LIMIT 1",
+                       (order_id, buyer_id))
+        return cursor.fetchone() is not None
+
     def get_seller_reviews(self, seller_id):
         conn = self.get_connection()
         cursor = conn.cursor()

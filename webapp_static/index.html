@@ -293,6 +293,13 @@
   .chatbar button{width:44px; height:44px; border-radius:50%; border:none; cursor:pointer; flex:0 0 auto;
                   background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; font-size:18px;}
   .chatempty{text-align:center; color:var(--hint); padding:50px 24px; font-size:14px; line-height:1.6;}
+  /* ---------- REYTING / QARZ ---------- */
+  .stars-pick{display:flex; gap:8px; font-size:34px; cursor:pointer; justify-content:center; padding:4px 0;}
+  .stars-pick span{filter:grayscale(1); opacity:.4; transition:.12s;}
+  .stars-pick span.on{filter:none; opacity:1; transform:scale(1.05);}
+  .debtcard{background:var(--card); border-radius:14px; padding:14px; box-shadow:var(--shadow);
+            display:flex; justify-content:space-between; align-items:center;}
+  .debtcard .dt{font-weight:800; font-size:16px; color:var(--sale);}
 </style>
 </head>
 <body>
@@ -349,6 +356,16 @@
     <div class="cohead"><span id="chatTitle">💬 Xabarlar</span><span class="x" id="chatClose">✕</span></div>
     <div class="chatwrap" id="chatWrap"></div>
     <div class="chatbar"><input id="chatInp" placeholder="Xabar yozing..." maxlength="2000"><button id="chatSend">➤</button></div>
+  </div>
+
+  <div class="checkout" id="reviewform">
+    <div class="cohead"><span>⭐ Baholash</span><span class="x" id="rvClose">✕</span></div>
+    <div id="reviewBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="debtsview">
+    <div class="cohead"><span>💳 Qarzlarim</span><span class="x" id="dbClose">✕</span></div>
+    <div id="debtsBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
 <script>
@@ -765,6 +782,60 @@ document.getElementById('chatClose').onclick=closeChat;
 document.getElementById('chatSend').onclick=sendChatMessage;
 document.getElementById('chatInp').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); sendChatMessage(); }});
 
+// ---------- SHARH / REYTING ----------
+let rvOrderId=null, rvSeller=5, rvProd=5, rvComment='';
+function _starsHtml(cls,val){ let s=''; for(let i=1;i<=5;i++) s+=`<span class="${i<=val?'on':''}" data-${cls}="${i}">⭐</span>`; return s; }
+function openReview(oid){
+  rvOrderId=oid; rvSeller=5; rvProd=5; rvComment='';
+  renderReview(MY_ORDERS.find(x=>String(x.id)===String(oid)));
+  document.getElementById('reviewform').classList.add('open');
+}
+function renderReview(o){
+  const body=document.getElementById('reviewBody');
+  body.innerHTML=`<div class="cobody">
+    <div style="text-align:center;color:var(--hint);font-size:13px">${o?esc(o.product_name||''):''}${o&&o.shop_name?' · '+esc(o.shop_name):''}</div>
+    <div class="cosec"><div class="lbl" style="text-align:center">Do'kon (sotuvchi) bahosi</div><div class="stars-pick" id="rvS">${_starsHtml('s',rvSeller)}</div></div>
+    <div class="cosec"><div class="lbl" style="text-align:center">Mahsulot bahosi</div><div class="stars-pick" id="rvP">${_starsHtml('p',rvProd)}</div></div>
+    <div class="cosec"><div class="lbl">Izoh (ixtiyoriy)</div><textarea class="coaddr" id="rvC" placeholder="Fikringiz...">${esc(rvComment)}</textarea></div>
+  </div>
+  <div class="cobar"><button id="rvSubmit">✅ Baho yuborish</button></div>`;
+  body.querySelectorAll('[data-s]').forEach(x=>x.onclick=()=>{ rvSeller=Number(x.dataset.s); renderReview(o); });
+  body.querySelectorAll('[data-p]').forEach(x=>x.onclick=()=>{ rvProd=Number(x.dataset.p); renderReview(o); });
+  const c=document.getElementById('rvC'); if(c) c.oninput=()=>{ rvComment=c.value; };
+  document.getElementById('rvSubmit').onclick=submitReview;
+}
+async function submitReview(){
+  const btn=document.getElementById('rvSubmit'); btn.disabled=true; btn.textContent='Yuborilmoqda...';
+  try{
+    const r=await fetch('/api/order/'+rvOrderId+'/review',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body:JSON.stringify({seller_rating:rvSeller, product_rating:rvProd, comment:(rvComment||'').trim()||null})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    closeReview(); loadMyOrders();
+  }catch(e){ btn.disabled=false; btn.textContent='✅ Baho yuborish';
+    tg.showAlert(e.message==='already_reviewed'?"Bu buyurtmani allaqachon baholagansiz.":("Xatolik: "+e.message)); }
+}
+function closeReview(){ document.getElementById('reviewform').classList.remove('open'); }
+document.getElementById('rvClose').onclick=closeReview;
+
+// ---------- QARZLARIM ----------
+async function openDebts(){
+  document.getElementById('debtsview').classList.add('open');
+  const body=document.getElementById('debtsBody');
+  body.innerHTML=`<div class="loading">Yuklanmoqda...</div>`;
+  try{
+    const debts=await api('/api/my/debts');
+    if(!debts.length){ body.innerHTML=`<div class="cartempty"><span class="big">✅</span>Qarzingiz yo'q</div>`; return; }
+    const total=debts.reduce((s,d)=>s+Number(d.total_due||0),0);
+    body.innerHTML=`<div class="cobody">
+      <div style="text-align:center;font-size:13px;color:var(--hint)">Jami qarz: <b style="color:var(--sale);font-size:16px">${money(total)}</b></div>
+      ${debts.map(d=>`<div class="debtcard"><div><div style="font-weight:600">🏪 ${esc(d.shop_name||d.seller_name||'')}</div>${d.cnt?`<div style="font-size:12px;color:var(--hint)">${d.cnt} ta buyurtma</div>`:''}</div><div class="dt">${money(d.total_due)}</div></div>`).join('')}
+    </div>`;
+  }catch(e){ body.innerHTML=`<div class="cartempty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+function closeDebts(){ document.getElementById('debtsview').classList.remove('open'); }
+document.getElementById('dbClose').onclick=closeDebts;
+
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
 tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
@@ -818,24 +889,48 @@ function orderCardHtml(o){
     ${(o.amount_due && o.amount_due>0)?`<div class="odebt">Qarz: ${money(o.amount_due)}</div>`:''}
     ${contact}
     <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">💬 Xabar yozish</button>
+    ${(o.status==='pending' && !o.order_group_id)?`<button class="oact no" data-cancel="${o.id}" style="width:100%;margin-top:8px">❌ Bekor qilish</button>`:''}
+    ${o.status==='delivered'?`<button class="oact ok" data-review="${o.id}" style="width:100%;margin-top:8px">⭐ Baholash</button>`:''}
   </div>`;
 }
 
+let MY_ORDERS = [];
 async function loadMyOrders(){
   const v = document.getElementById('viewOrders');
-  v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="loading">Yuklanmoqda...</div>`;
+  const head = `<div class="vhead">Buyurtmalarim</div><div style="padding:0 12px 4px"><button class="oact ok" id="debtsBtn" style="width:100%;background:var(--bg);color:var(--accent)">💳 Qarzlarim</button></div>`;
+  v.innerHTML = head + `<div class="loading">Yuklanmoqda...</div>`;
+  document.getElementById('debtsBtn').onclick = openDebts;
   try{
     const orders = await api('/api/my/orders');
+    MY_ORDERS = orders;
     if(!orders.length){
-      v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="empty"><span class="big">📦</span>Hali buyurtmangiz yo'q<br><small>Katalogdan mahsulot tanlang</small></div>`;
+      v.innerHTML = head + `<div class="empty"><span class="big">📦</span>Hali buyurtmangiz yo'q<br><small>Katalogdan mahsulot tanlang</small></div>`;
+      document.getElementById('debtsBtn').onclick = openDebts;
       return;
     }
-    v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="olist">${orders.map(orderCardHtml).join('')}</div>`;
+    v.innerHTML = head + `<div class="olist">${orders.map(orderCardHtml).join('')}</div>`;
+    document.getElementById('debtsBtn').onclick = openDebts;
     v.querySelectorAll('button.ocontact[data-un]').forEach(b=>b.onclick=()=>tg.openTelegramLink(`https://t.me/${b.dataset.un}`));
     v.querySelectorAll('[data-chat]').forEach(b=>b.onclick=()=>openChat(b.dataset.chat));
+    v.querySelectorAll('[data-cancel]').forEach(b=>b.onclick=()=>buyerCancelOrder(b.dataset.cancel));
+    v.querySelectorAll('[data-review]').forEach(b=>b.onclick=()=>openReview(b.dataset.review));
   }catch(e){
-    v.innerHTML = `<div class="vhead">Buyurtmalarim</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
+    v.innerHTML = head + `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
+    document.getElementById('debtsBtn').onclick = openDebts;
   }
+}
+
+function buyerCancelOrder(oid){
+  const doIt=async()=>{
+    try{
+      const r=await fetch('/api/order/'+oid+'/cancel',{method:'POST',headers:{Authorization:AUTH}});
+      if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      loadMyOrders();
+    }catch(e){ tg.showAlert("Bekor qilinmadi: "+e.message); }
+  };
+  if(tg.showConfirm) tg.showConfirm("Buyurtmani bekor qilasizmi?", ok=>{ if(ok) doIt(); });
+  else if(confirm("Bekor qilinsinmi?")) doIt();
 }
 
 async function loadProfile(){

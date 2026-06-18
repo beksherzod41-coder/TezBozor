@@ -263,6 +263,86 @@ def api_my_orders(authorization: str = Header(None)):
     return _rows(db.get_buyer_orders_list(buyer["id"]))
 
 
+@app.get("/api/my/debts")
+def api_my_debts(authorization: str = Header(None)):
+    buyer = _buyer_from_auth(authorization)
+    return _rows(db.get_buyer_open_debts(buyer["id"]))
+
+
+class ReviewIn(BaseModel):
+    seller_rating: int
+    product_rating: Optional[int] = None
+    comment: Optional[str] = None
+
+
+@app.post("/api/order/{order_id}/review")
+async def api_review(order_id: int, body: ReviewIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if order.get("buyer_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("status") != "delivered":
+        raise HTTPException(status_code=409, detail="not_delivered")
+    if db.order_review_exists(order_id, user["id"]):
+        raise HTTPException(status_code=409, detail="already_reviewed")
+    sr = body.seller_rating
+    if not isinstance(sr, int) or not (1 <= sr <= 5):
+        raise HTTPException(status_code=400, detail="bad_rating")
+    pr = body.product_rating
+    if pr is not None and not (1 <= pr <= 5):
+        raise HTTPException(status_code=400, detail="bad_product_rating")
+    comment = (body.comment or "").strip() or None
+    db.create_review(order_id, order["seller_id"], user["id"], sr, comment,
+                     order.get("product_id"), pr)
+    try:
+        if order.get("seller_tg"):
+            stars = "⭐" * sr
+            txt = f"{stars} {fmt_order_id(order_id)} — yangi baho"
+            if comment:
+                txt += f"\n💬 {html.escape(comment)}"
+            await _tg_call("sendMessage", {"chat_id": order["seller_tg"], "text": txt, "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"review notify xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
+@app.post("/api/order/{order_id}/cancel")
+async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if order.get("buyer_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="not_your_order")
+    if order.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="not_pending")
+    if order.get("order_group_id"):
+        # Guruh (savat) buyurtmasini app'dan yakka bekor qilish hozircha qo'llanmaydi
+        raise HTTPException(status_code=409, detail="group_cancel_unsupported")
+    db.update_order_status(order_id, "cancelled")
+    try:
+        seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
+        slang = get_user_lang(seller) if seller else DEFAULT_LANG
+        if order.get("seller_tg"):
+            await _tg_call("sendMessage", {
+                "chat_id": order["seller_tg"],
+                "text": t(slang, "order_cancelled_notify", oid=fmt_order_id(order_id),
+                          pname=html.escape(order.get("product_name") or "")),
+                "parse_mode": "HTML"})
+        cid = order.get("notify_chat_id")
+        mid = order.get("notify_message_id")
+        if cid and mid:
+            final = (order.get("notify_caption") or "") + "\n\n❌ Xaridor bekor qildi"
+            await _tg_call("editMessageText", {
+                "chat_id": cid, "message_id": mid, "text": final,
+                "parse_mode": "HTML", "reply_markup": {"inline_keyboard": []}})
+    except Exception as e:
+        logging.warning(f"buyer cancel notify xato (order {order_id}): {e}")
+    return {"ok": True}
+
+
 def _order_party_or_403(user, order):
     if user.get("id") not in (order.get("buyer_id"), order.get("seller_id")) \
        and user.get("role") != "admin":
