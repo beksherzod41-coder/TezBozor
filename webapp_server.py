@@ -35,6 +35,7 @@ from database import Database
 from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
 from tezbozor_design import fmt_order_id
+import ai_assistant
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 try:
@@ -100,6 +101,31 @@ def api_products(
 def api_shops(authorization: str = Header(None), q: str = Query(None)):
     require_auth(authorization)
     return _rows(db.search_shops(query=q))
+
+
+# AI yordamchi — DeepSeek (ai_assistant.ask qayta ishlatiladi). Tarix xotirada (tg_id bo'yicha).
+AI_SESSIONS = {}
+
+
+class AiAsk(BaseModel):
+    text: str
+
+
+@app.post("/api/ai")
+async def api_ai(body: AiAsk, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 1000:
+        raise HTTPException(status_code=400, detail="too_long")
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    ud = AI_SESSIONS.setdefault(user.get("telegram_id"), {})
+    lang = user.get("language") or "uz"
+    res = await ai_assistant.ask(db, lang, "buyer", text, ud,
+                                 user_name=user.get("name") or "")
+    return {"text": res.get("text"), "products": _rows(res.get("products") or []) or None}
 
 
 class ContactIn(BaseModel):
