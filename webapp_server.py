@@ -951,12 +951,26 @@ def _staff_in_shop(shop_id, staff_id):
     return None
 
 
+# #3 — xodim ruxsatlari (bot PERM_KEYS pariteti): kalit -> DB ustuni
+STAFF_PERM_KEYS = {"add": "perm_add_product", "conf": "perm_confirm_orders",
+                   "price": "perm_edit_price", "rev": "perm_reply_reviews"}
+
+
 @app.get("/api/seller/staff")
 def api_staff(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     shop = _owner_shop(user)
-    return {"staff": _rows(db.get_shop_staff(shop["id"], include_owner=False)),
-            "invites": _rows(db.get_active_invites(shop["id"]))}
+    # Har xodimga ko'rsatkich (mahsulot/sotilgan/daromad) — bot staff_stats pariteti
+    perf = {r["user_id"]: dict(r) for r in db.get_shop_staff_performance(shop["id"])}
+    staff = []
+    for s in db.get_shop_staff(shop["id"], include_owner=False):
+        s = dict(s)
+        pr = perf.get(s["user_id"], {})
+        s["products_count"] = pr.get("products_count", 0)
+        s["sold"] = pr.get("sold", 0)
+        s["revenue"] = pr.get("revenue", 0)
+        staff.append(s)
+    return {"staff": staff, "invites": _rows(db.get_active_invites(shop["id"]))}
 
 
 @app.post("/api/seller/staff/invite")
@@ -990,6 +1004,73 @@ def api_staff_remove(staff_id: int, authorization: str = Header(None)):
     if not db.remove_staff(staff_id):
         raise HTTPException(status_code=400, detail="cant_remove")
     return {"ok": True}
+
+
+# ---- #3 XODIM DETALI + STATISTIKA (bot staff_detail/staff_stats pariteti) ----
+@app.get("/api/seller/staff/{staff_id}")
+def api_staff_detail(staff_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    s = dict(s)
+    stats = db.get_staff_stats(s["user_id"])
+    perms = {k: bool(s.get(col)) for k, col in STAFF_PERM_KEYS.items()}
+    return {"staff": s, "stats": stats, "perms": perms}
+
+
+@app.post("/api/seller/staff/{staff_id}/role")
+def api_staff_role(staff_id: int, authorization: str = Header(None)):
+    """Manager ↔ staff almashtiradi."""
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    if s.get("staff_role") == "owner":
+        raise HTTPException(status_code=400, detail="cant_owner")
+    new_role = "staff" if s.get("staff_role") == "manager" else "manager"
+    db.update_staff(staff_id, staff_role=new_role)
+    return {"ok": True, "staff_role": new_role}
+
+
+class StaffDeptIn(BaseModel):
+    department: str = ""
+
+
+@app.post("/api/seller/staff/{staff_id}/dept")
+def api_staff_dept(staff_id: int, body: StaffDeptIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    dept = (body.department or "").strip()[:60] or None
+    db.update_staff(staff_id, department=dept)
+    return {"ok": True, "department": dept}
+
+
+class StaffPermIn(BaseModel):
+    key: str   # add | conf | price | rev
+
+
+@app.post("/api/seller/staff/{staff_id}/perm")
+def api_staff_perm(staff_id: int, body: StaffPermIn, authorization: str = Header(None)):
+    """Bitta ruxsatni toggle qiladi (bot staff_perm pariteti)."""
+    user = dict(_buyer_from_auth(authorization))
+    shop = _owner_shop(user)
+    s = _staff_in_shop(shop["id"], staff_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="not_found")
+    if s.get("staff_role") == "owner":
+        raise HTTPException(status_code=400, detail="cant_owner")
+    col = STAFF_PERM_KEYS.get(body.key)
+    if not col:
+        raise HTTPException(status_code=400, detail="bad_key")
+    new_val = 0 if s.get(col) else 1
+    db.update_staff(staff_id, **{col: new_val})
+    return {"ok": True, "key": body.key, "value": bool(new_val)}
 
 
 # ---- Rejalashtirilgan postlar ----

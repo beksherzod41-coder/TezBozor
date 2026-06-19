@@ -355,6 +355,69 @@ def test_join_code_success(client):
     assert r2.status_code == 404
 
 
+# ===== #3 XODIM STATISTIKASI / DETALI =====
+def _shop_with_staff(client):
+    """Seller(5002) egasi do'kon + xodim(6002) qo'shadi. (shop_id, staff_id, staff_uid)."""
+    sid = webapp_server.db.create_shop(2, name="Do'kon")
+    uid = webapp_server.db.create_user(telegram_id=6002, phone_number="998900000077",
+                                       name="Xodim", role="seller")
+    stid = webapp_server.db.add_staff(sid, uid, staff_role="staff", is_active=1)
+    return sid, stid, uid
+
+
+def test_staff_list_has_stats(client):
+    _shop_with_staff(client)
+    r = client.get("/api/seller/staff", headers=hdr(5002))
+    assert r.status_code == 200
+    st = r.json()["staff"]
+    assert st and "revenue" in st[0] and "products_count" in st[0]
+
+
+def test_staff_detail_200(client):
+    _, stid, _ = _shop_with_staff(client)
+    r = client.get(f"/api/seller/staff/{stid}", headers=hdr(5002))
+    assert r.status_code == 200
+    body = r.json()
+    assert "stats" in body and "perms" in body
+    assert set(body["perms"].keys()) == {"add", "conf", "price", "rev"}
+
+
+def test_staff_detail_not_owner_403(client):
+    _, stid, _ = _shop_with_staff(client)
+    assert client.get(f"/api/seller/staff/{stid}", headers=hdr(5001)).status_code == 403
+
+
+def test_staff_role_toggle(client):
+    _, stid, _ = _shop_with_staff(client)
+    r = client.post(f"/api/seller/staff/{stid}/role", headers=hdr(5002))
+    assert r.status_code == 200 and r.json()["staff_role"] == "manager"
+    r2 = client.post(f"/api/seller/staff/{stid}/role", headers=hdr(5002))
+    assert r2.json()["staff_role"] == "staff"
+
+
+def test_staff_dept_set(client):
+    _, stid, _ = _shop_with_staff(client)
+    r = client.post(f"/api/seller/staff/{stid}/dept", headers=hdr(5002),
+                    json={"department": "Telefonlar"})
+    assert r.status_code == 200 and r.json()["department"] == "Telefonlar"
+
+
+def test_staff_perm_toggle(client):
+    _, stid, _ = _shop_with_staff(client)
+    # Ruxsatlar standart yoqilgan (DEFAULT 1) — toggle uni teskari qiladi
+    r = client.post(f"/api/seller/staff/{stid}/perm", headers=hdr(5002),
+                    json={"key": "add"})
+    assert r.status_code == 200
+    v1 = r.json()["value"]
+    r2 = client.post(f"/api/seller/staff/{stid}/perm", headers=hdr(5002),
+                     json={"key": "add"})
+    assert r2.json()["value"] is (not v1)  # ikkinchi marta teskari
+    # noma'lum kalit -> 400
+    rb = client.post(f"/api/seller/staff/{stid}/perm", headers=hdr(5002),
+                     json={"key": "bad"})
+    assert rb.status_code == 400
+
+
 def test_cancel_respond_deny_disputes(client):
     """Sotuvchi so'ragan -> xaridor rad -> nizo (disputed)."""
     oid = _confirmed_order(client)

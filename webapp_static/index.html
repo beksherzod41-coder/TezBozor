@@ -448,6 +448,11 @@
     <div id="staffBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="staffdetview">
+    <div class="cohead"><span id="ttl_staffdetview">👤 Xodim</span><span class="x" id="staffDetClose">✕</span></div>
+    <div id="staffDetBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="schedview">
     <div class="cohead"><span id="ttl_schedview">📅 Rejalashtirilgan postlar</span><span class="x" id="schedClose">✕</span></div>
     <div id="schedBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -753,6 +758,15 @@ const I18N = {
   sp_ov_ai:{uz:"🤖 AI yordamchi",ru:"🤖 AI помощник"},
   sp_cancel_incoming:{uz:"🚫 Xaridor bekor qilishni so'radi:",ru:"🚫 Покупатель запросил отмену:"},
   sp_cancel_wait:{uz:"⏳ Bekor so'rovi yuborildi — xaridor javobini kuting.",ru:"⏳ Запрос на отмену отправлен — ждите ответа покупателя."},
+  sp_staff_detail:{uz:"Batafsil",ru:"Подробнее"}, sp_staff_detail_title:{uz:"👤 Xodim",ru:"👤 Сотрудник"},
+  sp_st_dept:{uz:"Bo'lim",ru:"Отдел"}, sp_st_products:{uz:"Mahsulotlar",ru:"Товары"},
+  sp_st_delivered:{uz:"Berilgan",ru:"Выдано"}, sp_st_pending:{uz:"Kutilmoqda",ru:"В ожидании"},
+  sp_st_revenue:{uz:"Daromad",ru:"Выручка"},
+  sp_perms_title:{uz:"Ruxsatlar",ru:"Права доступа"},
+  sp_perm_add:{uz:"Mahsulot qo'shish",ru:"Добавлять товары"}, sp_perm_conf:{uz:"Buyurtma tasdiqlash",ru:"Подтверждать заказы"},
+  sp_perm_price:{uz:"Narx tahrirlash",ru:"Менять цену"}, sp_perm_rev:{uz:"Sharhga javob",ru:"Отвечать на отзывы"},
+  sp_make_staff:{uz:"⬇️ Oddiy xodim qilish",ru:"⬇️ Сделать сотрудником"}, sp_make_manager:{uz:"⬆️ Manager qilish",ru:"⬆️ Сделать менеджером"},
+  sp_set_dept:{uz:"🏷 Bo'limni o'zgartirish",ru:"🏷 Изменить отдел"}, sp_dept_ask:{uz:"Bo'lim nomini kiriting:",ru:"Введите название отдела:"},
   sp_img_failed:{uz:"Rasm yuklanmadi: ",ru:"Фото не загружено: "}, sp_name_req:{uz:"Mahsulot nomini kiriting.",ru:"Введите название товара."},
   sp_price_req:{uz:"To'g'ri narx kiriting.",ru:"Введите корректную цену."},
   // xaridor / profil — qolgan matnlar
@@ -830,7 +844,7 @@ function applyStaticI18n(){
     ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',
     ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title',
     ttl_adview:'sp_ov_adview',ttl_regionview:'bp_region_title',ttl_stockview:'sp_ov_stock',
-    ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code'};
+    ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code',ttl_staffdetview:'sp_staff_detail_title'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
   if(typeof updateRegionBtn==='function') updateRegionBtn();
@@ -2044,10 +2058,11 @@ function staffCard(s){
   const active = s.is_active? `<span class="ostatus st-ok">${L('sp_active')}</span>`:`<span class="ostatus st-pending">${L('sp_inactive')}</span>`;
   const uname = s.telegram_username? '@'+String(s.telegram_username).replace('@',''):'';
   return `<div class="ocard">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+    <div data-staffdet="${s.id}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer">
       <div style="min-width:0"><div class="oname" style="font-size:14px">👤 ${esc(s.name||uname||L('sp_role_staff'))}</div><div style="font-size:11.5px;color:var(--hint)">${role}${uname?' · '+esc(uname):''}${s.department?' · '+esc(s.department):''}</div></div>
       ${active}
     </div>
+    <div class="ometa" data-staffdet="${s.id}" style="margin-top:5px;cursor:pointer">📦 ${s.products_count||0} · 🚚 ${s.sold||0} · 💰 <b>${money(s.revenue||0)}</b><span style="color:var(--accent);float:right">${L('sp_staff_detail')} ›</span></div>
     <div class="oactions">
       <button class="oact ${s.is_active?'no':'ok'}" data-toggle="${s.id}">${s.is_active?L('sp_pause'):L('sp_activate')}</button>
       <button class="oact no" data-rmstaff="${s.id}" style="background:#fdebef;color:var(--sale)">${L('sp_remove_staff')}</button>
@@ -2069,6 +2084,7 @@ async function loadStaff(){
     b.querySelectorAll('[data-toggle]').forEach(btn=>btn.onclick=()=>staffToggle(btn.dataset.toggle));
     b.querySelectorAll('[data-rmstaff]').forEach(btn=>btn.onclick=()=>staffRemove(btn.dataset.rmstaff));
     b.querySelectorAll('[data-shareinv]').forEach(btn=>btn.onclick=()=>shareInvite(btn.dataset.shareinv));
+    b.querySelectorAll('[data-staffdet]').forEach(el=>el.onclick=()=>openStaffDetail(el.dataset.staffdet));
   }catch(e){
     b.innerHTML = e.message==='not_owner'
       ? `<div class="empty"><span class="big">🔒</span>${L('sp_owner_only')}</div>`
@@ -2100,6 +2116,64 @@ function staffRemove(sid){
   if(tg.showConfirm) tg.showConfirm(L('sp_remove_staff_confirm'), ok=>{ if(ok) doIt(); }); else if(confirm(L('sp_delete_q'))) doIt();
 }
 document.getElementById('staffClose').onclick=()=>document.getElementById('staffview').classList.remove('open');
+
+// ---------- #3 XODIM DETALI + STATISTIKA ----------
+async function openStaffDetail(sid){
+  document.getElementById('staffdetview').classList.add('open');
+  const body=document.getElementById('staffDetBody');
+  body.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const d=await api('/api/seller/staff/'+sid);
+    const s=d.staff, st=d.stats||{}, perms=d.perms||{};
+    const role=s.staff_role==='manager'?L('sp_role_manager'):L('sp_role_staff');
+    const statusBadge=s.is_active?`<span class="ostatus st-ok">${L('sp_active')}</span>`:`<span class="ostatus st-pending">${L('sp_inactive')}</span>`;
+    const permRow=(k)=>`<button class="oact ${perms[k]?'ok':'no'}" data-perm="${k}" style="width:100%;text-align:left">${perms[k]?'✅':'⬜'} ${L('sp_perm_'+k)}</button>`;
+    body.innerHTML=`<div class="cobody" style="overflow-y:auto">
+      <div class="ocard">
+        <div class="oname">👤 ${esc(s.name||'—')} ${statusBadge}</div>
+        <div class="ometa">${role}${s.telegram_username?' · @'+esc(String(s.telegram_username).replace('@','')):''}</div>
+        <div class="ometa">🏷 ${L('sp_st_dept')}: <b>${esc(s.department||'—')}</b></div>
+        ${s.phone_number?`<div class="ometa">📞 ${esc(s.phone_number)}</div>`:''}
+      </div>
+      <div class="ocard">
+        <div class="ometa">📦 ${L('sp_st_products')}: <b>${st.products_count||0}</b></div>
+        <div class="ometa">🚚 ${L('sp_st_delivered')}: <b>${st.delivered||0}</b></div>
+        <div class="ometa">⏳ ${L('sp_st_pending')}: <b>${st.pending||0}</b></div>
+        <div class="ometa">💰 ${L('sp_st_revenue')}: <b>${money(st.total_revenue||0)}</b></div>
+      </div>
+      <div style="font-weight:700;margin:8px 0 4px">${L('sp_perms_title')}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${['add','conf','price','rev'].map(permRow).join('')}</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+        <button class="oact ${s.is_active?'no':'ok'}" id="sdToggle" style="width:100%">${s.is_active?L('sp_pause'):L('sp_activate')}</button>
+        <button class="oact ok" id="sdRole" style="width:100%;background:var(--bg);color:var(--accent)">${s.staff_role==='manager'?L('sp_make_staff'):L('sp_make_manager')}</button>
+        <button class="oact ok" id="sdDept" style="width:100%;background:var(--bg);color:var(--accent)">${L('sp_set_dept')}</button>
+        <button class="oact no" id="sdRemove" style="width:100%;background:#fdebef;color:var(--sale)">${L('sp_remove_staff')}</button>
+      </div>
+    </div>`;
+    body.querySelectorAll('[data-perm]').forEach(btn=>btn.onclick=async()=>{
+      try{ await apiSend('/api/seller/staff/'+sid+'/perm','POST',{key:btn.dataset.perm}); openStaffDetail(sid); }
+      catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+    });
+    document.getElementById('sdToggle').onclick=async()=>{ await staffToggle(sid); openStaffDetail(sid); };
+    document.getElementById('sdRole').onclick=async()=>{
+      try{ await apiSend('/api/seller/staff/'+sid+'/role','POST'); openStaffDetail(sid); }
+      catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+    };
+    document.getElementById('sdDept').onclick=()=>{
+      const cur=s.department||'';
+      const go=async(val)=>{ try{ await apiSend('/api/seller/staff/'+sid+'/dept','POST',{department:val||''}); openStaffDetail(sid); }
+        catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); } };
+      const v=prompt(L('sp_dept_ask'), cur); if(v!==null) go(v.trim());
+    };
+    document.getElementById('sdRemove').onclick=()=>{
+      const doIt=async()=>{ try{ await apiSend('/api/seller/staff/'+sid,'DELETE');
+        document.getElementById('staffdetview').classList.remove('open'); loadStaff();
+      }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); } };
+      if(tg.showConfirm) tg.showConfirm(L('sp_remove_staff_confirm'), ok=>{ if(ok) doIt(); }); else doIt();
+    };
+  }catch(e){ body.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('staffDetClose').onclick=()=>document.getElementById('staffdetview').classList.remove('open');
 
 // ---------- REJALASHTIRILGAN POSTLAR ----------
 async function openScheduled(){ document.getElementById('schedview').classList.add('open'); await loadScheduled(); }
