@@ -44,6 +44,19 @@ if MINIAPP_URL and not MINIAPP_URL.startswith("https://"):
     logging.warning("⚠️ MINIAPP_URL https:// bilan boshlanishi shart (Telegram WebApp talabi) — o'chirildi.")
     MINIAPP_URL = None
 
+
+def _product_buy_link(bot_username, product_id):
+    """Kanal/guruh/ulashish "Sotib olish" havolasi — bosilganda MINI APP'ni ochadi (botni
+    emas) va start_param=product_<id> uzatadi (app o'sha mahsulotni ochadi). startapp uchun
+    bot'da "Main Mini App" sozlangan bo'lishi kerak (BotFather). MINIAPP_SHORT_NAME berilsa —
+    nomli app. Mini App sozlanmagan bo'lsa — eski bot ?start= xulqiga qaytadi."""
+    if MINIAPP_URL:
+        short = os.getenv("MINIAPP_SHORT_NAME", "").strip()
+        if short:
+            return f"https://t.me/{bot_username}/{short}?startapp=product_{product_id}"
+        return f"https://t.me/{bot_username}?startapp=product_{product_id}"
+    return f"https://t.me/{bot_username}?start=product_{product_id}"
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo, MenuButtonWebApp, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
@@ -55,6 +68,14 @@ from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt
 import ai_assistant
 import ad_design
 from telegram.constants import ChatAction
+
+
+def price_with_unit(product):
+    """Narx + (mavjud bo'lsa) o'lchov birligi: "5 000 so'm / kg". #20 — app/bot parite.
+    Birlik bo'lmasa oddiy narx qaytadi (eski mahsulotlar buzilmaydi)."""
+    s = fmt_price(product.get('price'))
+    unit = (product.get('unit') or '').strip() if isinstance(product, dict) else ''
+    return f"{s} / {unit}" if unit else s
 
 # ===== LOGGING + (ixtiyoriy) MONITORING =====
 def _setup_logging():
@@ -1721,7 +1742,7 @@ async def buyer_product_details(update: Update, context: ContextTypes.DEFAULT_TY
     rating_cnt = (t(lang, 'frag_rating_count', n=prod_count) if prod_count
                   else t(lang, 'frag_no_rating'))
     text = t(lang, 'product_card',
-             name=name, price=fmt_price(product['price']), stock=stock_line,
+             name=name, price=price_with_unit(product), stock=stock_line,
              shop=shop_name, verified=verified_badge,
              region=region_line, address=manzil_line,
              landmark=shop_landmark, map=map_link, dist=dist_line,
@@ -1880,7 +1901,7 @@ async def _show_product_deeplink(update: Update, context: ContextTypes.DEFAULT_T
     rating_cnt = (t(lang, 'frag_rating_count', n=prod_count) if prod_count
                   else t(lang, 'frag_no_rating'))
     text = t(lang, 'product_card_deeplink',
-             name=name, price=fmt_price(product['price']), shop=shop_name,
+             name=name, price=price_with_unit(product), shop=shop_name,
              region=region_line, address=manzil_line, dist=dist_line,
              prod_rating=f"{prod_avg:.1f}", rating_cnt=rating_cnt,
              shop_rating=f"{rating:.1f}", wh=working_hours, desc=desc)
@@ -2010,7 +2031,7 @@ async def _render_search_page(chat_id, context, products, page=0, sort_by='ratin
         rating_cnt = (t(lang, 'srch_rating_cnt', n=prod_count) if prod_count
                       else t(lang, 'srch_no_rating'))
         caption = t(lang, 'search_item_card',
-                    emoji=emoji, name=name, price=fmt_price(product['price']),
+                    emoji=emoji, name=name, price=price_with_unit(product),
                     shop=shop_name, region=region_line, address=manzil_line,
                     prod_rating=f"{prod_avg:.1f}", rating_cnt=rating_cnt,
                     shop_rating=f"{rating:.1f}")
@@ -2374,7 +2395,7 @@ def _format_catalog_card(lang, product, pos, total):
     return t(lang, 'catalog_card_feed',
              badge=badge,
              name=html.escape(product.get('name') or ''),
-             price=fmt_price(product.get('price')),
+             price=price_with_unit(product),
              rating=rating, stock=stock)
 
 
@@ -3662,7 +3683,14 @@ async def buyer_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
         return
 
-    db.update_order_status(order_id, 'cancelled')
+    # ATOMIK: sotuvchi ayni damda tasdiqlab ulgursa, eski bekor 'confirmed'ni bosib
+    # o'tkazib zahirani yo'qotmasin — faqat hali 'pending' bo'lsa bekor qilamiz.
+    if not db.transition_order_status(order_id, 'cancelled', 'pending'):
+        cur = db.get_order_by_id(order_id)
+        await query.edit_message_text(
+            t(lang, 'cant_cancel_status', status=fmt_status((cur or {}).get('status') or 'confirmed'))
+        )
+        return
 
     # Avtomatik bekor qilish taymerini o'chiramiz
     if context.application.job_queue:
@@ -3879,6 +3907,7 @@ async def order_delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def order_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = get_lang(update, context)
     if update.message.location:
         loc = update.message.location
         context.user_data['order_lat'] = loc.latitude
@@ -3886,13 +3915,17 @@ async def order_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['order_address'] = f"{loc.latitude:.5f}, {loc.longitude:.5f}"
         remember_buyer_geo(context, loc.latitude, loc.longitude)
     else:
-        text = update.message.text.strip()
-        if len(text) < 5:
-            await update.message.reply_text(T(update, context, 'address_too_short'))
-            return ORDER_ADDRESS
-        context.user_data['order_address'] = text
+        # Yetkazib berishda joylashuv MAJBURIY — matn manzil qabul qilinmaydi (kuryer
+        # navigatsiyasi GPS'ga bog'liq; app bilan bir xil qoida).
+        await update.message.reply_text(
+            t(lang, 'delivery_need_location'),
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton(t(lang, 'btn_send_location'), request_location=True)]],
+                resize_keyboard=True, one_time_keyboard=True,
+            )
+        )
+        return ORDER_ADDRESS
 
-    lang = get_lang(update, context)
     await update.message.reply_text(
         t(lang, 'address_accepted'),
         reply_markup=ReplyKeyboardRemove()
@@ -4299,11 +4332,12 @@ async def _autocancel_order_or_group(context, order, gid, oid, slang):
         seller_tg = order.get('seller_tg')
         if gid:
             orders = db.get_orders_in_group(gid)
-            pend = [o for o in orders if o['status'] == 'pending']
+            # ATOMIK: faqat hali 'pending' bo'lganlarini bekor qilamiz. Sotuvchi aynan shu
+            # lahzada tasdiqlab/bekor qilib ulgursa, transition False qaytaradi → taymer
+            # chekinadi (xaridorga soxta "avto-bekor" xabari ketmaydi).
+            pend = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
             if not pend:
                 return
-            for o in pend:
-                db.update_order_status(o['id'], 'cancelled')
             disp = fmt_order_id(int(gid))
             buyer = db.get_user_by_id(order['buyer_id'])
             seller = db.get_user_by_id(order['seller_id'])
@@ -4317,7 +4351,10 @@ async def _autocancel_order_or_group(context, order, gid, oid, slang):
             o = db.get_order_by_id(oid)
             if not o or o['status'] != 'pending':
                 return
-            db.update_order_status(oid, 'cancelled')
+            # ATOMIK: sotuvchi shu lahzada tasdiqlab/bekor qilib ulgurgan bo'lsa, taymer
+            # chekinadi (ikki marta ishlov + soxta "avto-bekor" xabarining oldini olamiz).
+            if not db.transition_order_status(oid, 'cancelled', 'pending'):
+                return
             disp = fmt_order_id(oid)
             buyer = db.get_user_by_id(o['buyer_id'])
             seller = db.get_user_by_id(o['seller_id'])
@@ -4796,6 +4833,7 @@ async def cart_delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def cart_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = get_lang(update, context)
     if update.message.location:
         loc = update.message.location
         context.user_data['cart_lat'] = loc.latitude
@@ -4803,13 +4841,16 @@ async def cart_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['cart_address'] = f"{loc.latitude:.5f}, {loc.longitude:.5f}"
         remember_buyer_geo(context, loc.latitude, loc.longitude)
     else:
-        text = update.message.text.strip()
-        if len(text) < 5:
-            await update.message.reply_text(T(update, context, 'address_too_short'))
-            return CART_ADDRESS
-        context.user_data['cart_address'] = text
+        # Yetkazib berishda joylashuv MAJBURIY (app bilan bir xil)
+        await update.message.reply_text(
+            t(lang, 'delivery_need_location'),
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton(t(lang, 'btn_send_location'), request_location=True)]],
+                resize_keyboard=True, one_time_keyboard=True,
+            )
+        )
+        return CART_ADDRESS
 
-    lang = get_lang(update, context)
     await update.message.reply_text(t(lang, 'address_accepted'), reply_markup=ReplyKeyboardRemove())
 
     cart = _cart(context)
@@ -5091,23 +5132,28 @@ async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     # Guruh taymerlarini o'chiramiz
-    if new_status in ('confirmed', 'cancelled') and context.application.job_queue:
+    if context.application.job_queue:
         for nm in (f"countdown_group_{group_id}", f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
             for job in context.application.job_queue.get_jobs_by_name(nm):
                 job.schedule_removal()
 
-    # Tasdiqlashda har bir mahsulot zahirasini kamaytiramiz
+    # HIMOYA (ATOMIK): har bir ichki buyurtmani 'pending'dan o'tkazamiz; faqat YUTGAN
+    # (haqiqatan o'zgargan) buyurtmalar uchun zahira kamaytiramiz. Bot+Mini App bir vaqtda
+    # yoki tugma ikki marta bosilsa, guruh ikki marta ishlanmaydi (ilgari guard yo'q edi →
+    # zahira ikki marta kamayardi). Hech biri yutmasa — allaqachon ishlangan, qaytamiz.
+    won_orders = [o for o in orders if db.transition_order_status(o['id'], new_status, 'pending')]
+    if not won_orders:
+        return
+
+    # Tasdiqlashda har bir (yutgan) mahsulot zahirasini kamaytiramiz
     if new_status == 'confirmed':
-        for o in orders:
+        for o in won_orders:
             try:
                 left = db.decrement_stock_on_confirm(o['product_id'], o['quantity'])
                 if left == 0:
                     await _notify_seller_sold_out(context, o['product_id'])
             except Exception as e:
                 logging.error(f"Guruh stock kamaytirish xatosi: {e}")
-
-    for o in orders:
-        db.update_order_status(o['id'], new_status)
 
     # Xaridorga BITTA bildirishnoma (xaridor tilida)
     try:
@@ -5396,18 +5442,20 @@ async def buyer_cancel_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not buyer or buyer['id'] != orders[0].get('buyer_id'):
         await query.answer(t(lang, 'not_your_order_toast'), show_alert=True)
         return
-    if orders[0]['status'] != 'pending':
+    # ATOMIK: faqat hali 'pending' bo'lgan sub-buyurtmalarni bekor qilamiz — sotuvchi
+    # ayni damda tasdiqlab ulgursa, eski bekor 'confirmed'ni bosib o'tkazib zahirani
+    # yo'qotmasin.
+    won = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
+    if not won:
         await query.answer(t(lang, 'cant_cancel_now_toast'), show_alert=True)
         await buyer_group_order_detail(update, context, group_id=group_id)
         return
 
-    # Taymerlarni o'chiramiz va guruhni bekor qilamiz
+    # Taymerlarni o'chiramiz
     if context.application.job_queue:
         for nm in (f"countdown_group_{group_id}", f"auto_cancel_group_{group_id}", f"reminder_group_{group_id}"):
             for job in context.application.job_queue.get_jobs_by_name(nm):
                 job.schedule_removal()
-    for o in orders:
-        db.update_order_status(o['id'], 'cancelled')
 
     # Sotuvchiga xabar (sotuvchi tilida)
     try:
@@ -5476,11 +5524,11 @@ async def auto_cancel_group_job(context: ContextTypes.DEFAULT_TYPE):
     orders = db.get_orders_in_group(group_id)
     if not orders:
         return
-    pending = [o for o in orders if o['status'] == 'pending']
+    # ATOMIK: faqat hali 'pending' bo'lganlarini bekor qilamiz — sotuvchi shu lahzada
+    # tasdiqlab ulgursa, taymer 'confirmed'ni bekor qilmasin.
+    pending = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
     if not pending:
         return
-    for o in pending:
-        db.update_order_status(o['id'], 'cancelled')
     try:
         first = orders[0]
         buyer = db.get_user_by_id(first['buyer_id'])
@@ -7568,7 +7616,7 @@ async def _build_ad_caption(product, length="long"):
 
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
-        f"\n💵 {fmt_price(product.get('price'))}"
+        f"\n💵 {price_with_unit(product)}"
         f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}"
     )
     parse_mode = 'HTML'
@@ -7577,7 +7625,7 @@ async def _build_ad_caption(product, length="long"):
     try:
         ad_text = await ai_assistant.generate_ad_caption(
             name=product.get('name') or '',
-            price_text=fmt_price(product.get('price')),
+            price_text=price_with_unit(product),
             category=str(cat) if cat else '',
             description=(product.get('description') or ''),
             shop=str(shop_name) if shop_name else '',
@@ -7682,7 +7730,7 @@ async def post_product_to_channel(context, product_id, *,
             return
 
         bot_me = await context.bot.get_me()
-        deep_link = f"https://t.me/{bot_me.username}?start=product_{product_id}"
+        deep_link = _product_buy_link(bot_me.username, product_id)   # kanal tugmasi → Mini App
 
         # === REKLAMA MATNI (A) ===
         if caption_override is not None:
@@ -7876,7 +7924,7 @@ async def show_ad_preview(update, context, product_id):
     designed = await _build_ad_design_bytes(context, product)
     photo = product.get('image_url')
     bot_me = await context.bot.get_me()
-    deep_link = f"https://t.me/{bot_me.username}?start=product_{product_id}"
+    deep_link = _product_buy_link(bot_me.username, product_id)   # preview tugmasi → Mini App
     buy_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🛒 Sotib olish", url=deep_link)]])
 
     # 1) Aynan reklama ko'rinishini yuboramiz va (rasmli bo'lsa) file_id ni eslab qolamiz
@@ -10518,10 +10566,30 @@ async def _finalize_settlement(update, context, settlement_type, paid, via_messa
     eff_type = 'paid' if due <= 0 else settlement_type
     chat_id = update.effective_chat.id
 
+    async def _already_done():
+        # Buyurtma shu lahzada ilova (yoki boshqa qurilma) orqali berilgan — qayta
+        # settlement/xabar bajarmaymiz, sotuvchini ortga qaytaramiz.
+        context.user_data.pop('settle', None)
+        back_cb = f"seller_gorder_{key}" if scope == 'g' else f"seller_order_{key}"
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton(t(lang, 'back'), callback_data=back_cb)]])
+        msg = t(lang, 'setl_already_done')
+        if via_message:
+            await update.message.reply_text(msg, reply_markup=kb)
+        else:
+            try:
+                await update.callback_query.edit_message_text(msg, reply_markup=kb)
+            except Exception:
+                await context.bot.send_message(chat_id=chat_id, text=msg, reply_markup=kb)
+
     if scope == 'g':
         orders = db.get_orders_in_group(key)
-        for o in orders:
-            db.update_order_status(o['id'], 'delivered')
+        # ATOMIK: faqat 'confirmed' sub-buyurtmalarni 'delivered'ga o'tkazamiz. App deliver
+        # bilan bir vaqtda yoki ikki marta bo'lsa — faqat YUTGAN tomon settlement/xabar
+        # bajaradi (qarama-qarshi to'lov holati + ikki marta "berildi" xabarining oldini).
+        won = [o for o in orders if db.transition_order_status(o['id'], 'delivered', 'confirmed')]
+        if not won:
+            await _already_done()
+            return
         db.set_group_settlement(key, eff_type, paid, due)
         rep = orders[0] if orders else None
         if rep:
@@ -10549,7 +10617,10 @@ async def _finalize_settlement(update, context, settlement_type, paid, via_messa
         if not order:
             context.user_data.pop('settle', None)
             return
-        db.update_order_status(int(key), 'delivered')
+        # ATOMIK: faqat 'confirmed' holatdan o'tkazamiz (app deliver bilan poyga himoyasi).
+        if not db.transition_order_status(int(key), 'delivered', 'confirmed'):
+            await _already_done()
+            return
         db.set_order_settlement(int(key), eff_type, paid, due)
         buyer_tg = order.get('buyer_tg')
         buyer = db.get_user_by_id(order['buyer_id'])
@@ -10846,22 +10917,23 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
     status_map = {'confirm': 'confirmed', 'cancel': 'cancelled', 'deliver': 'delivered'}
     new_status = status_map.get(action)
     if new_status:
-        # HIMOYA: agar buyurtma allaqachon 'pending' emas (masalan, Mini App orqali yoki
-        # eski tugmadan ishlov berilgan) — qayta ishlamaymiz (ikki marta stock kamaytirish
-        # va takroriy xabarning oldini olamiz). Faqat detalni yangilaymiz.
-        if action in ('confirm', 'cancel'):
-            _cur = db.get_order_by_id(order_id)
-            if _cur and _cur.get('status') != 'pending':
-                await seller_order_detail(update, context)
-                return
+        # HIMOYA (ATOMIK): faqat 'pending' holatdan o'tkazamiz. Bot va Mini App AYNAN bir
+        # buyurtmani bir vaqtda tasdiqlasa/bekor qilsa yoki tugma ikki marta bosilsa —
+        # `transition_order_status` faqat BITTA chaqiruvga True qaytaradi (rowcount=1).
+        # Yutmagan chaqiruv zahirani kamaytirmaydi va xabar yubormaydi, faqat detalni
+        # ko'rsatadi (ilgarigi read-then-check atomik emas edi → ikki marta ishlardi).
+        won = db.transition_order_status(order_id, new_status, 'pending')
+        if not won:
+            await seller_order_detail(update, context)
+            return
 
         # Jonli sanoq + avtomatik bekor taymerini o'chiramiz
-        if new_status in ('confirmed', 'cancelled') and context.application.job_queue:
+        if context.application.job_queue:
             for jn in (f"countdown_order_{order_id}", f"auto_cancel_{order_id}", f"reminder_{order_id}"):
                 for job in context.application.job_queue.get_jobs_by_name(jn):
                     job.schedule_removal()
 
-        # Stock kamaytirish — faqat tasdiqlanganda
+        # Stock kamaytirish — faqat tasdiqlanganda (va biz yutgan bo'lsak)
         if new_status == 'confirmed':
             try:
                 order_for_stock = db.get_order_by_id(order_id)
@@ -10874,8 +10946,6 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
                         await _notify_seller_sold_out(context, order_for_stock['product_id'])
             except Exception as e:
                 logging.error(f"Stock kamaytirish xatosi: {e}")
-
-        db.update_order_status(order_id, new_status)
 
         # Xaridorga bildirishnoma yuboramiz (xaridor tilida)
         try:
@@ -10943,19 +11013,34 @@ async def message_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(t(lang, 'order_not_found_x'))
         return ConversationHandler.END
 
-    # Qabul qiluvchi tilini aniqlash uchun
-    receiver = db.get_user_by_id(order['seller_id'] if user['id'] == order['buyer_id'] else order['buyer_id'])
-    rlang = get_user_lang(receiver) if receiver else DEFAULT_LANG
-
-    # Foydalanuvchi shu buyurtmaning xaridorimi yoki sotuvchisimi — shunga qarab xabar yuboriladi.
-    # role'ga tayanish noto'g'ri, chunki bitta foydalanuvchi ham xaridor ham sotuvchi bo'lishi mumkin.
+    # Foydalanuvchi shu buyurtmaning xaridori/sotuvchisi/kuryeri — shunga qarab xabar
+    # yo'naltiriladi. #13 — kuryer ham ishtirokchi: xaridordan kuryer biriktirilgan bo'lsa
+    # kuryerga, aks holda sotuvchiga; kuryer/sotuvchidan — xaridorga.
     if user['id'] == order['buyer_id']:
-        receiver_id = order['seller_id']
-        receiver_tg = order.get('seller_tg')
-        sender_label = t(rlang, 'sender_label_buyer', name=html.escape(user.get('name') or ''))
+        if order.get('courier_id'):
+            receiver_id = order['courier_id']
+            receiver_tg = order.get('courier_tg')
+        else:
+            receiver_id = order['seller_id']
+            receiver_tg = order.get('seller_tg')
+        sender_role = 'buyer'
+    elif user['id'] == order.get('courier_id'):
+        receiver_id = order['buyer_id']
+        receiver_tg = order.get('buyer_tg')
+        sender_role = 'courier'
     else:
         receiver_id = order['buyer_id']
         receiver_tg = order.get('buyer_tg')
+        sender_role = 'seller'
+
+    # Qabul qiluvchi tilini aniqlash uchun
+    receiver = db.get_user_by_id(receiver_id) if receiver_id else None
+    rlang = get_user_lang(receiver) if receiver else DEFAULT_LANG
+    if sender_role == 'buyer':
+        sender_label = t(rlang, 'sender_label_buyer', name=html.escape(user.get('name') or ''))
+    elif sender_role == 'courier':
+        sender_label = t(rlang, 'sender_label_courier', name=html.escape(user.get('name') or ''))
+    else:
         sender_label = t(rlang, 'sender_label_seller', name=html.escape(user.get('shop_name') or user.get('name') or ''))
 
     db.create_message(order_id, user['id'], receiver_id, message_text)
@@ -10997,7 +11082,7 @@ async def view_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user_by_telegram_id(update.effective_user.id)
     order = db.get_order_by_id(order_id)
 
-    if not order or not user or user['id'] not in (order['buyer_id'], order['seller_id']):
+    if not order or not user or user['id'] not in (order['buyer_id'], order['seller_id'], order.get('courier_id')):
         await query.edit_message_text(t(lang, 'order_not_yours_full'))
         return
 
@@ -11007,7 +11092,7 @@ async def view_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         lines = [t(lang, 'messages_history_header', oid=fmt_order_id(order_id))]
         for m in messages[-30:]:  # so'nggi 30 ta xabar
-            who = "👤" if m['sender_id'] == order['buyer_id'] else "🏪"
+            who = "👤" if m['sender_id'] == order['buyer_id'] else ("🚴" if m['sender_id'] == order.get('courier_id') else "🏪")
             name = html.escape(m.get('sender_name') or '')
             msg = html.escape(m.get('message') or '')
             ts = fmt_datetime(m.get('created_at'))
@@ -12356,7 +12441,12 @@ async def admin_force_cancel_order(update: Update, context: ContextTypes.DEFAULT
     order = db.get_order_by_id(order_id)
 
     if order:
-        db.update_order_status(order_id, 'cancelled')
+        # ATOMIK bekor: 'confirmed' bo'lsa zahirani QAYTARAMIZ (kamaytirilgan edi),
+        # 'pending' bo'lsa shart emas. Avval restock yo'q edi → zahira yo'qolardi (bug).
+        if db.transition_order_status(order_id, 'cancelled', 'confirmed'):
+            await _maybe_restock_on_cancel(context, order)
+        else:
+            db.transition_order_status(order_id, 'cancelled', 'pending')
         # Ikki tomonga xabar (har biri o'z tilida)
         oid = fmt_order_id(order_id)
         buyer = db.get_user_by_id(order['buyer_id']) if order.get('buyer_id') else None
@@ -12902,7 +12992,7 @@ async def share_product_link(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     bot_me = await context.bot.get_me()
     bot_username = bot_me.username
-    deep_link = f"https://t.me/{bot_username}?start=product_{product_id}"
+    deep_link = _product_buy_link(bot_username, product_id)   # ulashish havolasi → Mini App
 
     from urllib.parse import quote
     share_text = f"{product.get('name', '')} — {fmt_price(product.get('price', 0))}"
@@ -14452,6 +14542,63 @@ async def webapp_order_dispatch_job(context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 
+async def _notify_courier_assigned(context, order_id):
+    """#3 — buyurtmaga biriktirilgan KURYERga Telegram PUSH: tafsilotlar (mahsulot,
+    xaridor + telefon, manzil, summa). Kuryer Mini App kuryer panelidan yetkazadi."""
+    order = db.get_order_by_id(order_id)
+    if not order:
+        return
+    cid = order.get('courier_id')
+    if not cid:
+        return
+    courier = db.get_user_by_id(cid)
+    if not courier or not courier.get('telegram_id'):
+        return
+    prod = db.get_product_by_id(order.get('product_id')) or {}
+    buyer = db.get_user_by_id(order.get('buyer_id')) or {}
+    lang = courier.get('language') or 'uz'
+    name = html.escape(prod.get('name') or '—')
+    bname = html.escape(buyer.get('name') or '—')
+    bphone = html.escape(buyer.get('phone_number') or '—')
+    addr = html.escape(order.get('delivery_address') or '—')
+    if lang == 'ru':
+        text = (f"🚴 <b>Вам назначен новый заказ!</b>\n\n"
+                f"📦 {name} × {order.get('quantity')}\n"
+                f"👤 {bname} · 📞 {bphone}\n"
+                f"📍 {addr}\n"
+                f"💵 {order.get('total_price')}\n\n"
+                f"Откройте Mini App → 🚴 Панель курьера, чтобы доставить.")
+    else:
+        text = (f"🚴 <b>Sizga yangi buyurtma biriktirildi!</b>\n\n"
+                f"📦 {name} × {order.get('quantity')}\n"
+                f"👤 {bname} · 📞 {bphone}\n"
+                f"📍 {addr}\n"
+                f"💵 {order.get('total_price')}\n\n"
+                f"Yetkazib berish uchun Mini App → 🚴 Kuryer panelini oching.")
+    await context.bot.send_message(chat_id=courier['telegram_id'], text=text, parse_mode='HTML')
+
+
+async def webapp_courier_notify_job(context: ContextTypes.DEFAULT_TYPE):
+    """#3 — App'da buyurtmaga biriktirilgan kuryerlarga PUSH yuboradi (har ~12s).
+    Webapp alohida jarayon — biriktirish app'da bo'ladi, bot shu job orqali xabar beradi.
+    Yuborilsa ham, ketmasa ham belgi tozalanadi (qayta spam qilmaslik uchun)."""
+    try:
+        ids = db.get_orders_awaiting_courier_notify()
+    except Exception as e:
+        logging.error(f"webapp_courier_notify_job: ro'yxat olinmadi: {e}")
+        return
+    for oid in ids:
+        try:
+            await _notify_courier_assigned(context, oid)
+        except Exception as e:
+            logging.error(f"webapp_courier_notify_job: order {oid} kuryer PUSH xato: {e}")
+        finally:
+            try:
+                db.clear_courier_notify(oid)
+            except Exception:
+                pass
+
+
 async def webapp_scheduled_scan_job(context: ContextTypes.DEFAULT_TYPE):
     """Mini App yaratgan rejalashtirilgan postlarga publish jobini ulaydi (idempotent).
     Webapp alohida jarayon — uning yaratgan rejasiga bot job-queue'si avtomatik ulanmaydi;
@@ -14924,6 +15071,10 @@ def main():
         # Mini App (webapp) yaratgan buyurtmalarga sotuvchi bildirishnomasi (har 12s)
         app.job_queue.run_repeating(webapp_order_dispatch_job, interval=12, first=15)
         logging.info("Mini App buyurtma dispatch job rejalashtirildi (har 12s)")
+
+        # #3 — App'da kuryerga biriktirilgan buyurtmalar uchun kuryer PUSH (har 12s)
+        app.job_queue.run_repeating(webapp_courier_notify_job, interval=12, first=18)
+        logging.info("Mini App kuryer biriktirish PUSH job rejalashtirildi (har 12s)")
 
         # Mini App yaratgan rejalashtirilgan postlarga publish jobini ulash (har 30s)
         app.job_queue.run_repeating(webapp_scheduled_scan_job, interval=30, first=20)

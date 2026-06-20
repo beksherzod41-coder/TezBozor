@@ -144,9 +144,7 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text=""):
 
         draw = ImageDraw.Draw(canvas, "RGBA")
 
-        # 2) Rangli ramka
-        border = 14
-        draw.rectangle([0, 0, CANVAS - 1, CANVAS - 1], outline=ACCENT, width=border)
+        # 2) Rangli ramka — OLIB TASHLANDI (rasm ustiga qizil ramka qo'yilmaydi)
 
         margin = 46
 

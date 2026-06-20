@@ -1039,6 +1039,178 @@ async def generate_product_questions(*, name, category="", description="",
 
 
 # ============================================================
+# AVTO-MODERATSIYA (#5) — mahsulot matnini xavfsizlik bo'yicha tekshiradi
+# ============================================================
+_MODERATION_SYSTEM = (
+    "You are a strict but fair content-safety moderator for an Uzbekistan marketplace. "
+    "Decide if a product listing (name + description) violates marketplace policy.\n"
+    "PROHIBITED: firearms, ammunition, explosives, weapons designed to kill; "
+    "narcotics/drugs and drug paraphernalia; prescription-only medicines; poisons; "
+    "sexual/adult/pornographic content and services; human/organ/people trade; "
+    "counterfeit money, fraud, stolen goods, hacking/carding services; "
+    "endangered animals/parts; extremist, hateful or terrorist content; alcohol/tobacco to minors.\n"
+    "ALLOWED (do NOT flag): ordinary clothes, electronics, food, cosmetics, household goods, "
+    "kitchen knives, tools, toys (incl. toy guns), legal supplements/vitamins, books, furniture, etc.\n"
+    "Be conservative: when in doubt, DO NOT flag (avoid false positives). "
+    "Respond ONLY with compact JSON: "
+    '{"flagged": true|false, "category": "<short category or empty>", '
+    '"reason": "<one short sentence in {LANG}, why flagged>"}'
+)
+
+
+async def moderate_product(*, name, description="", lang="uz") -> dict:
+    """Mahsulot matnini taqiqlangan tovar/kontent uchun tekshiradi.
+
+    Qaytaradi {"flagged": bool, "category": str, "reason": str} yoki None
+    (AI o'chiq / xato — chaqiruvchi bunda mahsulotni bloklamaydi, oddiy o'tkazadi)."""
+    if not is_enabled() or not (name or "").strip():
+        return None
+    lng = "uzbek" if lang == "uz" else ("russian" if lang == "ru" else "uzbek")
+    system = _MODERATION_SYSTEM.replace("{LANG}", lng)
+    user_msg = f"name: {name}\ndescription: {description or ''}"
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 200,
+        "temperature": 0.0,   # qat'iy/barqaror qaror
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Moderatsiya API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            if not content:
+                return None
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            return {
+                "flagged": bool(parsed.get("flagged")),
+                "category": str(parsed.get("category") or "")[:60],
+                "reason": str(parsed.get("reason") or "")[:300],
+            }
+    except Exception as e:
+        log.warning(f"Moderatsiya xato: {e}")
+        return None
+
+
+# ============================================================
+# AI-MENEJER / RAG (#3) — mijoz savoliga do'kon profilidan grounded javob
+# ============================================================
+_SHOP_QA_SYSTEM = {
+    'uz': ("Siz do'konning xushmuomala AI-yordamchisisiz. Mijoz savoliga FAQAT quyida "
+           "berilgan do'kon va mahsulot ma'lumotlari asosida javob bering. Ma'lumotlarda "
+           "javob bo'lmasa, muloyimlik bilan «Bu haqda sotuvchining o'zidan so'rang» deng. "
+           "Narx, muddat yoki shartni O'ZINGIZDAN o'ylab TOPMANG. Qisqa (1-3 jumla), "
+           "do'stona, o'zbek tilida javob bering."),
+    'ru': ("Вы вежливый AI-помощник магазина. Отвечайте на вопрос клиента ТОЛЬКО на основе "
+           "приведённых данных о магазине и товаре. Если ответа в данных нет, вежливо "
+           "скажите «Уточните это у самого продавца». НЕ ВЫДУМЫВАЙТЕ цены, сроки или условия. "
+           "Отвечайте кратко (1-3 предложения), дружелюбно, на русском языке."),
+}
+
+
+async def answer_shop_question(*, question, facts, lang="uz") -> str:
+    """Mijoz savoliga do'kon/mahsulot faktlari asosida javob beradi (RAG).
+    Qaytaradi javob matni yoki None (AI o'chiq/xato)."""
+    if not is_enabled() or not (question or "").strip():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    label = "Do'kon va mahsulot ma'lumotlari" if lng == 'uz' else "Данные магазина и товара"
+    qlabel = "Mijoz savoli" if lng == 'uz' else "Вопрос клиента"
+    user_msg = f"{label}:\n{facts}\n\n{qlabel}: {question}"
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _SHOP_QA_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 300,
+        "temperature": 0.2,   # past — faktlardan chetga chiqmasin
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Shop QA API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            return content or None
+    except Exception as e:
+        log.warning(f"Shop QA xato: {e}")
+        return None
+
+
+# ============================================================
+# AI SAVDOLASHISH (#8) — sotuvchi nomidan, maxfiy "oxirgi narx" floor'i bilan
+# ============================================================
+_HAGGLE_SYSTEM = (
+    "You are a warm, witty Uzbek bazaar seller's assistant, haggling on the seller's behalf. "
+    "Talk like a friendly bazaar trader (use 'aka', 'uka', light humor), praise the product.\n"
+    "The product's LISTED price is {LISTED}. Your SECRET minimum acceptable price is {FLOOR}. "
+    "RULES YOU MUST NEVER BREAK:\n"
+    "1) NEVER reveal, hint at, or mention that you have a minimum/secret price or what it is.\n"
+    "2) NEVER agree to any price BELOW {FLOOR}. If the buyer offers below {FLOOR}, politely refuse "
+    "and counter with a price between their offer and the listed price (but >= {FLOOR}).\n"
+    "3) Concede slowly: start near the listed price, lower only a little when the buyer pushes.\n"
+    "4) If the buyer's offer is >= {FLOOR} and reasonable, you MAY accept it (or settle slightly higher).\n"
+    "Reply in {LANG}, 1-2 short sentences, friendly.\n"
+    'Respond ONLY with JSON: {"reply": "<message>", "offer_price": <integer current or agreed price>, '
+    '"accepted": true|false}. accepted=true ONLY for a final deal at offer_price (>= your minimum).'
+)
+
+
+async def haggle(*, listed_price, floor_price, history, buyer_message, lang="uz") -> dict:
+    """Xaridor bilan sotuvchi nomidan savdolashadi. floor_price — MAXFIY (hech qachon
+    ochilmaydi/buzilmaydi). Qaytaradi {"reply", "offer_price", "accepted"} yoki None."""
+    if not is_enabled() or not (buyer_message or "").strip():
+        return None
+    lng = "uzbek" if lang == "uz" else ("russian" if lang == "ru" else "uzbek")
+    system = (_HAGGLE_SYSTEM.replace("{LISTED}", str(int(listed_price)))
+              .replace("{FLOOR}", str(int(floor_price))).replace("{LANG}", lng))
+    msgs = [{"role": "system", "content": system}]
+    for h in (history or [])[-6:]:
+        role = "assistant" if h.get("role") == "assistant" else "user"
+        msgs.append({"role": role, "content": str(h.get("content") or "")[:500]})
+    msgs.append({"role": "user", "content": str(buyer_message)[:500]})
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {"model": MODEL, "messages": msgs, "max_tokens": 250,
+               "temperature": 0.6, "response_format": {"type": "json_object"}, "stream": False}
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions", json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Haggle API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            try:
+                offer = int(float(parsed.get("offer_price") or listed_price))
+            except (TypeError, ValueError):
+                offer = int(listed_price)
+            return {
+                "reply": str(parsed.get("reply") or "")[:500],
+                "offer_price": offer,
+                "accepted": bool(parsed.get("accepted")),
+            }
+    except Exception as e:
+        log.warning(f"Haggle xato: {e}")
+        return None
+
+
+# ============================================================
 # SHARHGA JAVOB GENERATSIYASI (bir martalik, agent siklisiz)
 # ============================================================
 _REVIEW_REPLY_SYSTEM = {
@@ -1192,6 +1364,464 @@ async def generate_profile_completion_message(*, name="", missing_fields=None,
             return text or None
     except Exception as e:
         log.warning(f"Profil to'ldirish xabari yaratishda xato: {e}")
+        return None
+
+
+# ============================================================
+# #9 — SHEVA / SLANG QIDIRUV (natija topilmasa AI tushunadi)
+# ============================================================
+# Xaridor "chotki oyoq kiyim", "duxi", "kasitka" kabi shevada yozsa, oddiy LIKE
+# qidiruv hech narsa topmaydi. Bu yordamchi so'rovni RASMIY/standart qidiruv
+# so'zlariga aylantiradi (sinonim + transliteratsiya emas, MA'NO darajasida).
+_SLANG_SYSTEM = {
+    'uz': (
+        "Sen O'zbekiston onlayn bozori uchun qidiruv tarjimonisan. Xaridor mahsulotni "
+        "SHEVA, jargon yoki so'zlashuv tilida yozadi (masalan 'chotki krasovka', 'duxi', "
+        "'kasitka', 'adidaslar'). Sening vazifang — buni do'kondagi mahsulot nomi/tavsifida "
+        "uchraydigan 2-5 ta STANDART, rasmiy kalit so'zga aylantirish.\n"
+        "Faqat JSON qaytar: {\"keywords\": [\"...\", \"...\"], \"category\": \"<eng mos kategoriya nomi yoki bo'sh>\"}.\n"
+        "keywords — qisqa, umumiy nomlar (sifat/brendni ham qo'shsang bo'ladi). Hech narsa "
+        "tushunmasang, bo'sh ro'yxat qaytar. Izoh yozma."
+    ),
+    'ru': (
+        "Ты — поисковый переводчик для узбекского онлайн-рынка. Покупатель пишет товар на "
+        "СЛЕНГЕ или разговорно (например 'кроссы', 'духи', 'кофта'). Твоя задача — превратить "
+        "это в 2-5 СТАНДАРТНЫХ ключевых слов, которые встречаются в названии/описании товара.\n"
+        "Верни только JSON: {\"keywords\": [\"...\", \"...\"], \"category\": \"<подходящая категория или пусто>\"}.\n"
+        "keywords — короткие общие названия. Если ничего не понятно — пустой список. Без пояснений."
+    ),
+}
+
+
+async def interpret_search_query(query, categories=None, lang="uz") -> dict:
+    """Sheva/jargon so'rovni standart kalit so'zlarga aylantiradi (#9).
+    Qaytaradi {"keywords": [str, ...], "category": str} yoki None (AI o'chiq/xato)."""
+    if not is_enabled() or not (query or "").strip():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    user_msg = (query or "").strip()[:200]
+    if categories:
+        cat_label = "Mavjud kategoriyalar" if lng == 'uz' else "Доступные категории"
+        names = ", ".join(str(c)[:40] for c in categories if c)[:600]
+        user_msg += f"\n\n{cat_label}: {names}"
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _SLANG_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 150,
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Slang qidiruv API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            kws = parsed.get("keywords") or []
+            if isinstance(kws, str):
+                kws = [kws]
+            keywords = [str(k).strip()[:50] for k in kws if str(k).strip()][:5]
+            return {
+                "keywords": keywords,
+                "category": str(parsed.get("category") or "").strip()[:60],
+            }
+    except Exception as e:
+        log.warning(f"Slang qidiruv xato: {e}")
+        return None
+
+
+# ============================================================
+# #4 — REELS / TIKTOK SSENARIY (sotuvchiga qisqa video skript)
+# ============================================================
+_REELS_SYSTEM = {
+    'uz': (
+        "Sen — qisqa video (Reels/TikTok) bo'yicha tajribali ssenariy mualliflisan. "
+        "Sotuvchiga uning mahsuloti uchun 15-30 soniyalik JOZIBALI video skript yoz.\n"
+        "Tuzilma (shu sarlavhalar bilan):\n"
+        "🎬 HOOK (0-3s) — e'tibor tortuvchi birinchi jumla/sahna.\n"
+        "🎥 SAHNALAR — 3-5 ta qisqa kadr: har biri [vaqt] + nima ko'rsatiladi + ekrandagi yozuv.\n"
+        "🗣 OVOZ MATNI — kadrlarga mos qisqa zakadr matni.\n"
+        "🎵 MUSIQA — mos trend/uslub maslahati.\n"
+        "📢 CTA — oxirgi chorlov.\n"
+        "#️⃣ HASHTAGLAR — 5-8 ta mos hashtag.\n"
+        "Faqat berilgan mahsulot faktlaridan foydalan, narx/xususiyatni o'ylab topma. "
+        "Jonli, sodda o'zbek tilida. HTML/markdown ishlatma — oddiy matn va emoji."
+    ),
+    'ru': (
+        "Ты — опытный сценарист коротких видео (Reels/TikTok). Напиши продавцу ЦЕПЛЯЮЩИЙ "
+        "сценарий видео на 15-30 секунд для его товара.\n"
+        "Структура (с этими заголовками):\n"
+        "🎬 HOOK (0-3s) — цепляющая первая фраза/сцена.\n"
+        "🎥 СЦЕНЫ — 3-5 коротких кадров: [время] + что показать + текст на экране.\n"
+        "🗣 ОЗВУЧКА — короткий закадровый текст под кадры.\n"
+        "🎵 МУЗЫКА — совет по тренду/стилю.\n"
+        "📢 CTA — финальный призыв.\n"
+        "#️⃣ ХЕШТЕГИ — 5-8 подходящих.\n"
+        "Используй только данные факты, не выдумывай цену/характеристики. "
+        "Живой, простой русский. Без HTML/markdown — обычный текст и эмодзи."
+    ),
+}
+
+
+async def generate_video_script(*, name, price_text="", category="",
+                                description="", lang="uz") -> str:
+    """Mahsulot uchun Reels/TikTok ssenariysi yozadi (#4). Matn yoki None qaytaradi."""
+    if not is_enabled() or not (name or "").strip():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    parts = [f"{'Mahsulot' if lng=='uz' else 'Товар'}: {name}"]
+    if price_text:
+        parts.append(f"{'Narx' if lng=='uz' else 'Цена'}: {price_text}")
+    if category:
+        parts.append(f"{'Kategoriya' if lng=='uz' else 'Категория'}: {category}")
+    if description:
+        parts.append(f"{'Tavsif' if lng=='uz' else 'Описание'}: {description}")
+    user_msg = "\n".join(parts)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _REELS_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 800,
+        "temperature": 0.85,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Reels ssenariy API xatosi {resp.status_code}")
+                return None
+            text = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            if len(text) > 2000:
+                text = text[:2000].rstrip()
+            return text or None
+    except Exception as e:
+        log.warning(f"Reels ssenariy xato: {e}")
+        return None
+
+
+# ============================================================
+# #6 — SENTIMENT TAHLIL (sharhlardan admin uchun "nimadan norozi")
+# ============================================================
+_SENTIMENT_SYSTEM = {
+    'uz': (
+        "Sen — marketplace uchun mijoz sharhlarini tahlil qiluvchi tahlilchisan. "
+        "Senga bir nechta sharh (baho + izoh) beriladi. Ularni umumlashtirib, admin uchun "
+        "qisqa hisobot tuz.\n"
+        "Faqat JSON qaytar:\n"
+        '{"summary": "<2-3 jumlalik umumiy xulosa>", '
+        '"complaints": ["<asosiy shikoyat/norozilik mavzulari>"], '
+        '"praises": ["<eng ko\'p maqtalgan jihatlar>"], '
+        '"suggestions": ["<admin uchun 2-4 ta amaliy tavsiya>"]}.\n'
+        "Har ro'yxat 3-5 banddan oshmasin, bandlar qisqa. Faqat berilgan sharhlarga tayan. "
+        "O'zbek tilida yoz. Izohsiz."
+    ),
+    'ru': (
+        "Ты — аналитик отзывов клиентов маркетплейса. Тебе дают несколько отзывов "
+        "(оценка + комментарий). Обобщи их в краткий отчёт для админа.\n"
+        "Верни только JSON:\n"
+        '{"summary": "<вывод в 2-3 предложениях>", '
+        '"complaints": ["<основные темы жалоб>"], '
+        '"praises": ["<что чаще всего хвалят>"], '
+        '"suggestions": ["<2-4 практических совета админу>"]}.\n'
+        "В каждом списке не более 3-5 коротких пунктов. Опирайся только на данные отзывы. "
+        "Пиши по-русски. Без пояснений."
+    ),
+}
+
+
+async def analyze_sentiment(reviews, lang="uz") -> dict:
+    """Sharhlar ro'yxatini tahlil qilib admin hisobotini qaytaradi (#6).
+    reviews — [{rating, comment, product_name?, shop_name?}, ...].
+    Qaytaradi {"summary","complaints","praises","suggestions"} yoki None."""
+    if not is_enabled():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    lines = []
+    for r in (reviews or [])[:120]:
+        cm = str((r.get("comment") or "")).strip()
+        if not cm:
+            continue
+        rt = r.get("rating") or r.get("product_rating") or "?"
+        shop = str(r.get("shop_name") or "").strip()
+        prefix = f"[{rt}★]" + (f"({shop})" if shop else "")
+        lines.append(f"{prefix} {cm[:300]}")
+    if not lines:
+        return None
+    user_msg = "\n".join(lines[:120])[:8000]
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _SENTIMENT_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 700,
+        "temperature": 0.3,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Sentiment API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+
+            def _lst(key):
+                v = parsed.get(key) or []
+                if isinstance(v, str):
+                    v = [v]
+                return [str(x).strip()[:200] for x in v if str(x).strip()][:5]
+
+            return {
+                "summary": str(parsed.get("summary") or "").strip()[:600],
+                "complaints": _lst("complaints"),
+                "praises": _lst("praises"),
+                "suggestions": _lst("suggestions"),
+            }
+    except Exception as e:
+        log.warning(f"Sentiment tahlil xato: {e}")
+        return None
+
+
+# ============================================================
+# #11 — DINAMIK NARX (talab/raqobat signallaridan narx tavsiyasi)
+# ============================================================
+# #2 (price-insight) faqat raqobat o'rtachasiga qaraydi. Dinamik narx esa mahsulotning
+# REAL signallarini (sotuv tezligi, zahira, kunlar, sevimlilar, reyting) + raqobatni
+# birga tahlil qilib "ko'tar / tushir / qoldir" tavsiyasini va aniq narxni beradi.
+_DYNPRICE_SYSTEM = {
+    'uz': (
+        "Sen — marketplace uchun dinamik narx bo'yicha tahlilchisan. Senga mahsulotning "
+        "joriy narxi, talab signallari (sotilgan dona, kutilayotgan buyurtma, sevimlilar, "
+        "e'lon turgan kunlar, zahira, reyting) va raqobat narx statistikasi beriladi.\n"
+        "Mantiq:\n"
+        "• Talab YUQORI (tez sotilyapti, ko'p sevimli) + zahira kam → narxni biroz KO'TARISH mumkin.\n"
+        "• Talab PAST (uzoq turibdi, sotilmayapti, ko'p zahira) → narxni TUSHIRISH (chegirma) tavsiya.\n"
+        "• Narx raqobatdan ancha qimmat va sotuv past → tushir; ancha arzon va talab yuqori → ko'tar.\n"
+        "• Ishonching kam bo'lsa yoki signal yetarli emas → 'keep'.\n"
+        "Faqat JSON qaytar: {\"verdict\": \"raise|lower|keep\", \"suggested_price\": <butun son>, "
+        "\"change_pct\": <foiz, manfiy=tushish>, \"reason\": \"<1-2 jumla, o'zbekcha>\", "
+        "\"confidence\": \"low|medium|high\"}. suggested_price real va mantiqiy bo'lsin "
+        "(odatda joriy narxdan ±25% ichida). Izohsiz."
+    ),
+    'ru': (
+        "Ты — аналитик динамического ценообразования маркетплейса. Тебе дают текущую цену "
+        "товара, сигналы спроса (продано шт, ожидающие заказы, в избранном, дней в продаже, "
+        "остаток, рейтинг) и статистику цен конкурентов.\n"
+        "Логика:\n"
+        "• Высокий спрос (быстро продаётся, много в избранном) + мало остатка → можно слегка ПОВЫСИТЬ.\n"
+        "• Низкий спрос (долго висит, не продаётся, много остатка) → ПОНИЗИТЬ (скидка).\n"
+        "• Цена сильно выше конкурентов и слабые продажи → понизить; сильно ниже и высокий спрос → повысить.\n"
+        "• Мало уверенности или недостаточно сигналов → 'keep'.\n"
+        "Верни только JSON: {\"verdict\": \"raise|lower|keep\", \"suggested_price\": <целое>, "
+        "\"change_pct\": <процент, минус=снижение>, \"reason\": \"<1-2 предложения, по-русски>\", "
+        "\"confidence\": \"low|medium|high\"}. suggested_price реалистичный "
+        "(обычно в пределах ±25% от текущей). Без пояснений."
+    ),
+}
+
+
+async def dynamic_price_advice(*, name, price, signals, competitor=None,
+                               category="", lang="uz") -> dict:
+    """#11 — mahsulot uchun dinamik narx tavsiyasi. signals — get_product_demand_signals()
+    natijasi; competitor — get_category_price_stats() natijasi (yoki None).
+    Qaytaradi {"verdict","suggested_price","change_pct","reason","confidence"} yoki None."""
+    if not is_enabled() or not (name or "").strip():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    s = signals or {}
+    parts = [f"{'Mahsulot' if lng=='uz' else 'Товар'}: {name}"]
+    if category:
+        parts.append(f"{'Kategoriya' if lng=='uz' else 'Категория'}: {category}")
+    parts.append(f"{'Joriy narx' if lng=='uz' else 'Текущая цена'}: {int(price or 0)}")
+    stock = s.get("stock_count")
+    stock_txt = ("∞" if stock is None else str(stock))
+    if lng == 'uz':
+        parts += [
+            f"E'lon turgan kunlar: {s.get('days_listed', 0)}",
+            f"Sotilgan (dona): {s.get('sold', 0)}",
+            f"Jami buyurtma: {s.get('orders_total', 0)} (kutilayotgan: {s.get('pending_orders', 0)})",
+            f"Sevimlilarga qo'shilgan: {s.get('favorites', 0)}",
+            f"Zahira: {stock_txt}",
+            f"Reyting: {s.get('prod_rating') or '—'} ({s.get('review_count', 0)} sharh)",
+        ]
+    else:
+        parts += [
+            f"Дней в продаже: {s.get('days_listed', 0)}",
+            f"Продано (шт): {s.get('sold', 0)}",
+            f"Всего заказов: {s.get('orders_total', 0)} (ожидают: {s.get('pending_orders', 0)})",
+            f"В избранном: {s.get('favorites', 0)}",
+            f"Остаток: {stock_txt}",
+            f"Рейтинг: {s.get('prod_rating') or '—'} ({s.get('review_count', 0)} отзывов)",
+        ]
+    if competitor and competitor.get("count"):
+        if lng == 'uz':
+            parts.append(f"Raqobat ({competitor['count']} ta): o'rtacha {competitor.get('avg')}, "
+                         f"eng arzon {competitor.get('min')}, eng qimmat {competitor.get('max')}")
+        else:
+            parts.append(f"Конкуренты ({competitor['count']}): средняя {competitor.get('avg')}, "
+                         f"мин {competitor.get('min')}, макс {competitor.get('max')}")
+    user_msg = "\n".join(parts)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _DYNPRICE_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 250,
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Dinamik narx API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            verdict = str(parsed.get("verdict") or "keep").lower()
+            if verdict not in ("raise", "lower", "keep"):
+                verdict = "keep"
+            try:
+                sp = int(float(parsed.get("suggested_price") or price or 0))
+            except (TypeError, ValueError):
+                sp = int(price or 0)
+            try:
+                cp = int(float(parsed.get("change_pct") or 0))
+            except (TypeError, ValueError):
+                cp = 0
+            conf = str(parsed.get("confidence") or "medium").lower()
+            if conf not in ("low", "medium", "high"):
+                conf = "medium"
+            return {
+                "verdict": verdict,
+                "suggested_price": max(0, sp),
+                "change_pct": cp,
+                "reason": str(parsed.get("reason") or "")[:300],
+                "confidence": conf,
+            }
+    except Exception as e:
+        log.warning(f"Dinamik narx xato: {e}")
+        return None
+
+
+# ============================================================
+# #17 — AQLLI SOVG'A YORDAMCHISI (kimga + sabab + budjet → g'oyalar)
+# ============================================================
+_GIFT_SYSTEM = {
+    'uz': (
+        "Sen — O'zbekiston marketplace'ining sovg'a tanlash bo'yicha aqlli yordamchisisan. "
+        "Foydalanuvchi kimga (kishi, yosh/jins), qaysi sabab bilan va qancha budjetga sovg'a "
+        "izlayotganini aytadi. Sen 3-5 ta aniq sovg'a G'OYASINI taklif qil.\n"
+        "Faqat JSON qaytar:\n"
+        '{"intro": "<1 jumlalik samimiy kirish>", "ideas": [{"title": "<sovg\'a nomi>", '
+        '"reason": "<nega mos, 1 jumla>", "keywords": ["<do\'kondan qidirish uchun 1-3 standart so\'z>"]}]}\n'
+        "keywords — do'kon katalogida mahsulot nomida uchraydigan umumiy so'zlar (brend emas). "
+        "G'oyalar budjetga mos va xilma-xil bo'lsin. O'zbekcha. Izohsiz."
+    ),
+    'ru': (
+        "Ты — умный помощник по выбору подарков узбекского маркетплейса. Пользователь говорит, "
+        "кому (человек, возраст/пол), по какому поводу и на какой бюджет ищет подарок. "
+        "Предложи 3-5 конкретных ИДЕЙ подарка.\n"
+        "Верни только JSON:\n"
+        '{"intro": "<тёплое вступление в 1 предложение>", "ideas": [{"title": "<название подарка>", '
+        '"reason": "<почему подходит, 1 предложение>", "keywords": ["<1-3 стандартных слова для поиска>"]}]}\n'
+        "keywords — общие слова, встречающиеся в названиях товаров каталога (не бренды). "
+        "Идеи в рамках бюджета и разнообразные. По-русски. Без пояснений."
+    ),
+}
+
+
+async def gift_advisor(*, recipient="", occasion="", budget=None, notes="",
+                       categories=None, lang="uz") -> dict:
+    """#17 — sovg'a g'oyalarini taklif qiladi. Qaytaradi {"intro", "ideas":[{title,reason,keywords}]}
+    yoki None (AI o'chiq/xato)."""
+    if not is_enabled():
+        return None
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    parts = []
+    if recipient:
+        parts.append(f"{'Kimga' if lng=='uz' else 'Кому'}: {recipient}")
+    if occasion:
+        parts.append(f"{'Sabab' if lng=='uz' else 'Повод'}: {occasion}")
+    if budget:
+        parts.append(f"{'Budjet' if lng=='uz' else 'Бюджет'}: {budget}")
+    if notes:
+        parts.append(f"{'Qo`shimcha' if lng=='uz' else 'Дополнительно'}: {notes}")
+    if not parts:
+        return None
+    if categories:
+        cat_label = "Mavjud kategoriyalar" if lng == 'uz' else "Доступные категории"
+        names = ", ".join(str(c)[:40] for c in categories if c)[:600]
+        parts.append(f"{cat_label}: {names}")
+    user_msg = "\n".join(parts)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _GIFT_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 600,
+        "temperature": 0.7,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Sovg'a yordamchisi API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            ideas = []
+            for it in (parsed.get("ideas") or [])[:5]:
+                if not isinstance(it, dict):
+                    continue
+                kws = it.get("keywords") or []
+                if isinstance(kws, str):
+                    kws = [kws]
+                keywords = [str(k).strip()[:50] for k in kws if str(k).strip()][:3]
+                title = str(it.get("title") or "").strip()[:80]
+                if not title:
+                    continue
+                ideas.append({
+                    "title": title,
+                    "reason": str(it.get("reason") or "").strip()[:200],
+                    "keywords": keywords,
+                })
+            if not ideas:
+                return None
+            return {"intro": str(parsed.get("intro") or "").strip()[:300], "ideas": ideas}
+    except Exception as e:
+        log.warning(f"Sovg'a yordamchisi xato: {e}")
         return None
 
 

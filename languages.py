@@ -1721,12 +1721,16 @@ _TEXTS = {
         'ru': "Итого: <b>{total}</b>\n\nКак хотите получить?",
     },
     'delivery_address_ask': {
-        'uz': "📍 Yetkazib berish manzilini yuboring (lokatsiya yoki matn):",
-        'ru': "📍 Отправьте адрес доставки (геолокация или текст):",
+        'uz': "📍 Yetkazib berish uchun JOYLASHUVINGIZNI yuboring (majburiy):",
+        'ru': "📍 Для доставки отправьте свою ГЕОЛОКАЦИЮ (обязательно):",
     },
     'delivery_address_hint': {
-        'uz': "Lokatsiyani yuborish uchun pastdagi tugmani bosing yoki manzilni matn ko'rinishida yozing:",
-        'ru': "Нажмите кнопку ниже, чтобы отправить геолокацию, или напишите адрес текстом:",
+        'uz': "Kuryer sizni aniq topishi uchun pastdagi tugma orqali joylashuvni yuboring. Bu majburiy.",
+        'ru': "Чтобы курьер точно вас нашёл, отправьте геолокацию кнопкой ниже. Это обязательно.",
+    },
+    'delivery_need_location': {
+        'uz': "❌ Yetkazib berish uchun joylashuv MAJBURIY — kuryer sizni topishi uchun. Iltimos, pastdagi «📍 Lokatsiyani yuborish» tugmasini bosing.",
+        'ru': "❌ Для доставки геолокация ОБЯЗАТЕЛЬНА — чтобы курьер вас нашёл. Нажмите кнопку «📍 Отправить геолокацию» ниже.",
     },
     'btn_send_location': {'uz': "📍 Lokatsiyani yuborish", 'ru': "📍 Отправить геолокацию"},
     'address_too_short': {'uz': "❌ Manzil juda qisqa. Aniqroq yozing:", 'ru': "❌ Адрес слишком короткий. Уточните:"},
@@ -1812,6 +1816,10 @@ _TEXTS = {
     'setl_expired': {
         'uz': "⚠️ Sessiya tugadi. Buyurtmani qaytadan oching.",
         'ru': "⚠️ Сессия истекла. Откройте заказ заново.",
+    },
+    'setl_already_done': {
+        'uz': "ℹ️ Bu buyurtma allaqachon berilgan (ilova yoki boshqa qurilmada).",
+        'ru': "ℹ️ Этот заказ уже выдан (в приложении или на другом устройстве).",
     },
     'setl_done_paid': {
         'uz': "✅ Buyurtma berildi va to'liq to'landi deb belgilandi.",
@@ -2102,6 +2110,7 @@ _TEXTS = {
     'order_not_found_x': {'uz': "❌ Buyurtma topilmadi.", 'ru': "❌ Заказ не найден."},
     'sender_label_buyer': {'uz': "👤 {name} (xaridor)", 'ru': "👤 {name} (покупатель)"},
     'sender_label_seller': {'uz': "🏪 {name} (sotuvchi)", 'ru': "🏪 {name} (продавец)"},
+    'sender_label_courier': {'uz': "🚴 {name} (kuryer)", 'ru': "🚴 {name} (курьер)"},
     'btn_reply': {'uz': "💬 Javob berish", 'ru': "💬 Ответить"},
     'new_message_notify': {
         'uz': "💬 Yangi xabar — {oid}\n\n{sender}:\n{msg}",
@@ -3841,7 +3850,7 @@ _TEXTS = {
 
     # ===== MULTI-SOTUVCHI: bitta do'kon — ko'p xodim =====
     'btn_approve': {'uz': "✅ Tasdiqlash", 'ru': "✅ Подтвердить"},
-    'btn_manage_staff': {'uz': "👥 Sotuvchilar", 'ru': "👥 Продавцы"},
+    'btn_manage_staff': {'uz': "👥 Xodimlar", 'ru': "👥 Сотрудники"},
 
     # --- mahsulot moderatsiyasi (xodim → ega tasdig'i) ---
     'staff_no_perm_add': {
@@ -3889,10 +3898,10 @@ _TEXTS = {
         'ru': "⛔ Этот раздел только для владельца магазина.",
     },
     'staff_panel_text': {
-        'uz': ("👥 <b>Sotuvchilarni boshqarish</b>\n\n"
+        'uz': ("👥 <b>Xodimlarni boshqarish</b>\n\n"
                "Jami xodimlar: {total}\n✅ Faol: {active}\n⏳ Kutilmoqda: {pending}\n\n"
                "💳 To'lov rejimi: {paymode}\n🔎 Moderatsiya: {mod}"),
-        'ru': ("👥 <b>Управление продавцами</b>\n\n"
+        'ru': ("👥 <b>Управление сотрудниками</b>\n\n"
                "Всего сотрудников: {total}\n✅ Активны: {active}\n⏳ Ожидают: {pending}\n\n"
                "💳 Режим оплаты: {paymode}\n🔎 Модерация: {mod}"),
     },
@@ -3900,16 +3909,16 @@ _TEXTS = {
     'paymode_staff': {'uz': "Har xodim o'z kartasi", 'ru': "Карта каждого продавца"},
     'mod_direct': {'uz': "To'g'ridan-to'g'ri", 'ru': "Напрямую"},
     'mod_owner': {'uz': "Ega tasdig'i", 'ru': "Подтверждение владельца"},
-    'btn_staff_list': {'uz': "📋 Sotuvchilar ro'yxati", 'ru': "📋 Список продавцов"},
-    'btn_staff_add': {'uz': "➕ Sotuvchi qo'shish", 'ru': "➕ Добавить продавца"},
-    'btn_staff_stats': {'uz': "📊 Sotuvchilar statistikasi", 'ru': "📊 Статистика продавцов"},
+    'btn_staff_list': {'uz': "📋 Xodimlar ro'yxati", 'ru': "📋 Список сотрудников"},
+    'btn_staff_add': {'uz': "➕ Xodim qo'shish", 'ru': "➕ Добавить сотрудника"},
+    'btn_staff_stats': {'uz': "📊 Xodimlar statistikasi", 'ru': "📊 Статистика сотрудников"},
     'btn_paymode': {'uz': "💳 To'lov rejimi: {mode}", 'ru': "💳 Режим оплаты: {mode}"},
     'btn_pending_products': {'uz': "✅ Tasdiqlash: {n} ta", 'ru': "✅ На подтверждение: {n}"},
     'staff_list_empty': {
-        'uz': "📭 Hali sotuvchi qo'shilmagan. «➕ Sotuvchi qo'shish» orqali taklif yarating.",
-        'ru': "📭 Продавцы ещё не добавлены. Создайте приглашение через «➕ Добавить продавца».",
+        'uz': "📭 Hali xodim qo'shilmagan. «➕ Xodim qo'shish» orqali taklif yarating.",
+        'ru': "📭 Сотрудники ещё не добавлены. Создайте приглашение через «➕ Добавить сотрудника».",
     },
-    'staff_list_header': {'uz': "📋 <b>Sotuvchilar</b>\n\nBatafsil uchun tanlang:", 'ru': "📋 <b>Продавцы</b>\n\nВыберите для подробностей:"},
+    'staff_list_header': {'uz': "📋 <b>Xodimlar</b>\n\nBatafsil uchun tanlang:", 'ru': "📋 <b>Сотрудники</b>\n\nВыберите для подробностей:"},
     'staff_detail_text': {
         'uz': ("👤 <b>{name}</b>\n🏷 Bo'lim: {dept}\n🎚 Rol: {role}\nHolat: {status}\n\n"
                "📦 Mahsulotlar: {products}\n✅ Yetkazilgan: {delivered}\n💰 Daromad: {revenue}\n⏳ Kutilayotgan: {pending}\n\n"
@@ -3997,14 +4006,14 @@ _TEXTS = {
                "<b>1-usul (oson):</b> havolani sotuvchiga yuboring — u bosishi bilan do'koningizga qo'shiladi:\n{link}\n\n"
                "<b>2-usul:</b> agar sotuvchi botda ro'yxatdan o'tgan bo'lsa — Xaridor menyusi → «🔑 Kod bilan qo'shilish» → quyidagi kodni kiritsin:\n"
                "<code>{code}</code>\n\n"
-               "<i>Qo'shilgach siz «Sotuvchilar» bo'limidan tasdiqlaysiz.</i>"),
+               "<i>Qo'shilgach siz «Xodimlar» bo'limidan tasdiqlaysiz.</i>"),
         'ru': ("🔗 <b>Приглашение готово!</b>\n🏷 Отдел: {dept}\n\n"
                "<b>Способ 1 (просто):</b> отправьте ссылку продавцу — перейдя по ней, он присоединится:\n{link}\n\n"
                "<b>Способ 2:</b> если продавец уже зарегистрирован в боте — меню Покупателя → «🔑 Войти по коду» → пусть введёт код:\n"
                "<code>{code}</code>\n\n"
                "<i>После присоединения подтвердите его в разделе «Продавцы».</i>"),
     },
-    'staff_stats_header': {'uz': "📊 <b>Sotuvchilar statistikasi</b>\n", 'ru': "📊 <b>Статистика продавцов</b>\n"},
+    'staff_stats_header': {'uz': "📊 <b>Xodimlar statistikasi</b>\n", 'ru': "📊 <b>Статистика сотрудников</b>\n"},
     'staff_stats_row': {
         'uz': "{mark} <b>{name}</b> — 📦{products} · ✅{sold} dona · 💰{revenue}",
         'ru': "{mark} <b>{name}</b> — 📦{products} · ✅{sold} шт · 💰{revenue}",
@@ -4020,7 +4029,7 @@ _TEXTS = {
 
     # --- onboarding (xodim deeplink) ---
     'owner_new_staff_notify': {
-        'uz': ("👥 <b>Do'koningizga yangi sotuvchi qo'shilmoqchi!</b>\n\n"
+        'uz': ("👥 <b>Do'koningizga yangi xodim qo'shilmoqchi!</b>\n\n"
                "👤 {name}\n📞 {phone}\n🏷 Bo'lim: {dept}\n\n"
                "Faollashtirish uchun tugmani bosing 👇"),
         'ru': ("👥 <b>К вашему магазину хочет присоединиться продавец!</b>\n\n"

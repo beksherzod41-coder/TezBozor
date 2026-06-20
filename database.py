@@ -427,9 +427,16 @@ class Database:
             ("orders",   "settled_at",        "TIMESTAMP"),       # qarz to'liq yopilgan vaqt (NULL = ochiq)
             ("orders",   "buyer_received",    "INTEGER"),         # 1 = xaridor «oldim» bosgan, lekin sotuvchi to'lovni hali belgilamagan (status hali 'confirmed')
             ("orders",   "notify_pending",    "INTEGER DEFAULT 0"),  # 1 = Mini App yaratdi, bot sotuvchiga xabar yuborishi kerak (fon job)
+            ("orders",   "courier_lat",       "REAL"),               # #13 yetkazib beruvchi joriy lat (jonli kuzatuv)
+            ("orders",   "courier_lon",       "REAL"),               # #13 yetkazib beruvchi joriy lon
+            ("orders",   "courier_updated_at", "TIMESTAMP"),         # #13 joylashuv oxirgi yangilangan vaqt (UTC)
+            ("orders",   "courier_id",        "INTEGER"),            # #3 biriktirilgan KURYER user_id (NULL = biriktirilmagan)
+            ("orders",   "courier_notify",    "INTEGER DEFAULT 0"),  # #3 1 = kuryerga "biriktirildi" PUSH yuborilishi kerak (bot fon job)
             ("products", "stock_count",    "INTEGER"),            # NULL = cheksiz
             ("products", "region_id",      "INTEGER"),            # do'kon hududi
-            ("products", "status",         "TEXT DEFAULT 'active'"),  # active|reserve|deleted
+            ("products", "status",         "TEXT DEFAULT 'active'"),  # active|reserve|deleted|mod_blocked
+            ("products", "mod_reason",      "TEXT"),                   # #5 avto-moderatsiya bloklash sababi
+            ("products", "min_price",       "REAL"),                   # #8 MAXFIY oxirgi narx (savdolashish floor'i; xaridorga ko'rinmaydi)
             ("reviews",  "product_id",     "INTEGER"),            # baho qaysi mahsulotga
             ("reviews",  "product_rating", "INTEGER"),            # mahsulot uchun 1-5
             ("reviews",  "seller_reply",   "TEXT"),               # sotuvchining ochiq javobi (NULL = javob yo'q)
@@ -492,6 +499,8 @@ class Database:
                 comment TEXT,
                 product_id INTEGER,
                 product_rating INTEGER,
+                seller_reply TEXT,                 -- sotuvchining ochiq javobi (yangi bazada inline)
+                replied_at TIMESTAMP,              -- javob yozilgan vaqt
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (order_id) REFERENCES orders(id),
                 FOREIGN KEY (seller_id) REFERENCES users(id),
@@ -657,6 +666,7 @@ class Database:
                 perm_confirm_orders INTEGER DEFAULT 1,
                 perm_edit_price    INTEGER DEFAULT 1,
                 perm_reply_reviews INTEGER DEFAULT 1,
+                perm_add_staff     INTEGER DEFAULT 0,   -- xodim qo'shish (menejer; default O'CHIQ)
                 card_number TEXT,
                 card_owner TEXT,
                 card_type TEXT,
@@ -667,6 +677,11 @@ class Database:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
+        # perm_add_staff — eski bazalar uchun idempotent qo'shamiz (menejerga xodim qo'shish ruxsati)
+        try:
+            cursor.execute("ALTER TABLE shop_staff ADD COLUMN perm_add_staff INTEGER DEFAULT 0")
+        except Exception:
+            pass
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS shop_invites (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -692,6 +707,11 @@ class Database:
             pass
         try:
             cursor.execute("ALTER TABLE products ADD COLUMN old_price REAL")  # chegirma: eski narx
+        except Exception:
+            pass
+        try:
+            # #20 — o'lchov birligi (dona/kg/litr/metr/tonna...). Bo'sh = "dona" deb qaraladi.
+            cursor.execute("ALTER TABLE products ADD COLUMN unit TEXT")
         except Exception:
             pass
         conn.commit()
@@ -828,6 +848,80 @@ class Database:
                         VALUES (?,?,?,?,?,?)
                     """, (cat_id, attr_key, attr_label, attr_type, required, hint))
             conn.commit()
+
+        # ===== PLATFORMA SOZLAMALARI (kalit-qiymat) — monetizatsiya #22/#18 =====
+        # Admin yoqadigan/o'chiradigan bayroqlar shu yerda saqlanadi (komissiya, boost,
+        # obuna, Click/Payme...). HAMMASI default O'CHIQ — yoqilmaguncha foydalanuvchiga
+        # hech narsa o'zgarmaydi. Qiymatlar TEXT sifatida saqlanadi (kod typed o'qiydi).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS platform_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+
+        # ===== SEVIMLILAR (#16 wishlist) — narx tushganda xabar uchun ham manba =====
+        # products(id) ga ON DELETE CASCADE — mahsulot o'chsa sevimli yozuvi ham o'chadi
+        # (delete_product'da FK xatosi/HTTP 500 bo'lmaydi).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                buyer_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(buyer_id, product_id),
+                FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+            )
+        """)
+        conn.commit()
+
+        # ===== AI SAVDOLASHISH KELISHUVLARI (#8) =====
+        # AI bilan savdolashishda kelishilgan narx shu yerda saqlanadi; checkout shuni
+        # hurmat qiladi. Qisqa muddatli (expires_at). products(id) ON DELETE CASCADE.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS haggle_deals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                buyer_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                price REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP NOT NULL,
+                UNIQUE(buyer_id, product_id),
+                FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE,
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+            )
+        """)
+        conn.commit()
+
+        # ===== INDEKSLAR (tezlik #3) =====
+        # SQLite indekssiz har so'rovda to'liq jadval skan qiladi. Eng og'ir yo'l —
+        # search_products: har mahsulot uchun reviews bo'yicha 3 ta korrelyatsion
+        # subquery ishlaydi; reviews(seller_id)/reviews(product_id) indekslari ularni
+        # skan'dan qidiruvga aylantiradi. (users.telegram_id va shop_staff.user_id
+        # UNIQUE — avtomatik indekslangan, qayta qo'shilmaydi.)
+        for idx_sql in [
+            "CREATE INDEX IF NOT EXISTS idx_products_seller ON products(seller_id)",
+            "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)",
+            "CREATE INDEX IF NOT EXISTS idx_products_listing ON products(in_stock, status)",
+            "CREATE INDEX IF NOT EXISTS idx_reviews_seller ON reviews(seller_id)",
+            "CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_id)",
+            "CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_shop_staff_shop ON shop_staff(shop_id)",
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_product ON scheduled_posts(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_product_audit_product ON product_audit(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_favorites_buyer ON favorites(buyer_id)",
+            "CREATE INDEX IF NOT EXISTS idx_favorites_product ON favorites(product_id)",
+        ]:
+            try:
+                cursor.execute(idx_sql)
+            except Exception as e:
+                logging.warning(f"indeks yaratish o'tkazib yuborildi: {e}")
+        conn.commit()
 
         # Hududlarni bir marta yuklash — kategoriyalardan keyin
         self.init_regions()
@@ -1478,6 +1572,176 @@ class Database:
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
+    # ===== KASHFIYOT (#15) — mavjud ma'lumotdan: trend / chegirma =====
+    # Faol, ko'rinadigan mahsulotlar uchun umumiy filtr (search_products bilan bir xil).
+    _DISCOVERY_SELECT = """
+        SELECT p.*, c.name as category_name, c.emoji as category_emoji,
+               u.shop_name, u.is_verified,
+               (SELECT AVG(r2.product_rating) FROM reviews r2 WHERE r2.product_id=p.id AND r2.product_rating IS NOT NULL) as prod_avg_rating,
+               (SELECT COUNT(*) FROM reviews r3 WHERE r3.product_id=p.id AND r3.product_rating IS NOT NULL) as prod_review_count
+        FROM products p
+        LEFT JOIN categories c ON p.category_id=c.id
+        LEFT JOIN users u ON p.seller_id=u.id
+        WHERE p.in_stock=1 AND COALESCE(p.status,'active')='active' AND COALESCE(u.is_blocked,0)=0
+              AND (COALESCE(u.is_approved,0)=1 OR u.role='admin')
+    """
+
+    def get_trending_products(self, limit=12):
+        """Eng ko'p buyurtma qilingan (trend) mahsulotlar. idx_orders_product'dan foydalanadi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sql = self._DISCOVERY_SELECT + """
+              AND (SELECT COUNT(*) FROM orders o WHERE o.product_id=p.id) > 0
+            ORDER BY (SELECT COUNT(*) FROM orders o WHERE o.product_id=p.id) DESC,
+                     prod_avg_rating DESC, p.created_at DESC
+            LIMIT ?"""
+        cursor.execute(sql, (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_recommendations(self, buyer_id, limit=12):
+        """#1 — "Aynan siz uchun": ikki signalni birlashtiradi —
+        (a) KOLLABORATIV: men olgan mahsulotlarni olgan boshqa xaridorlar yana nima olgan;
+        (b) KATEGORIYA: xarid+sevimli tarixidagi yo'nalishlar.
+        Kollaborativ avval (kuchliroq signal). Tarix bo'lmasa — bo'sh (trend qoladi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        # (a) Co-purchase — "buni olganlar yana shuni oldi"
+        cursor.execute("""
+            SELECT o3.product_id, COUNT(*) AS score
+            FROM orders o1
+            JOIN orders o2 ON o2.product_id=o1.product_id AND o2.buyer_id != o1.buyer_id
+            JOIN orders o3 ON o3.buyer_id=o2.buyer_id
+            WHERE o1.buyer_id=?
+              AND o3.product_id NOT IN (SELECT product_id FROM orders WHERE buyer_id=?)
+            GROUP BY o3.product_id ORDER BY score DESC, o3.product_id DESC LIMIT 30
+        """, (buyer_id, buyer_id))
+        co_ids = [r[0] for r in cursor.fetchall()]
+        # (b) Kategoriya-asosli
+        cursor.execute("""
+            SELECT DISTINCT category_id FROM (
+                SELECT p.category_id FROM orders o JOIN products p ON o.product_id=p.id WHERE o.buyer_id=?
+                UNION
+                SELECT p.category_id FROM favorites f JOIN products p ON f.product_id=p.id WHERE f.buyer_id=?
+            ) WHERE category_id IS NOT NULL
+        """, (buyer_id, buyer_id))
+        cats = [r[0] for r in cursor.fetchall()]
+        cat_ids = []
+        if cats:
+            ph = ",".join("?" for _ in cats)
+            cursor.execute(f"""
+                SELECT p.id FROM products p
+                WHERE COALESCE(p.status,'active')='active' AND p.in_stock=1
+                  AND p.category_id IN ({ph})
+                  AND p.id NOT IN (SELECT product_id FROM orders WHERE buyer_id=?)
+                ORDER BY p.created_at DESC LIMIT 30
+            """, cats + [buyer_id])
+            cat_ids = [r[0] for r in cursor.fetchall()]
+        # Birlashtirish — kollaborativ avval, dedupe
+        ordered, seen = [], set()
+        for i in co_ids + cat_ids:
+            if i not in seen:
+                seen.add(i)
+                ordered.append(i)
+        if not ordered:
+            return []
+        ordered = ordered[:limit]
+        ph2 = ",".join("?" for _ in ordered)
+        cursor.execute(self._DISCOVERY_SELECT + f" AND p.id IN ({ph2}) AND p.seller_id != ?",
+                       ordered + [buyer_id])
+        rows = {dict(r)["id"]: dict(r) for r in cursor.fetchall()}
+        return [rows[i] for i in ordered if i in rows]   # birlashtirilgan tartibni saqlaymiz
+
+    def get_fraud_signals(self):
+        """AI #7 — firibgarlik shubhasi (evristik): o'z-o'ziga sharh, bitta juftlikda ko'p
+        buyurtma, kam xaridordan ko'p sharh. Admin tekshiruvi uchun signal — avtomatik jazo yo'q."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        out = {"self_reviews": [], "order_farming": [], "few_reviewers": []}
+        # 1) O'z-o'ziga sharh (sharh yozuvchi = do'kon egasi)
+        cursor.execute("""
+            SELECT r.id, u.name AS seller_name, r.seller_id
+            FROM reviews r LEFT JOIN users u ON r.seller_id=u.id
+            WHERE r.buyer_id = r.seller_id LIMIT 50
+        """)
+        out["self_reviews"] = [dict(r) for r in cursor.fetchall()]
+        # 2) Bitta xaridor → bitta sotuvchiga ko'p buyurtma (soxta buyurtma shubhasi)
+        cursor.execute("""
+            SELECT o.buyer_id, o.seller_id, COUNT(*) AS cnt,
+                   ub.name AS buyer_name, us.name AS seller_name
+            FROM orders o
+            LEFT JOIN users ub ON o.buyer_id=ub.id
+            LEFT JOIN users us ON o.seller_id=us.id
+            GROUP BY o.buyer_id, o.seller_id HAVING cnt >= 6
+            ORDER BY cnt DESC LIMIT 50
+        """)
+        out["order_farming"] = [dict(r) for r in cursor.fetchall()]
+        # 3) Sotuvchi sharhlari juda kam xaridordan (soxta reyting shubhasi)
+        cursor.execute("""
+            SELECT r.seller_id, us.name AS seller_name,
+                   COUNT(*) AS reviews, COUNT(DISTINCT r.buyer_id) AS buyers
+            FROM reviews r LEFT JOIN users us ON r.seller_id=us.id
+            GROUP BY r.seller_id HAVING reviews >= 4 AND buyers <= 1
+            ORDER BY reviews DESC LIMIT 50
+        """)
+        out["few_reviewers"] = [dict(r) for r in cursor.fetchall()]
+        return out
+
+    def get_category_price_stats(self, category_id, exclude_seller_id=None):
+        """AI #2 — kategoriyadagi raqobatchi narx statistikasi (faol mahsulotlar).
+        exclude_seller_id berilsa — o'sha sotuvchi mahsulotlari hisobga olinmaydi."""
+        if not category_id:
+            return None
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sql = """SELECT COUNT(*) AS n, AVG(p.price) AS avg_price,
+                        MIN(p.price) AS min_price, MAX(p.price) AS max_price
+                 FROM products p LEFT JOIN users u ON p.seller_id=u.id
+                 WHERE p.category_id=? AND COALESCE(p.status,'active')='active' AND p.in_stock=1
+                       AND p.price > 0 AND COALESCE(u.is_blocked,0)=0
+                       AND (COALESCE(u.is_approved,0)=1 OR u.role='admin')"""
+        params = [category_id]
+        if exclude_seller_id:
+            sql += " AND p.seller_id != ?"
+            params.append(exclude_seller_id)
+        cursor.execute(sql, params)
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        d = dict(row)
+        return {"count": d["n"], "avg": round(d["avg_price"] or 0),
+                "min": round(d["min_price"] or 0), "max": round(d["max_price"] or 0)}
+
+    def get_frequently_bought_together(self, product_id, limit=8):
+        """AI #10 cross-sell — shu mahsulotni olgan xaridorlar YANA nima olgan (item-to-item).
+        Faol/ko'rinadigan mahsulotlar, eng ko'p birga olinganlari avval."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o2.product_id AS pid, COUNT(*) AS cnt
+            FROM orders o1
+            JOIN orders o2 ON o2.buyer_id=o1.buyer_id AND o2.product_id != o1.product_id
+            WHERE o1.product_id=?
+            GROUP BY o2.product_id ORDER BY cnt DESC, o2.product_id DESC LIMIT ?
+        """, (product_id, limit))
+        ids = [r[0] for r in cursor.fetchall()]
+        if not ids:
+            return []
+        ph = ",".join("?" for _ in ids)
+        cursor.execute(self._DISCOVERY_SELECT + f" AND p.id IN ({ph})", ids)
+        rows = {dict(r)["id"]: dict(r) for r in cursor.fetchall()}
+        return [rows[i] for i in ids if i in rows]   # birga-olinish tartibini saqlaymiz
+
+    def get_discounted_products(self, limit=12):
+        """Chegirmadagi mahsulotlar (old_price > price), eng katta chegirma % avval."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sql = self._DISCOVERY_SELECT + """
+              AND p.old_price IS NOT NULL AND p.old_price > p.price AND p.price > 0
+            ORDER BY (p.old_price - p.price)*1.0/p.old_price DESC, p.created_at DESC
+            LIMIT ?"""
+        cursor.execute(sql, (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
     # ===== ORDERS =====
     def create_order(self, buyer_id, seller_id, product_id, quantity, total_price,
                      delivery_address=None, buyer_lat=None, buyer_lon=None,
@@ -1568,11 +1832,14 @@ class Database:
                    su.telegram_id as seller_tg,
                    su.shop_lat, su.shop_lon, su.shop_address, su.shop_landmark,
                    su.telegram_username as seller_username,
-                   bu.telegram_username as buyer_username
+                   bu.telegram_username as buyer_username,
+                   co.name as courier_name, co.phone_number as courier_phone,
+                   co.telegram_id as courier_tg, co.telegram_username as courier_username
             FROM orders o
             JOIN products p ON o.product_id=p.id
             JOIN users bu ON o.buyer_id=bu.id
             JOIN users su ON o.seller_id=su.id
+            LEFT JOIN users co ON o.courier_id=co.id
             WHERE o.id=?
         """, (order_id,))
         row = cursor.fetchone()
@@ -1814,6 +2081,25 @@ class Database:
             (status, order_id)
         )
         conn.commit()
+
+    def transition_order_status(self, order_id, new_status, expected_status='pending'):
+        """Atomik holat o'tkazish: faqat hozirgi holat `expected_status` ga teng bo'lsagina
+        o'zgartiradi va o'zgartirgan (yutgan) chaqiruv uchun True qaytaradi.
+
+        Bot va Mini App AYNAN bir buyurtmani bir vaqtda tasdiqlashi/bekor qilishi yoki
+        tugmani ikki marta bosish natijasida zahira ikki marta kamayishi va xaridorga
+        takroriy xabar yuborilishining oldini oladi. Bitta `UPDATE ... WHERE status=?`
+        — SQLite/PG darajasida atomik; faqat bitta chaqiruv rowcount=1 oladi. Chaqiruvchi
+        zahirani kamaytirish/xabar yuborishni FAQAT True qaytganda bajarishi kerak."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
+            "WHERE id=? AND status=?",
+            (new_status, order_id, expected_status)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
 
     def set_buyer_received(self, order_id):
         """Xaridor «oldim» bosdi — buyurtma YOPILMAYDI (status 'confirmed' qoladi).
@@ -2178,6 +2464,26 @@ class Database:
         cursor.execute(sql, params)
         return [dict(r) for r in cursor.fetchall()]
 
+    def get_recent_reviews_with_comments(self, limit=200):
+        """#6 — admin sentiment tahlili uchun: butun platforma bo'yicha izohli
+        sharhlar (yangi -> eski). Faqat matnli izohi borlari."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT r.rating, r.product_rating, r.comment, r.created_at,
+                   u.shop_name,
+                   COALESCE(po.name, pr.name) as product_name
+            FROM reviews r
+            LEFT JOIN users u ON r.seller_id=u.id
+            LEFT JOIN orders o ON r.order_id=o.id
+            LEFT JOIN products po ON o.product_id=po.id
+            LEFT JOIN products pr ON r.product_id=pr.id
+            WHERE r.comment IS NOT NULL AND TRIM(r.comment) <> ''
+            ORDER BY r.created_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
     def get_seller_stats(self, seller_id):
         """Sotuvchi statistikasi: buyurtmalar, daromad, mahsulotlar soni
         (hafta / oy / jami kesimida)."""
@@ -2238,6 +2544,18 @@ class Database:
             'products_count': products_count,
         }
 
+    def get_moderation_queue(self):
+        """#5 — avto-moderatsiya bloklagan mahsulotlar (admin tekshiruvi uchun)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.*, u.name as seller_name, u.shop_name, u.telegram_id as seller_tg
+            FROM products p LEFT JOIN users u ON p.seller_id=u.id
+            WHERE COALESCE(p.status,'')='mod_blocked'
+            ORDER BY p.created_at DESC
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
     def get_seller_product_performance(self, seller_id):
         """Sotuvchining har bir mahsuloti bo'yicha sotuv ko'rsatkichi.
         Qaytaradi: [{'id', 'name', 'price', 'sold', 'revenue'}, ...]
@@ -2255,6 +2573,63 @@ class Database:
             ORDER BY sold DESC, p.created_at DESC
         """, (seller_id,))
         return [dict(r) for r in cursor.fetchall()]
+
+    def get_product_demand_signals(self, product_id):
+        """#11 Dinamik narx — bitta mahsulot bo'yicha talab/sotuv signallari.
+        Qaytaradi: days_listed, sold, orders_total, pending_orders, favorites,
+        stock_count, prod_rating, review_count, views (mavjud bo'lsa)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.price, p.stock_count, p.created_at,
+                   CAST(julianday('now') - julianday(p.created_at) AS INTEGER) AS days_listed,
+                   (SELECT COALESCE(SUM(CASE WHEN o.status='delivered' THEN o.quantity ELSE 0 END),0)
+                      FROM orders o WHERE o.product_id=p.id) AS sold,
+                   (SELECT COUNT(*) FROM orders o WHERE o.product_id=p.id) AS orders_total,
+                   (SELECT COUNT(*) FROM orders o WHERE o.product_id=p.id AND o.status='pending') AS pending_orders,
+                   (SELECT COUNT(*) FROM favorites f WHERE f.product_id=p.id) AS favorites,
+                   (SELECT AVG(product_rating) FROM reviews r WHERE r.product_id=p.id AND r.product_rating IS NOT NULL) AS prod_rating,
+                   (SELECT COUNT(*) FROM reviews r WHERE r.product_id=p.id AND r.product_rating IS NOT NULL) AS review_count
+            FROM products p WHERE p.id=?
+        """, (product_id,))
+        row = cursor.fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        return {
+            "price": round(float(d.get("price") or 0)),
+            "stock_count": d.get("stock_count"),
+            "days_listed": max(0, int(d.get("days_listed") or 0)),
+            "sold": int(d.get("sold") or 0),
+            "orders_total": int(d.get("orders_total") or 0),
+            "pending_orders": int(d.get("pending_orders") or 0),
+            "favorites": int(d.get("favorites") or 0),
+            "prod_rating": round(float(d["prod_rating"]), 1) if d.get("prod_rating") else None,
+            "review_count": int(d.get("review_count") or 0),
+        }
+
+    def get_seller_time_analytics(self, seller_id):
+        """#17 — "qachon sotilyapti": hafta kuni kesimida buyurtmalar + so'nggi 7 kun
+        kunlik daromadi. Vaqt UTC (created_at) — MVP uchun yetarli."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        # Hafta kuni bo'yicha buyurtmalar soni (0=Yakshanba .. 6=Shanba)
+        cursor.execute("""
+            SELECT CAST(strftime('%w', created_at) AS INTEGER) as wd, COUNT(*) as n
+            FROM orders WHERE seller_id=? GROUP BY wd
+        """, (seller_id,))
+        wd = {r[0]: r[1] for r in cursor.fetchall()}
+        by_weekday = [wd.get(i, 0) for i in range(7)]
+        # So'nggi 7 kun kunlik daromadi (delivered)
+        cursor.execute("""
+            SELECT date(created_at) as d,
+                   COALESCE(SUM(CASE WHEN status='delivered' THEN total_price ELSE 0 END), 0) as rev
+            FROM orders
+            WHERE seller_id=? AND created_at >= datetime('now', '-7 days')
+            GROUP BY d ORDER BY d
+        """, (seller_id,))
+        daily_7 = [{"date": r[0], "revenue": r[1]} for r in cursor.fetchall()]
+        return {"by_weekday": by_weekday, "daily_7": daily_7}
 
     def auto_cancel_stale_orders(self, days=3):
         """3 kun ichida tasdiqlanmagan buyurtmalarni avtomatik bekor qiladi.
@@ -2699,6 +3074,12 @@ class Database:
               p.get('stock_count'), p.get('status'), order_count, action,
               deleted_by, deleted_by_role, p.get('created_at')))
 
+        # Rejalashtirilgan/avto-reklama yozuvlari products(id) ga FK bilan bog'langan,
+        # lekin ON DELETE CASCADE yo'q — ularni avval tozalamasak, jismonan o'chirishda
+        # FOREIGN KEY xatosi (HTTP 500) chiqadi. Mahsulot o'chsa, reja ham keraksiz.
+        cursor.execute("DELETE FROM scheduled_posts WHERE product_id=?", (product_id,))
+        cursor.execute("DELETE FROM auto_reposts WHERE product_id=?", (product_id,))
+
         if has_orders:
             cursor.execute(
                 "UPDATE products SET status='purged', in_stock=0 WHERE id=?",
@@ -2735,6 +3116,32 @@ class Database:
         """, (audit_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    # ===== PLATFORMA SOZLAMALARI (kalit-qiymat) =====
+    def get_setting(self, key, default=None):
+        """platform_settings'dan bitta qiymatni o'qiydi (TEXT yoki default)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM platform_settings WHERE key=?", (key,))
+        row = cursor.fetchone()
+        return row[0] if row and row[0] is not None else default
+
+    def get_all_settings(self):
+        """Barcha sozlamalarni dict sifatida qaytaradi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM platform_settings")
+        return {r[0]: r[1] for r in cursor.fetchall()}
+
+    def set_setting(self, key, value):
+        """Bitta sozlamani yozadi (upsert). value None bo'lsa bo'sh satr saqlanadi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO platform_settings (key, value, updated_at) VALUES (?,?,CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
+            (key, "" if value is None else str(value)))
+        conn.commit()
 
     def update_product_fields(self, product_id, **fields):
         """Mahsulot maydonlarini yangilaydi. fields — dict ko'rinishida."""
@@ -2844,20 +3251,184 @@ class Database:
         """, (buyer_id,))
         return [dict(r) for r in cursor.fetchall()]
 
+    # ===== SEVIMLILAR (#16 wishlist) =====
+    def add_favorite(self, buyer_id, product_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO favorites (buyer_id, product_id) VALUES (?,?)",
+                       (buyer_id, product_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def remove_favorite(self, buyer_id, product_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM favorites WHERE buyer_id=? AND product_id=?",
+                       (buyer_id, product_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def is_favorite(self, buyer_id, product_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM favorites WHERE buyer_id=? AND product_id=?",
+                       (buyer_id, product_id))
+        return cursor.fetchone() is not None
+
+    def get_favorites(self, buyer_id):
+        """Xaridor sevimlilari — faqat ko'rinadigan (faol) mahsulotlar, to'liq ma'lumot bilan."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT p.*, c.name as category_name, c.emoji as category_emoji, u.shop_name,
+                   (SELECT AVG(product_rating) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_avg_rating,
+                   (SELECT COUNT(*) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_review_count,
+                   f.created_at as faved_at
+            FROM favorites f
+            JOIN products p ON f.product_id=p.id
+            LEFT JOIN categories c ON p.category_id=c.id
+            LEFT JOIN users u ON p.seller_id=u.id
+            WHERE f.buyer_id=? AND COALESCE(p.status,'active')='active'
+            ORDER BY f.created_at DESC
+        """, (buyer_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_product_favoriters(self, product_id):
+        """Mahsulotni sevimliga qo'shgan xaridorlar (tg_id + til) — narx-tushdi xabari uchun."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT u.id, u.telegram_id, u.language
+            FROM favorites f JOIN users u ON f.buyer_id=u.id
+            WHERE f.product_id=? AND u.telegram_id IS NOT NULL AND COALESCE(u.is_blocked,0)=0
+        """, (product_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    # ===== AI SAVDOLASHISH KELISHUVLARI (#8) =====
+    def set_haggle_deal(self, buyer_id, product_id, price, ttl_minutes=60):
+        """Kelishilgan narxni saqlaydi (mavjudini almashtiradi). ttl_minutes — amal muddati."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO haggle_deals (buyer_id, product_id, price, expires_at) "
+            "VALUES (?,?,?, datetime('now', ?)) "
+            "ON CONFLICT(buyer_id, product_id) DO UPDATE SET "
+            "price=excluded.price, created_at=CURRENT_TIMESTAMP, expires_at=excluded.expires_at",
+            (buyer_id, product_id, price, f"+{int(ttl_minutes)} minutes"))
+        conn.commit()
+
+    def get_active_haggle_price(self, buyer_id, product_id):
+        """Amaldagi (muddati o'tmagan) kelishilgan narx yoki None."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT price FROM haggle_deals WHERE buyer_id=? AND product_id=? "
+            "AND expires_at > datetime('now')", (buyer_id, product_id))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def get_buyer_order_totals(self, buyer_id):
+        """#16 — sodiqlik uchun: xaridorning yetkazilgan buyurtmalari soni va jami xarajati."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(CASE WHEN status='delivered' THEN 1 END) as delivered_orders,
+                   COALESCE(SUM(CASE WHEN status='delivered' THEN total_price ELSE 0 END), 0) as spent
+            FROM orders WHERE buyer_id=?
+        """, (buyer_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else {"delivered_orders": 0, "spent": 0}
+
+    def update_courier_location(self, order_id, lat, lon):
+        """#13 — yetkazib beruvchining joriy joylashuvini yangilaydi (UTC vaqt bilan)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE orders SET courier_lat=?, courier_lon=?, "
+            "courier_updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (lat, lon, order_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
     def get_seller_orders_list(self, seller_id):
-        """Sotuvchi buyurtmalari ro'yxati."""
+        """Do'kon buyurtmalari ro'yxati. creator_id/creator_name — mahsulotni joylagan
+        XODIM (multivendor: ega xodimlar bo'yicha buyurtmalarni ajratib ko'rishi uchun)."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.*, p.name as product_name, p.price as product_price,
-                   u.name as buyer_name, u.phone_number as buyer_phone, u.telegram_id as buyer_tg
+                   p.created_by as creator_id, cu.name as creator_name,
+                   u.name as buyer_name, u.phone_number as buyer_phone, u.telegram_id as buyer_tg,
+                   u.telegram_username as buyer_username,
+                   co.name as courier_name, co.phone_number as courier_phone
             FROM orders o
             JOIN products p ON o.product_id=p.id
             JOIN users u ON o.buyer_id=u.id
+            LEFT JOIN users cu ON p.created_by=cu.id
+            LEFT JOIN users co ON o.courier_id=co.id
             WHERE o.seller_id=?
             ORDER BY o.created_at DESC
         """, (seller_id,))
         return [dict(r) for r in cursor.fetchall()]
+
+    def get_shop_couriers(self, owner_user_id):
+        """#3 — do'kon EGAsining FAOL kuryerlari (assign uchun). Egasi user_id'sidan
+        shop_id topiladi. is_active=1 va staff_role='courier'."""
+        shop = self.get_shop_by_owner(owner_user_id)
+        if not shop:
+            return []
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT st.user_id, u.name, u.phone_number, u.telegram_id, u.telegram_username,
+                   (SELECT COUNT(*) FROM orders o WHERE o.courier_id=st.user_id
+                        AND o.seller_id=? AND o.status='confirmed' AND o.delivery_type='delivery') AS active_orders
+            FROM shop_staff st JOIN users u ON st.user_id=u.id
+            WHERE st.shop_id=? AND st.staff_role='courier' AND st.is_active=1
+            ORDER BY u.name
+        """, (owner_user_id, shop["id"]))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def is_shop_courier(self, owner_user_id, courier_user_id):
+        """courier_user_id shu do'konning (owner) FAOL kuryerimi?"""
+        shop = self.get_shop_by_owner(owner_user_id)
+        if not shop:
+            return False
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM shop_staff WHERE shop_id=? AND user_id=? "
+                       "AND staff_role='courier' AND is_active=1",
+                       (shop["id"], courier_user_id))
+        return cursor.fetchone() is not None
+
+    def assign_order_courier(self, order_id, courier_user_id, seller_id):
+        """#3 — buyurtmaga kuryer biriktiradi (yoki None = bekor qiladi). seller_id
+        EGAlik tekshiruvi: faqat o'z buyurtmasini o'zgartira oladi. Real kuryer
+        biriktirilsa courier_notify=1 (bot kuryerga PUSH yuboradi). rowcount>0 = OK."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        notify = 1 if courier_user_id else 0
+        cursor.execute("UPDATE orders SET courier_id=?, courier_notify=? WHERE id=? AND seller_id=?",
+                       (courier_user_id, notify, order_id, seller_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_orders_awaiting_courier_notify(self, limit=20):
+        """#3 — bot fon job'i uchun: kuryerga "biriktirildi" PUSH ketmagan, hali
+        yo'ldagi (confirmed) buyurtmalar id'lari."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM orders WHERE courier_notify=1 AND courier_id IS NOT NULL "
+            "AND status='confirmed' ORDER BY id ASC LIMIT ?", (limit,))
+        return [r[0] for r in cursor.fetchall()]
+
+    def clear_courier_notify(self, order_id):
+        """PUSH yuborilgach (yoki yuborib bo'lmasa ham — qayta spam qilmaslik uchun) belgini tozalaydi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET courier_notify=0 WHERE id=?", (order_id,))
+        conn.commit()
 
     def get_seller_customers(self, seller_id, limit=100):
         """Sotuvchining mijozlari — buyurtma bergan xaridorlar (umumiy soni, sarflagan
