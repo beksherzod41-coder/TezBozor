@@ -42,6 +42,10 @@ import ai_assistant
 import ad_design
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Rasmiy kanal havolasi (app'dagi "kanalga o'tish" tugmasi — bot bilan bir xil manba)
+CHANNEL_ID = os.getenv("CHANNEL_ID")
+CHANNEL_URL = (f"https://t.me/{str(CHANNEL_ID).lstrip('@')}"
+               if CHANNEL_ID and str(CHANNEL_ID).startswith('@') else None)
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "0") or "0")
 except ValueError:
@@ -3340,7 +3344,7 @@ async def api_config(authorization: str = Header(None)):
                     _bot_username_cache["value"] = d["result"]["username"]
         except Exception:
             pass
-    return {"bot_username": _bot_username_cache["value"]}
+    return {"bot_username": _bot_username_cache["value"], "channel_url": CHANNEL_URL}
 
 
 @app.get("/api/health")

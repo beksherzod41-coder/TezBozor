@@ -1180,6 +1180,7 @@ const I18N = {
   bp_contact_seller:{uz:"💬 Sotuvchi bilan bog'lanish",ru:"💬 Связаться с продавцом"},
   bp_seller_word:{uz:"Sotuvchi",ru:"Продавец"},
   bp_my_reviews:{uz:"⭐ Mening sharhlarim",ru:"⭐ Мои отзывы"},
+  bp_official_channel:{uz:"🛍 Ko'proq mahsulot — kanalimiz",ru:"🛍 Больше товаров — наш канал"},
   bp_no_reviews:{uz:"Hali sharh qoldirmagansiz",ru:"Вы ещё не оставляли отзывов"},
   bp_join_code:{uz:"🔑 Kod bilan qo'shilish",ru:"🔑 Присоединиться по коду"},
   bp_join_hint:{uz:"Do'kon egasi bergan taklif kodini kiriting — xodim sifatida qo'shilasiz (ega tasdiqlagach faollashasiz).",ru:"Введите код-приглашение от владельца магазина — вы присоединитесь как сотрудник (активируетесь после подтверждения)."},
@@ -2687,6 +2688,7 @@ async function loadProfile(){
       <div style="padding:12px;display:flex;flex-direction:column;gap:10px">
         ${f.is_courier?`<button class="oact ok full" id="courierBtn" style="background:linear-gradient(135deg,#16a34a,#22c55e)">${L('cour_btn')}</button>`:''}
         ${_modeButtonsHtml()}
+        ${CHANNEL_URL?`<button class="oact ok full" id="officialChanBtn">${L('bp_official_channel')}</button>`:''}
         <button class="oact soft full" id="favBtn">${L('fav_title')}</button>
         <button class="oact soft full" id="myRevBtn">${L('bp_my_reviews')}</button>
         ${(!canManage())?`<button class="oact soft full" id="becomeSellerBtn">${L('become_seller')}</button>`:''}
@@ -2725,6 +2727,7 @@ async function loadProfile(){
       try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
     });
     v.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>confirmSwitchMode(b.dataset.mode));
+    const ocb=document.getElementById('officialChanBtn'); if(ocb) ocb.onclick=()=>{ try{ tg.openTelegramLink(CHANNEL_URL); }catch(e){ try{ window.open(CHANNEL_URL,'_blank'); }catch(_){} } };
     document.getElementById('contactAdminBtn').onclick=openContact;
   }catch(e){
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
@@ -2856,7 +2859,7 @@ function goPendingTab(tab){
 
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
-let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, SELLER_ORDERS_LIST = [], COURIER_ORDERS = [], dState = {}, appMode = 'buyer';
+let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, CHANNEL_URL = null, SELLER_ORDERS_LIST = [], COURIER_ORDERS = [], dState = {}, appMode = 'buyer';
 
 async function loadMe(){
   let needReg=false;
@@ -2866,7 +2869,7 @@ async function loadMe(){
     else if(r.ok){ ME = await r.json(); }
     else { ME=null; }
   }catch(e){ ME=null; }
-  try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
+  try{ if(!BOT_USERNAME){ const cfg=await api('/api/config'); BOT_USERNAME=cfg.bot_username; CHANNEL_URL=cfg.channel_url||null; } }catch(e){}
   if(needReg){ showRegistration(); return; }            // app ichida ro'yxatdan o'tish
   // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz (kategoriya "Hammasi" ham!)
   if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); loadCategories(); if(catMode==='products') loadProducts(); }

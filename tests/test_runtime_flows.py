@@ -284,6 +284,13 @@ def test_admin_revokes_paid_subscription(env):
     assert not env.db.get_user_by_id(env.SELLER).get("pro_until"), "qaytarilgach Pro olib tashlanishi shart"
 
 
+def test_config_exposes_channel_url(env, monkeypatch):
+    """App rasmiy kanal tugmasi uchun /api/config channel_url qaytaradi (bot pariteti)."""
+    monkeypatch.setattr(webapp_server, "CHANNEL_URL", "https://t.me/TezBozorUz24")
+    r = env.get("/api/config", headers=hdr(7001))
+    assert r.status_code == 200 and r.json().get("channel_url") == "https://t.me/TezBozorUz24"
+
+
 # ---------------- AUTH HIMOYASI ----------------
 def test_auth_guards(env):
     assert env.get("/api/me").status_code == 401                      # imzosiz
