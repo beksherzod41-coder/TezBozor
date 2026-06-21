@@ -872,13 +872,17 @@ def test_backup_admin_guards(client):
 
 
 def test_monetization_default_all_off(client):
-    """#22 — monetizatsiya default HAMMASI o'chiq (foydalanuvchiga bepul)."""
+    """#22 — monetizatsiya default barcha BAYROQ o'chiq (foydalanuvchiga bepul)."""
     cfg = client.get("/api/admin/monetization", headers=hdr(5003)).json()
     assert cfg["mon_enabled"] is False
-    assert all(v in (False, 0, 0.0) for v in cfg.values())
+    # Barcha *_enabled bayroqlari o'chiq, narxlar 0 (muddat/limit kabi sozlamalar bundan mustasno)
+    for k, v in cfg.items():
+        if k.endswith("_enabled") or k.endswith("_price") or k.endswith("_percent"):
+            assert v in (False, 0, 0.0), k
     # /api/me public bayroqlari ham o'chiq
     mon = client.get("/api/me", headers=hdr(5001)).json()["monetization"]
     assert mon["enabled"] is False and mon["commission"] is False
+    assert mon["boost"] is False and mon["subscription"] is False
 
 
 def test_monetization_admin_only(client):
@@ -905,6 +909,153 @@ def test_monetization_toggle_and_validate(client):
     # manfiy narx → 400
     assert client.post("/api/admin/monetization", headers=hdr(5003),
                        json={"mon_boost_price": -10}).status_code == 400
+
+
+# ===== #18 BOOST / OBUNA / KOMISSIYA / TO'LOV =====
+def _enable_mon(client, **flags):
+    body = {"mon_enabled": True}
+    body.update(flags)
+    assert client.post("/api/admin/monetization", headers=hdr(5003), json=body).status_code == 200
+
+
+def test_boost_disabled_403(client):
+    """Bayroq o'chiq bo'lsa boost 403."""
+    assert client.post(f"/api/seller/boost/{client.pid}", headers=hdr(5002)).status_code == 403
+
+
+def test_boost_flow_dev_confirm_and_ordering(client):
+    """Boost yoqilgan: to'lov yaratiladi, dev-confirm bilan tasdiqlanadi va mahsulot tepaga chiqadi."""
+    db = webapp_server.db
+    _enable_mon(client, mon_boost_enabled=True, mon_boost_price=5000, mon_boost_days=7)
+    # boshqa (boostsiz) yangiroq mahsulot — boostsiz holatda u oldinda turishi mumkin
+    s = db.get_user_by_telegram_id(5002)["id"]
+    db.update_user(s, is_approved=1)   # search_products faqat tasdiqlangan sotuvchini ko'rsatadi
+    other = db.create_product(seller_id=s, name="Boshqa mahsulot", price=2000, stock_count=5)
+    db.update_product_fields(other, in_stock=1, status="active")
+    # to'lov boshlash
+    r = client.post(f"/api/seller/boost/{client.pid}", headers=hdr(5002))
+    assert r.status_code == 200, r.text
+    pay_id = r.json()["payment_id"]
+    assert r.json()["amount"] == 5000
+    # oddiy sotuvchiga dev_confirm berilmaydi (faqat admin)
+    assert r.json().get("dev_confirm") is None
+    # qo'lda tasdiqlash FAQAT admin (5003)
+    assert client.post(f"/api/pay/dev-confirm/{pay_id}", headers=hdr(5002)).status_code == 403
+    assert client.post(f"/api/pay/dev-confirm/{pay_id}", headers=hdr(5003)).status_code == 200
+    prod = db.get_product_by_id(client.pid)
+    assert prod["boosted_until"] is not None
+    # qidiruvda boost qilingani tepada
+    rows = db.search_products(sort_by="newest")
+    ids = [p["id"] for p in rows]
+    assert ids[0] == client.pid
+
+
+def test_subscribe_pro_and_free_limit(client):
+    """Obuna yoqilib bepul limit 1 bo'lsa: 2-mahsulot 403; Pro olgach — ruxsat."""
+    db = webapp_server.db
+    _enable_mon(client, mon_subscription_enabled=True, mon_subscription_price=20000,
+                mon_subscription_days=30, mon_free_product_limit=1)
+    # fixture'da 1 ta faol mahsulot bor → limit (1) ga yetgan
+    r = client.post("/api/seller/product", headers=hdr(5002), json={"name": "Ikkinchi", "price": 3000})
+    assert r.status_code == 403 and r.json()["detail"] == "free_limit_reached"
+    # Pro obuna ol → admin dev-confirm bilan tasdiqlaydi (egasi 5002 uchun faollashadi)
+    sub = client.post("/api/seller/subscribe", headers=hdr(5002)).json()
+    assert client.post(f"/api/pay/dev-confirm/{sub['payment_id']}", headers=hdr(5003)).status_code == 200
+    me = client.get("/api/me", headers=hdr(5002)).json()
+    assert me["pro"]["active"] is True
+    # endi mahsulot qo'shsa bo'ladi
+    assert client.post("/api/seller/product", headers=hdr(5002),
+                       json={"name": "Ikkinchi", "price": 3000}).status_code == 200
+
+
+def test_commission_accrued_on_delivery(client):
+    """Komissiya yoqilgan: yetkazilganda orders.commission_amount yoziladi + sotuvchiga ko'rinadi."""
+    db = webapp_server.db
+    _enable_mon(client, mon_commission_enabled=True, mon_commission_percent=10)
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    buyer_id = db.get_user_by_telegram_id(5001)["id"]
+    oid = db.create_order(buyer_id, owner_id, client.pid, 1, 1000)
+    db.transition_order_status(oid, "confirmed", "pending")
+    r = client.post(f"/api/seller/order/{oid}/deliver", headers=hdr(5002),
+                    json={"settlement_type": "paid", "paid": 1000})
+    assert r.status_code == 200, r.text
+    assert db.get_commission_owed_by_seller(owner_id) == 100.0   # 1000*10%
+    me = client.get("/api/me", headers=hdr(5002)).json()
+    assert me["commission_owed"] == 100.0
+
+
+def test_payme_webhook_perform(client, monkeypatch):
+    """Payme JSON-RPC: auth → Check → Create → Perform; PerformTransaction maqsadni bajaradi."""
+    import base64 as _b64
+    monkeypatch.setattr(webapp_server, "PAYME_MERCHANT_ID", "M1")
+    monkeypatch.setattr(webapp_server, "PAYME_KEY", "secretkey")
+    _enable_mon(client, mon_subscription_enabled=True, mon_subscription_price=20000,
+                mon_pay_payme_enabled=True)
+    db = webapp_server.db
+    sub = client.post("/api/seller/subscribe", headers=hdr(5002)).json()
+    pid = sub["payment_id"]
+    auth = "Basic " + _b64.b64encode(b"Paycom:secretkey").decode()
+    tiyin = 20000 * 100
+    # noto'g'ri auth → -32504
+    bad = client.post("/api/pay/payme", json={"id": 1, "method": "CheckPerformTransaction",
+                      "params": {"amount": tiyin, "account": {"payment_id": pid}}})
+    assert bad.json()["error"]["code"] == -32504
+    h = {"Authorization": auth}
+    chk = client.post("/api/pay/payme", headers=h, json={"id": 1, "method": "CheckPerformTransaction",
+                      "params": {"amount": tiyin, "account": {"payment_id": pid}}})
+    assert chk.json()["result"]["allow"] is True
+    cr = client.post("/api/pay/payme", headers=h, json={"id": 2, "method": "CreateTransaction",
+                     "params": {"id": "TXN1", "time": 1700000000000, "amount": tiyin,
+                                "account": {"payment_id": pid}}})
+    assert cr.json()["result"]["state"] == 1
+    pf = client.post("/api/pay/payme", headers=h, json={"id": 3, "method": "PerformTransaction",
+                     "params": {"id": "TXN1"}})
+    assert pf.json()["result"]["state"] == 2
+    # maqsad bajarildi: Pro faollashdi
+    assert db.get_payment(pid)["state"] == "paid"
+    me = client.get("/api/me", headers=hdr(5002)).json()
+    assert me["pro"]["active"] is True
+    # idempotent: qayta Perform → yana state 2, xato yo'q
+    pf2 = client.post("/api/pay/payme", headers=h, json={"id": 4, "method": "PerformTransaction",
+                      "params": {"id": "TXN1"}})
+    assert pf2.json()["result"]["state"] == 2
+
+
+def test_paynet_webhook_perform(client, monkeypatch):
+    """Paynet JSON-RPC: auth (LOGIN:PASSWORD) → Create → Perform maqsadni bajaradi."""
+    import base64 as _b64
+    monkeypatch.setattr(webapp_server, "PAYNET_MERCHANT_ID", "PM1")
+    monkeypatch.setattr(webapp_server, "PAYNET_LOGIN", "login1")
+    monkeypatch.setattr(webapp_server, "PAYNET_PASSWORD", "pass1")
+    _enable_mon(client, mon_subscription_enabled=True, mon_subscription_price=20000,
+                mon_pay_paynet_enabled=True)
+    db = webapp_server.db
+    sub = client.post("/api/seller/subscribe", headers=hdr(5002)).json()
+    pid = sub["payment_id"]
+    tiyin = 20000 * 100
+    auth = "Basic " + _b64.b64encode(b"login1:pass1").decode()
+    # noto'g'ri auth → -32504
+    assert client.post("/api/pay/paynet", json={"id": 1, "method": "CheckPerformTransaction",
+                       "params": {"amount": tiyin, "account": {"payment_id": pid}}}
+                       ).json()["error"]["code"] == -32504
+    h = {"Authorization": auth}
+    cr = client.post("/api/pay/paynet", headers=h, json={"id": 2, "method": "CreateTransaction",
+                     "params": {"id": "PN1", "time": 1700000000000, "amount": tiyin,
+                                "account": {"payment_id": pid}}})
+    assert cr.json()["result"]["state"] == 1
+    pf = client.post("/api/pay/paynet", headers=h, json={"id": 3, "method": "PerformTransaction",
+                     "params": {"id": "PN1"}})
+    assert pf.json()["result"]["state"] == 2
+    assert db.get_payment(pid)["state"] == "paid"
+    assert client.get("/api/me", headers=hdr(5002)).json()["pro"]["active"] is True
+
+
+def test_dev_confirm_not_allowed_for_stranger(client):
+    """Begona foydalanuvchi boshqaning to'lovini tasdiqlay olmaydi (admin emas)."""
+    _enable_mon(client, mon_subscription_enabled=True, mon_subscription_price=1000)
+    sub = client.post("/api/seller/subscribe", headers=hdr(5002)).json()
+    # 5001 (buyer) — na admin, na ega
+    assert client.post(f"/api/pay/dev-confirm/{sub['payment_id']}", headers=hdr(5001)).status_code == 403
 
 
 # ===== ADMIN paneli (faqat admin rolli foydalanuvchi) =====

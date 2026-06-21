@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8" />
+<title>TezBozor — biz bilan ishlang (A4 taklif)</title>
+<meta name="hz:slide-selector" content=".poster" />
+<meta name="hz:canvas-width" content="794" />
+<meta name="hz:canvas-height" content="1123" />
+<link rel="stylesheet" href="https://use.typekit.net/vjo3guh.css" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex; justify-content: center; align-items: center;
+    min-height: 100vh; background: #d9dee5;
+    font-family: "source-sans-3", sans-serif;
+  }
+  .poster {
+    position: relative; width: 210mm; height: 297mm;
+    background: #FFF7F0; overflow: hidden;
+    display: flex; flex-direction: column; color: #14233B;
+  }
+
+  /* BREND BAND */
+  .brandbar {
+    position: relative; height: 30mm;
+    background: linear-gradient(120deg, #F15A29 0%, #E0431A 100%);
+    color: #fff; display: flex; align-items: center; padding: 0 13mm; overflow: hidden;
+  }
+  .brandbar .blob { position: absolute; border-radius: 50%; background: rgba(255,255,255,0.10); }
+  .brandbar .b1 { width: 40mm; height: 40mm; right: -12mm; top: -14mm; }
+  .logomark {
+    width: 15mm; height: 15mm; border-radius: 4mm; background: #fff;
+    display: flex; align-items: center; justify-content: center; flex: 0 0 auto; margin-right: 5mm;
+    box-shadow: 0 1.5mm 4mm rgba(0,0,0,0.18);
+  }
+  .logomark svg { width: 9mm; height: 9mm; }
+  .brand-name { font-weight: 900; font-size: 25pt; line-height: 0.95; letter-spacing: -0.5pt; }
+  .brand-name span { color: #FFD9C2; }
+  .brand-tag { font-weight: 600; font-size: 9.5pt; margin-top: 1mm; color: #FFE6D8; }
+  .brand-right { margin-left: auto; position: relative; z-index: 2; text-align: right; }
+  .brand-right .pill2 {
+    font-weight: 800; font-size: 9.5pt; color: #fff;
+    border: 0.5mm solid rgba(255,255,255,0.6); border-radius: 30mm; padding: 1.6mm 4.5mm; letter-spacing: 0.4pt;
+  }
+
+  /* HERO: chap matn + o'ng telefon */
+  .hero { height: 96mm; display: flex; align-items: center; gap: 8mm; padding: 8mm 13mm 4mm; }
+  .hero-text { flex: 1; }
+  .badge {
+    display: inline-block; font-weight: 800; font-size: 9pt; letter-spacing: 0.5pt;
+    color: #F15A29; background: #FDEBE2; border-radius: 30mm; padding: 1.6mm 4.5mm; margin-bottom: 4mm;
+  }
+  .hero-text h1 { font-weight: 900; font-size: 36pt; line-height: 0.98; letter-spacing: -0.8pt; color: #14233B; }
+  .hero-text h1 em { font-style: normal; color: #F15A29; }
+  .hero-text p { font-weight: 400; font-size: 11pt; line-height: 1.42; color: #5B6B7B; margin-top: 4mm; }
+  .hero-text p b { color: #14233B; font-weight: 700; }
+
+  /* TELEFON MOCKUP */
+  .phone {
+    flex: 0 0 auto; width: 52mm; height: 90mm; background: #14233B; border-radius: 8mm;
+    padding: 2.6mm; box-shadow: 0 4mm 10mm rgba(20,35,59,0.22); position: relative;
+  }
+  .notch { position: absolute; top: 3.4mm; left: 50%; transform: translateX(-50%); width: 14mm; height: 1.6mm; background: #2b3d57; border-radius: 30mm; }
+  .screen { width: 100%; height: 100%; background: #fff; border-radius: 5.8mm; padding: 3mm 3mm 0; display: flex; flex-direction: column; overflow: hidden; }
+  .scr-top { display: flex; align-items: center; gap: 2mm; padding: 1mm 0 2.5mm; }
+  .scr-logo { width: 5mm; height: 5mm; border-radius: 1.6mm; background: #F15A29; display: flex; align-items: center; justify-content: center; }
+  .scr-logo svg { width: 3mm; height: 3mm; }
+  .scr-title { font-weight: 900; font-size: 9.5pt; color: #14233B; }
+  .scr-search { margin-left: auto; width: 13mm; height: 3.4mm; background: #EFEAE3; border-radius: 30mm; }
+  .scr-img { height: 33mm; border-radius: 3mm; background: linear-gradient(135deg, #F15A29 0%, #F6A609 100%); display: flex; align-items: center; justify-content: center; position: relative; }
+  .scr-img svg { width: 13mm; height: 13mm; }
+  .scr-tag { position: absolute; top: 2mm; left: 2mm; background: #1B9E5E; color: #fff; font-weight: 800; font-size: 6.5pt; padding: 0.8mm 2mm; border-radius: 20mm; }
+  .scr-name { font-weight: 700; font-size: 8.5pt; color: #14233B; margin-top: 2.8mm; }
+  .scr-price { display: flex; align-items: baseline; gap: 2mm; margin-top: 1mm; }
+  .scr-price b { font-weight: 900; font-size: 11pt; color: #F15A29; }
+  .scr-old { font-size: 7.5pt; color: #A9B3BF; text-decoration: line-through; }
+  .scr-rate { font-weight: 600; font-size: 7.5pt; color: #5B6B7B; margin-top: 1mm; }
+  .scr-btn { margin-top: 2.8mm; height: 7.5mm; background: #1B9E5E; border-radius: 2.6mm; color: #fff; font-weight: 800; font-size: 8.5pt; display: flex; align-items: center; justify-content: center; }
+  .scr-nav { margin-top: auto; height: 8mm; border-top: 0.4mm solid #EFEAE3; display: flex; align-items: center; justify-content: space-around; }
+  .scr-nav span { width: 4mm; height: 4mm; border-radius: 1.4mm; background: #E3DED6; }
+  .scr-nav span.on { background: #F15A29; }
+
+  /* QULAYLIKLAR */
+  .why { flex: 1; padding: 2mm 13mm 0; }
+  .why h2 { font-weight: 900; font-size: 17pt; color: #14233B; margin-bottom: 4mm; }
+  .why h2 em { font-style: normal; color: #109284; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm 5mm; }
+  .row { display: flex; align-items: flex-start; gap: 3mm; }
+  .ic { width: 9mm; height: 9mm; border-radius: 2.6mm; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; }
+  .ic svg { width: 5mm; height: 5mm; }
+  .row .tx b { display: block; font-weight: 700; font-size: 11pt; color: #14233B; }
+  .row .tx span { font-weight: 400; font-size: 9pt; line-height: 1.3; color: #5B6B7B; }
+  .c-orange { background: #FDEBE2; color: #F15A29; }
+  .c-teal   { background: #E2F5F2; color: #109284; }
+  .c-green  { background: #E4F5EC; color: #1B9E5E; }
+  .c-navy   { background: #E5EAF1; color: #2B3F5C; }
+  .c-violet { background: #ECE8F7; color: #6D4FC0; }
+  .c-amber  { background: #FCF1DC; color: #C98A12; }
+
+  /* 3 QADAM */
+  .steps { height: 22mm; background: #14233B; display: flex; align-items: center; justify-content: space-between; padding: 0 13mm; gap: 4mm; }
+  .step { display: flex; align-items: center; gap: 2.5mm; flex: 1; }
+  .step .n { width: 8mm; height: 8mm; border-radius: 50%; background: #F15A29; color: #fff; font-weight: 900; font-size: 11pt; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+  .step .st { font-weight: 700; font-size: 9.5pt; color: #fff; line-height: 1.15; }
+  .steps .arr { color: #8298AE; font-weight: 900; font-size: 14pt; flex: 0 0 auto; }
+
+  /* CTA */
+  .cta { height: 32mm; background: linear-gradient(120deg, #109284 0%, #14233B 110%); color: #fff; padding: 0 13mm; display: flex; align-items: center; justify-content: space-between; position: relative; overflow: hidden; }
+  .cta .ring { position: absolute; border-radius: 50%; border: 3mm solid rgba(255,255,255,0.08); width: 44mm; height: 44mm; right: -8mm; top: -14mm; }
+  .cta .go { font-weight: 900; font-size: 20pt; line-height: 1; position: relative; z-index: 2; }
+  .cta .go small { display: block; font-weight: 600; font-size: 10pt; color: #CFE8E4; margin-top: 2mm; }
+  .cta-handle { position: relative; z-index: 2; text-align: right; }
+  .cta-handle .tg { font-weight: 900; font-size: 14pt; color: #fff; background: #F15A29; border-radius: 30mm; padding: 2.3mm 5.5mm; display: inline-block; }
+  .cta-handle .web { display: block; font-weight: 600; font-size: 9.5pt; margin-top: 2mm; color: #CFE8E4; }
+</style>
+</head>
+<body>
+  <div class="poster" data-canvas-width="794" data-canvas-height="1123">
+
+    <!-- BREND -->
+    <header class="brandbar">
+      <span class="blob b1"></span>
+      <div class="logomark"><svg viewBox="0 0 24 24" fill="#F15A29"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg></div>
+      <div>
+        <div class="brand-name">Tez<span>Bozor</span></div>
+        <div class="brand-tag">O'zbekistonning tezkor onlayn bozori</div>
+      </div>
+      <div class="brand-right"><span class="pill2">SOTUVCHILAR UCHUN</span></div>
+    </header>
+
+    <!-- HERO -->
+    <section class="hero">
+      <div class="hero-text">
+        <span class="badge">BEPUL DO'KON</span>
+        <h1>Biz bilan <em>ishlang.</em></h1>
+        <p>Do'koningizni TezBozor'da <b>bepul</b> oching — minglab xaridor, aqlli
+           vositalar va tez yetkazish bir joyda. <b>Bizda juda ko'p qulaylik bor.</b></p>
+      </div>
+
+      <!-- TELEFON MOCKUP (Mini App ko'rinishi) -->
+      <div class="phone">
+        <span class="notch"></span>
+        <div class="screen">
+          <div class="scr-top">
+            <div class="scr-logo"><svg viewBox="0 0 24 24" fill="#fff"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z"/></svg></div>
+            <div class="scr-title">TezBozor</div>
+            <div class="scr-search"></div>
+          </div>
+          <div class="scr-img">
+            <span class="scr-tag">-20%</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 8h12l-1 11H7z"/><path d="M9 8a3 3 0 0 1 6 0"/>
+            </svg>
+          </div>
+          <div class="scr-name">Smartfon X12 · 128GB</div>
+          <div class="scr-price"><b>1 250 000</b><span class="scr-old">1 560 000</span></div>
+          <div class="scr-rate">4.9 · Tezkor Store · 2 km</div>
+          <div class="scr-btn">Sotib olish</div>
+          <div class="scr-nav"><span class="on"></span><span></span><span></span><span></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- QULAYLIKLAR -->
+    <section class="why">
+      <h2>Sizga <em>nimalar beramiz?</em></h2>
+      <div class="grid">
+        <div class="row">
+          <div class="ic c-orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9 4.5 4h15L21 9"/><path d="M4.5 9v10.5h15V9"/><path d="M9.5 19.5V14h5v5.5"/></svg></div>
+          <div class="tx"><b>Bepul do'kon</b><span>Daqiqada oching, bugunoq soting.</span></div>
+        </div>
+        <div class="row">
+          <div class="ic c-violet"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l1.7 4.6 4.6 1.7-4.6 1.7L12 15.1l-1.7-4.6L5.7 8.8l4.6-1.7z"/><circle cx="18.5" cy="16.5" r="1.7"/></svg></div>
+          <div class="tx"><b>AI yordamchi</b><span>Avto-reklama va narx tavsiyasi.</span></div>
+        </div>
+        <div class="row">
+          <div class="ic c-green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5h11.5v9.5H2.5z"/><path d="M14 10h3.5l3 3v3H14z"/><circle cx="7" cy="18" r="1.6" fill="currentColor" stroke="none"/><circle cx="17.5" cy="18" r="1.6" fill="currentColor" stroke="none"/></svg></div>
+          <div class="tx"><b>Tez yetkazish</b><span>Kuryer va jonli kuzatuv.</span></div>
+        </div>
+        <div class="row">
+          <div class="ic c-navy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M21 19H3"/></svg></div>
+          <div class="tx"><b>Statistika</b><span>Sotuv va daromad tahlili.</span></div>
+        </div>
+        <div class="row">
+          <div class="ic c-amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-6h6v6"/></svg></div>
+          <div class="tx"><b>Boost &amp; Pro</b><span>Tepaga chiqing, ko'proq mijoz.</span></div>
+        </div>
+        <div class="row">
+          <div class="ic c-teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2"/><path d="M2.5 10h19"/><path d="M6 15h4"/></svg></div>
+          <div class="tx"><b>Click·Payme·Paynet</b><span>Qulay onlayn to'lovlar.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3 QADAM -->
+    <div class="steps">
+      <div class="step"><div class="n">1</div><div class="st">Ro'yxatdan<br/>o'ting</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">2</div><div class="st">Mahsulot<br/>joylang</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">3</div><div class="st">Soting va<br/>yetkazing</div></div>
+    </div>
+
+    <!-- CTA -->
+    <footer class="cta">
+      <span class="ring"></span>
+      <div class="go">Bugun qo'shiling!<small>Telegram'da bir daqiqada</small></div>
+      <div class="cta-handle">
+        <span class="tg">@TezBozorUz24</span>
+        <span class="web">tezbozor.duckdns.org</span>
+      </div>
+    </footer>
+
+  </div>
+</body>
+</html>

@@ -524,6 +524,11 @@
     <div id="chanBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="paymentsview">
+    <div class="cohead"><span id="ttl_paymentsview">💳 To'lovlar tarixi</span><span class="x" id="paymentsClose">✕</span></div>
+    <div id="paymentsBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="staffview">
     <div class="cohead"><span id="ttl_staffview">👥 Xodimlar</span><span class="x" id="staffClose">✕</span></div>
     <div id="staffBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -751,6 +756,7 @@ const I18N = {
   fin_total:{uz:"Jami tushum (yetkazilgan)",ru:"Всего доход (доставлено)"}, fin_month:{uz:"Oylik tushum",ru:"Доход за месяц"},
   fin_delivered:{uz:"Yetkazilgan buyurtmalar",ru:"Доставленных заказов"}, fin_top_sellers:{uz:"Top sotuvchilar",ru:"Топ продавцы"},
   fin_by_pay:{uz:"To'lov usuli bo'yicha",ru:"По способу оплаты"}, fin_by_dlv:{uz:"Yetkazish turi bo'yicha",ru:"По типу доставки"}, fin_empty:{uz:"Yetkazilgan buyurtma yo'q",ru:"Нет доставленных заказов"},
+  fin_platform:{uz:"Platforma daromadi (monetizatsiya)",ru:"Доход платформы (монетизация)"}, fin_platform_total:{uz:"Jami",ru:"Итого"}, fin_commission:{uz:"Komissiya (sotuvlardan)",ru:"Комиссия (с продаж)"},
   adm_fraud_hint:{uz:"Shubhali signallar (avtomatik jazo yo'q — o'zingiz tekshiring).",ru:"Подозрительные сигналы (без авто-наказания — проверьте сами)."},
   adm_fraud_empty:{uz:"✅ Shubhali faollik aniqlanmadi.",ru:"✅ Подозрительная активность не обнаружена."},
   adm_fr_self:{uz:"O'z-o'ziga sharh",ru:"Самоотзыв"}, adm_fr_farm:{uz:"Bitta juftlikda ko'p buyurtma",ru:"Много заказов в одной паре"},
@@ -773,9 +779,12 @@ const I18N = {
   mon_commission_pct:{uz:"Komissiya foizi (%)",ru:"Процент комиссии (%)"},
   mon_boost:{uz:"Boost (pullik ko'tarish)",ru:"Boost (платное продвижение)"},
   mon_boost_price:{uz:"Boost narxi (so'm)",ru:"Цена Boost (сум)"},
+  mon_boost_days:{uz:"Boost muddati (kun)",ru:"Срок Boost (дней)"},
   mon_subscription:{uz:"Sotuvchi obunasi (Pro)",ru:"Подписка продавца (Pro)"},
   mon_sub_price:{uz:"Obuna narxi (so'm/oy)",ru:"Цена подписки (сум/мес)"},
-  mon_pay_click:{uz:"Click to'lovi",ru:"Оплата Click"}, mon_pay_payme:{uz:"Payme to'lovi",ru:"Оплата Payme"},
+  mon_sub_days:{uz:"Obuna muddati (kun)",ru:"Срок подписки (дней)"},
+  mon_free_limit:{uz:"Bepul mahsulot limiti (0=cheksiz)",ru:"Лимит товаров на бесплатном (0=без лимита)"},
+  mon_pay_click:{uz:"Click to'lovi",ru:"Оплата Click"}, mon_pay_payme:{uz:"Payme to'lovi",ru:"Оплата Payme"}, mon_pay_paynet:{uz:"Paynet to'lovi",ru:"Оплата Paynet"},
   mon_pay_hint:{uz:"To'lov provayderini yoqish uchun avval merchant hisobi va kalitlar kerak (keyingi bosqich).",ru:"Для включения провайдера нужны мерчант-аккаунт и ключи (следующий этап)."},
   mon_saved:{uz:"✅ Saqlandi",ru:"✅ Сохранено"}, mon_off_note:{uz:"Hozir hammasi O'CHIQ — foydalanuvchilar uchun bepul.",ru:"Сейчас всё ВЫКЛ — бесплатно для пользователей."},
   adm_no_channels:{uz:"Ulangan kanal yo'q",ru:"Нет подключённых каналов"},
@@ -960,6 +969,20 @@ const I18N = {
   sp_confirm_deliver:{uz:"📦 Berishni tasdiqlash",ru:"📦 Подтвердить выдачу"},
   // mahsulotlar
   sp_unlimited:{uz:"Cheksiz zahira",ru:"Безлимитный запас"}, sp_dona:{uz:"dona",ru:"шт"}, sp_sold_out:{uz:"Tugagan",ru:"Закончился"}, sp_hidden:{uz:"Yashirin",ru:"Скрыт"},
+  sp_boost:{uz:"Boost — tepaga ko'tarish",ru:"Boost — поднять вверх"}, sp_boosted:{uz:"Boost faol",ru:"Boost активен"},
+  sp_boost_confirm:{uz:"Bu mahsulotni {d} kunga tepaga ko'taramizmi? Narxi: {p}",ru:"Поднять этот товар вверх на {d} дн.? Цена: {p}"},
+  sp_boost_done:{uz:"🚀 Boost yoqildi!",ru:"🚀 Boost включён!"},
+  free_limit_reached:{uz:"Bepul rejada mahsulot limitiga yetdingiz. Cheksiz qo'shish uchun Pro obunani oching.",ru:"Достигнут лимит товаров на бесплатном тарифе. Оформите Pro для безлимита."},
+  pay_title:{uz:"To'lov",ru:"Оплата"}, pay_choose:{uz:"To'lov usulini tanlang",ru:"Выберите способ оплаты"},
+  pay_opened:{uz:"To'lov sahifasi ochildi. To'lagach, bu yerga qaytib yangilang.",ru:"Открыта страница оплаты. После оплаты вернитесь и обновите."},
+  pay_dev_confirm:{uz:"SINOV rejimi: to'lovni qo'lda tasdiqlaysizmi? (real pul yechilmaydi)",ru:"ТЕСТ режим: подтвердить оплату вручную? (реальные деньги не списываются)"},
+  pay_no_provider:{uz:"To'lov provayderi hali sozlanmagan.",ru:"Платёжный провайдер ещё не настроен."},
+  pro_confirm:{uz:"Pro obunani {d} kunga olasizmi? Narxi: {p}",ru:"Оформить Pro на {d} дн.? Цена: {p}"},
+  pro_done:{uz:"⭐ Pro obuna faollashtirildi!",ru:"⭐ Pro подписка активирована!"},
+  pro_title:{uz:"⭐ Pro obuna",ru:"⭐ Pro подписка"}, pro_active:{uz:"Pro faol",ru:"Pro активен"},
+  pro_until:{uz:"Amal qiladi:",ru:"Действует до:"}, pro_get:{uz:"Pro obunani olish",ru:"Оформить Pro"},
+  pro_perk:{uz:"Cheksiz mahsulot + ustuvor ko'rinish",ru:"Безлимит товаров + приоритет"},
+  comm_owed:{uz:"Platformaga komissiya:",ru:"Комиссия платформе:"},
   sp_add_product:{uz:"➕ Mahsulot qo'shish",ru:"➕ Добавить товар"},
   sp_pending_approval:{uz:"⏳ Tasdiq kutyapti ({n}) — xodim joylagan",ru:"⏳ Ждут подтверждения ({n}) — добавил сотрудник"},
   sp_no_products:{uz:"Hali mahsulot yo'q",ru:"Товаров пока нет"},
@@ -1114,6 +1137,13 @@ const I18N = {
   cr_active:{uz:"faol",ru:"актив."}, cr_cancel:{uz:"Bekor qilish",ru:"Отмена"},
   sp_role_courier:{uz:"Kuryer",ru:"Курьер"},
   sp_ov_mycard:{uz:"💳 Mening kartam",ru:"💳 Моя карта"}, mc_title:{uz:"💳 Mening to'lov kartam",ru:"💳 Моя карта для оплаты"},
+  sp_ov_payments:{uz:"💳 To'lovlar tarixi",ru:"💳 История платежей"},
+  sp_no_payments:{uz:"Hali to'lovlar yo'q",ru:"Платежей пока нет"},
+  pay_purpose_boost:{uz:"🚀 Reklama boost",ru:"🚀 Продвижение (boost)"},
+  pay_purpose_subscription:{uz:"⭐ Pro obuna",ru:"⭐ Pro подписка"},
+  pay_state_paid:{uz:"✅ To'langan",ru:"✅ Оплачено"},
+  pay_state_pending:{uz:"⏳ Kutilmoqda",ru:"⏳ Ожидание"},
+  pay_state_cancelled:{uz:"❌ Bekor",ru:"❌ Отменён"},
   mc_hint:{uz:"Do'kon 'xodim kartasi' rejimida — sizning kartangizga to'lov tushadi. Bo'sh = ega kartasiga.",ru:"Магазин в режиме 'карта сотрудника' — оплата на вашу карту. Пусто = карта владельца."},
   mc_saved:{uz:"✅ Karta saqlandi",ru:"✅ Карта сохранена"},
   sp_make_staff:{uz:"⬇️ Oddiy xodim qilish",ru:"⬇️ Сделать сотрудником"}, sp_make_manager:{uz:"⬆️ Manager qilish",ru:"⬆️ Сделать менеджером"},
@@ -1190,6 +1220,7 @@ function applyStaticI18n(){
   try{ document.getElementById('chatInp').placeholder = L('chat_ph'); }catch(e){}
   // overlay sarlavhalari (statik HTML) — sotuvchi + xaridor + admin
   const titles={ttl_shopform:'sp_ov_shop',ttl_replyform:'sp_ov_reply',ttl_chanview:'sp_ov_chan',
+    ttl_paymentsview:'sp_ov_payments',
     ttl_staffview:'sp_ov_staff',ttl_schedview:'sp_ov_sched',ttl_deliverform:'sp_ov_deliver',
     ttl_checkout:'bp_ov_checkout',ttl_cartview:'cart_title',
     ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',
@@ -2598,12 +2629,25 @@ async function loadProfile(){
         `</div>`;
     }
 
+    // #18 — Pro-obuna / komissiya kartasi (faqat sotuvchi + bayroq yoqilgan bo'lsa)
+    let monCard='';
+    if(isSeller && me.monetization && me.monetization.enabled){
+      const mon=me.monetization, pro=me.pro||{}; const rows=[];
+      if(mon.subscription){
+        if(pro.active) rows.push(`<div class="prow"><span>⭐ ${L('pro_active')}</span><b>${pro.until?fmtDate(pro.until):''}</b></div>`);
+        else rows.push(`<div class="prow"><span style="color:var(--hint)">${L('pro_perk')}</span></div>
+          <button class="oact ok full" id="proGetBtn" style="margin-top:8px">${L('pro_get')} · ${money(mon.subscription_price||0)}</button>`);
+      }
+      if(mon.commission && (me.commission_owed>0)) rows.push(`<div class="prow"><span>${L('comm_owed')}</span><b style="color:var(--sale)">${money(me.commission_owed)}</b></div>`);
+      if(rows.length) monCard=`<div style="padding:12px 12px 0"><div class="cosec" style="margin:0"><div class="lbl">${L('pro_title')}</div>${rows.join('')}</div></div>`;
+    }
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div>
       <div class="pcard">
         <div class="pava">${esc(initial)}</div>
         <div class="pname">${esc(f.name||'—')}</div>
         <div class="prole">${roleLabel}${(f.staff_role==='courier')?' · '+L('sp_role_courier'):(f.staff_role==='manager'?' · '+L('sp_role_manager'):'')}${canManage()?` · ${curModeLabel()}`:''}</div>
       </div>
+      ${monCard}
       <div id="a2hsWrap" style="padding:12px 12px 0"></div>
       ${_pfAcc('main', L('pf_main'), mainBody)}
       ${_pfAcc('shop', L('pf_shop'), shopBody)}
@@ -2647,6 +2691,7 @@ async function loadProfile(){
     loadLoyalty();   // #16 — sodiqlik nishoni
     setupAddToHome();   // 📲 ilovani bosh ekranga qo'shish (iOS + Android)
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
+    const pgb=document.getElementById('proGetBtn'); if(pgb) pgb.onclick=subscribePro;
     v.querySelectorAll('#themeSeg [data-theme]').forEach(o=>o.onclick=()=>{
       setThemePref(o.dataset.theme);
       v.querySelectorAll('#themeSeg .opt').forEach(x=>x.classList.toggle('on', x.dataset.theme===THEME_PREF));
@@ -3050,7 +3095,7 @@ function loadSeller(){
   const acts=[['route','sp_ov_route'],['sched','sp_ov_sched'],
               ...(canStaff?[['staff','sp_ov_staff']]:[]),['chan','sp_ov_chan'],
               ['ai','sp_ov_ai'],...(myCard?[['mycard','sp_ov_mycard']]:[]),
-              ...(owner?[['shop','sp_ov_shop']]:[])];
+              ...(owner?[['payments','sp_ov_payments'],['shop','sp_ov_shop']]:[])];
   v.innerHTML = `<div class="vhead">${L('sp_shop')}</div>
     <div class="chips" id="sellerSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding:0 12px 6px">
       ${segs.map(s=>`<div class="chip${sellerSub===s[0]?' active':''}" data-sub="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}
@@ -3058,7 +3103,7 @@ function loadSeller(){
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard};
+  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments};
   v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>actMap[o.dataset.act]());
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
@@ -3172,6 +3217,31 @@ function removeChannel(cid, title){
   if(tg.showConfirm) tg.showConfirm(L('sp_chan_remove_confirm').replace('{name}', title||cid), ok=>{ if(ok) doIt(); });
   else if(confirm(L('sp_delete_q'))) doIt();
 }
+
+// ---------- SOTUVCHI TO'LOVLAR TARIXI (boost/Pro monetizatsiya) ----------
+async function openPayments(){ document.getElementById('paymentsview').classList.add('open'); await loadPayments(); }
+function payCard(p){
+  const purpose = L('pay_purpose_'+(p.purpose||'')) || esc(p.purpose||'—');
+  const stKey = {paid:'pay_state_paid',pending:'pay_state_pending',cancelled:'pay_state_cancelled'}[p.state] || '';
+  const stTxt = stKey ? L(stKey) : esc(p.state||'');
+  const col = p.state==='paid' ? 'var(--ok,#16a34a)' : (p.state==='cancelled' ? 'var(--sale)' : 'var(--hint)');
+  return `<div class="ocard">
+    <div class="orow1"><span class="oname" style="font-size:14px">${purpose}</span><span style="color:${col};font-weight:600;font-size:13px">${stTxt}</span></div>
+    <div class="ometa"><b>${money(p.amount)}</b>${p.provider?` · ${esc(p.provider)}`:''}</div>
+    <div class="ometa" style="font-size:12px">🗓 ${fmtDate(p.paid_at||p.created_at)}</div>
+  </div>`;
+}
+async function loadPayments(){
+  const b=document.getElementById('paymentsBody');
+  b.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const r=await api('/api/seller/payments');
+    const list=(r && r.payments) || [];
+    if(!list.length){ b.innerHTML=`<div class="empty"><span class="big">💳</span>${L('sp_no_payments')}</div>`; return; }
+    b.innerHTML=`<div class="olist" style="padding:10px 0">`+list.map(payCard).join('')+`</div>`;
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('paymentsClose').onclick=()=>document.getElementById('paymentsview').classList.remove('open');
 document.getElementById('chanClose').onclick=()=>document.getElementById('chanview').classList.remove('open');
 
 // ---------- XODIMLAR (multivendor) ----------
@@ -3850,13 +3920,18 @@ function sellerProductCard(p){
   const stock = p.stock_count==null ? L('sp_unlimited') : (p.stock_count>0?`${p.stock_count} ${L('sp_dona')}`:L('sp_sold_out'));
   const hidden = p.in_stock ? '' : ` <span class="ostatus st-cancel">${L('sp_hidden')}</span>`;
   const oldp = (p.old_price && p.old_price>p.price) ? ` <span style="text-decoration:line-through;color:var(--hint);font-size:12px">${money(p.old_price)}</span>` : '';
+  const boostOn = !!(ME && ME.monetization && ME.monetization.boost);
+  const isBoosted = p.boosted_until && (new Date(p.boosted_until) > new Date());
+  const boostBadge = isBoosted ? ` <span class="ostatus" style="background:#fff3d6;color:#b8860b">🚀 ${L('sp_boosted')}</span>` : '';
+  const boostBtn = (boostOn && !isBoosted) ? `<button class="oact ok" data-boost="${p.id}" title="${L('sp_boost')}" style="width:auto;padding:9px 12px;margin:0;flex:0 0 auto;background:#fff3d6;color:#b8860b">🚀</button>` : '';
   return `<div class="ocard" data-pid="${p.id}" style="display:flex;gap:12px;align-items:center;cursor:pointer${soldOut?';border:1.5px solid var(--sale);background:var(--danger-soft,rgba(224,62,62,.08))':''}">
     <div class="coprod" style="padding:0;background:none;box-shadow:none;flex:0 0 auto">${img}</div>
     <div style="flex:1;min-width:0">
       <div class="oname" style="font-size:14px">${esc(p.name||'')}</div>
       <div class="ometa"><b>${money(p.price)}</b>${oldp}</div>
-      <div class="oshop">📦 ${stock}${hidden}</div>
+      <div class="oshop">📦 ${stock}${hidden}${boostBadge}</div>
     </div>
+    ${boostBtn}
     <button class="oact ok" data-stock="${p.id}" title="${L('sp_stock')}" style="width:auto;padding:9px 12px;margin:0;flex:0 0 auto;background:var(--accent-soft);color:var(--accent)">${soldOut?'➕':'🔢'}</button>
   </div>`;
 }
@@ -3889,6 +3964,7 @@ async function loadSellerProducts(){
         if(p) openProductForm(p);
       });
       b.querySelectorAll('[data-stock]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); quickStock(btn.dataset.stock); });
+      b.querySelectorAll('[data-boost]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); boostProduct(btn.dataset.boost); });
     };
     bindCards();
     b.querySelectorAll('[data-approve]').forEach(btn=>btn.onclick=()=>approveProduct(btn.dataset.approve, true));
@@ -3915,6 +3991,69 @@ function approveProduct(pid, ok){
   if(ok) doIt();
   else if(tg.showConfirm) tg.showConfirm(L('sp_reject_product_confirm'), o=>{ if(o) doIt(); });
   else if(confirm(L('sp_delete_q'))) doIt();
+}
+
+// ---------- TO'LOV (#18 boost / Pro-obuna) ----------
+// startPayment: server javobini (providers + dev_confirm) ishlatadi. Provayder bo'lsa
+// checkout linkini ochadi; sozlanmagan bo'lsa (yoki admin) sinov uchun qo'lda tasdiq.
+// To'lov holatini ~2 daqiqa kuzatadi (provayder ilovasida to'langач webhook 'paid' qiladi).
+function pollPayment(paymentId, onDone){
+  let tries=0;
+  const tick=async()=>{
+    tries++;
+    try{ const s=await api('/api/pay/status/'+paymentId);
+      if(s.state==='paid'){ if(onDone) onDone(); return; }
+      if(s.state==='cancelled'){ return; }
+    }catch(e){}
+    if(tries<40) setTimeout(tick, 3000);   // 40×3s ≈ 2 daqiqa
+  };
+  setTimeout(tick, 3000);
+}
+
+async function startPayment(resp, onDone){
+  const urls = resp.providers || {};
+  const provs = Object.keys(urls);
+  const open=(u)=>{ try{ tg.openLink(u); }catch(e){ window.open(u,'_blank'); } };
+  if(provs.length){
+    if(provs.length>1 && tg.showPopup){
+      tg.showPopup({title:L('pay_title'), message:L('pay_choose'),
+        buttons:provs.map(p=>({id:p,type:'default',text:p==='click'?'Click':(p==='paynet'?'Paynet':'Payme')}))},
+        id=>{ if(urls[id]){ open(urls[id]); tg.showAlert(L('pay_opened')); pollPayment(resp.payment_id, onDone); } });
+    } else { open(urls[provs[0]]); tg.showAlert(L('pay_opened')); pollPayment(resp.payment_id, onDone); }
+    return;
+  }
+  if(resp.dev_confirm){
+    const go=async()=>{ try{ await apiSend('/api/pay/dev-confirm/'+resp.payment_id,'POST',{});
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){} if(onDone) onDone(); }
+      catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); } };
+    if(tg.showConfirm) tg.showConfirm(L('pay_dev_confirm'), ok=>{ if(ok) go(); }); else go();
+    return;
+  }
+  tg.showAlert(L('pay_no_provider'));
+}
+
+function boostProduct(pid){
+  const m = (ME && ME.monetization) || {};
+  const msg = L('sp_boost_confirm').replace('{p}', money(m.boost_price||0)).replace('{d}', m.boost_days||7);
+  const go=async()=>{
+    try{
+      const resp = await apiSend('/api/seller/boost/'+pid,'POST',{});
+      await startPayment(resp, ()=>{ tg.showAlert(L('sp_boost_done')); loadSellerProducts(); });
+    }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+  };
+  if(tg.showConfirm) tg.showConfirm(msg, ok=>{ if(ok) go(); }); else if(confirm(msg)) go();
+}
+
+function subscribePro(){
+  const m = (ME && ME.monetization) || {};
+  const msg = L('pro_confirm').replace('{p}', money(m.subscription_price||0)).replace('{d}', m.subscription_days||30);
+  const go=async()=>{
+    try{
+      const resp = await apiSend('/api/seller/subscribe','POST',{});
+      await startPayment(resp, async()=>{ tg.showAlert(L('pro_done')); ME=null; await loadMe(); loadProfile(); });
+    }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+  };
+  if(tg.showConfirm) tg.showConfirm(msg, ok=>{ if(ok) go(); }); else if(confirm(msg)) go();
 }
 
 // ---------- MAHSULOT FORMASI (qo'shish / tahrirlash) ----------
@@ -4158,7 +4297,8 @@ async function saveProduct(){
     if(wasNew && newId) openAdView(newId);
   }catch(e){
     btn.disabled=false; btn.textContent = pf.id?L('s_save'):L('sp_add_ad');
-    tg.showAlert(L('sp_save_failed')+e.message);
+    const msg = (e.message==='free_limit_reached') ? L('free_limit_reached') : (L('sp_save_failed')+e.message);
+    tg.showAlert(msg);
   }
 }
 
@@ -4638,6 +4778,11 @@ async function admFinancial(){
         ${(d.top_sellers||[]).map((s,i)=>`<div class="ometa">${i+1}. ${esc(s.name)} — <b style="color:var(--ok)">${money(s.revenue)}</b> (${s.count})</div>`).join('')||'—'}</div>
       <div class="ocard"><div class="lbl">💳 ${L('fin_by_pay')}</div>${kv(d.by_payment)}</div>
       <div class="ocard"><div class="lbl">🚚 ${L('fin_by_dlv')}</div>${kv(d.by_delivery)}</div>
+      <div class="ocard" style="background:var(--accent-soft)"><div class="lbl">🏦 ${L('fin_platform')}</div>
+        <div class="ometa">${L('fin_platform_total')}: <b style="color:var(--accent)">${money(d.platform_revenue||0)}</b></div>
+        <div class="ometa">${L('fin_commission')}: <b>${money(d.commission_total||0)}</b></div>
+        ${Object.keys(d.payments_by_purpose||{}).map(k=>`<div class="ometa">${esc(k)}: <b>${money((d.payments_by_purpose[k]||{}).total||0)}</b> (${(d.payments_by_purpose[k]||{}).count||0})</div>`).join('')}
+      </div>
     </div>`;
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
@@ -4980,10 +5125,14 @@ function renderMon(cfg){
     ${cfg.mon_commission_enabled?_monNum(L('mon_commission_pct'),'mon_commission_percent',cfg.mon_commission_percent):''}
     ${_monRow(L('mon_boost'),'mon_boost_enabled',cfg.mon_boost_enabled)}
     ${cfg.mon_boost_enabled?_monNum(L('mon_boost_price'),'mon_boost_price',cfg.mon_boost_price):''}
+    ${cfg.mon_boost_enabled?_monNum(L('mon_boost_days'),'mon_boost_days',cfg.mon_boost_days):''}
     ${_monRow(L('mon_subscription'),'mon_subscription_enabled',cfg.mon_subscription_enabled)}
     ${cfg.mon_subscription_enabled?_monNum(L('mon_sub_price'),'mon_subscription_price',cfg.mon_subscription_price):''}
+    ${cfg.mon_subscription_enabled?_monNum(L('mon_sub_days'),'mon_subscription_days',cfg.mon_subscription_days):''}
+    ${cfg.mon_subscription_enabled?_monNum(L('mon_free_limit'),'mon_free_product_limit',cfg.mon_free_product_limit):''}
     ${_monRow(L('mon_pay_click'),'mon_pay_click_enabled',cfg.mon_pay_click_enabled,L('mon_pay_hint'))}
     ${_monRow(L('mon_pay_payme'),'mon_pay_payme_enabled',cfg.mon_pay_payme_enabled)}
+    ${_monRow(L('mon_pay_paynet'),'mon_pay_paynet_enabled',cfg.mon_pay_paynet_enabled)}
   </div>`;
   b.querySelectorAll('[data-montgl]').forEach(btn=>btn.onclick=async()=>{
     const key=btn.dataset.montgl;

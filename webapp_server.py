@@ -895,6 +895,10 @@ def api_me(authorization: str = Header(None)):
         # #22 — monetizatsiya bayroqlari (default hammasi o'chiq); frontend kelajakda
         # tugmalarni shunga qarab ko'rsatadi/yashiradi.
         "monetization": monetization_public(),
+        # #18 — Pro-obuna holati + platformaga komissiya qarzi (egasi bo'yicha; sotuvchi
+        # bo'lmasa tabiiy ravishda 0 qaytadi)
+        "pro": _pro_status(b),
+        "commission_owed": db.get_commission_owed_by_seller(_owner_id(b)),
     }
 
 
@@ -1874,6 +1878,33 @@ def _is_courier(user):
     return bool(s and dict(s).get("staff_role") == "courier")
 
 
+def _pro_until_dt(pu):
+    if not pu:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(pu).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _is_pro(owner_id):
+    """Do'kon egasining Pro-obunasi faolmi (pro_until > hozir)."""
+    u = db.get_user_by_id(owner_id)
+    dt = _pro_until_dt(dict(u).get("pro_until")) if u else None
+    return bool(dt and dt > datetime.now(timezone.utc))
+
+
+def _pro_status(user):
+    """Frontend uchun Pro holati: egasi bo'yicha (pro_until egada saqlanadi)."""
+    owner = db.get_user_by_id(_owner_id(user)) if user else None
+    dt = _pro_until_dt(dict(owner).get("pro_until")) if owner else None
+    active = bool(dt and dt > datetime.now(timezone.utc))
+    return {"active": active, "until": (dt.isoformat() if dt else None)}
+
+
 def _staff_mgmt_shop(user):
     """Xodim BOSHQARUVI (ro'yxat/taklif/o'chirish) huquqi bor do'kon: EGA yoki
     perm_add_staff berilgan MENEJER. Ruxsat berish (rol/perm) esa faqat egada qoladi."""
@@ -2840,6 +2871,19 @@ async def api_deliver(order_id: int, body: DeliverIn, authorization: str = Heade
         db.set_order_settlement(order_id, eff, paid, due)
         disp = fmt_order_id(order_id)
 
+    # #18 Komissiya — sotuv yakunlanganda platforma ulushini yozamiz (yoqilgan bo'lsa).
+    try:
+        mc = monetization_config()
+        pct = mc["mon_commission_percent"]
+        if mc["mon_enabled"] and mc["mon_commission_enabled"] and pct > 0:
+            if gid:
+                for o in won:
+                    db.set_order_commission(o["id"], float(o.get("total_price") or 0) * pct / 100.0)
+            else:
+                db.set_order_commission(order_id, total * pct / 100.0)
+    except Exception as e:
+        logging.warning(f"komissiya yozish xato (order {order_id}): {e}")
+
     try:
         buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
         blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
@@ -3014,6 +3058,12 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
             raise HTTPException(status_code=403, detail="staff_inactive")
         if not st.get("perm_add_product", 1):
             raise HTTPException(status_code=403, detail="no_perm_add")
+    # #18 Pro limit — obuna yoqilgan va bepul limit belgilangan bo'lsa, Pro bo'lmagan
+    # do'kon limitdan ortiq faol mahsulot qo'sha olmaydi.
+    pub = monetization_public()
+    flim = int(pub.get("free_product_limit") or 0)
+    if flim > 0 and not _is_pro(owner_id) and db.count_active_products(owner_id) >= flim:
+        raise HTTPException(status_code=403, detail="free_limit_reached")
     shop = db.get_shop_for_user(user["id"])
     needs_owner_approval = bool(is_staff and shop and dict(shop).get("moderation") == "owner_approve")
     # #5 AVTO-MODERATSIYA — taqiqlangan tovar/kontent bo'lsa jonli efirga CHIQARMAYMIZ.
@@ -3323,10 +3373,14 @@ MONETIZATION_SPEC = [
     ("mon_commission_percent",   "num",  "0"),  # 0..100
     ("mon_boost_enabled",        "bool", "0"),  # pullik "ko'tarish" reklamasi
     ("mon_boost_price",          "num",  "0"),
+    ("mon_boost_days",           "num",  "7"),   # boost necha kun amal qiladi
     ("mon_subscription_enabled", "bool", "0"),  # sotuvchi pro-obunasi
     ("mon_subscription_price",   "num",  "0"),
+    ("mon_subscription_days",    "num",  "30"),  # obuna necha kunga
+    ("mon_free_product_limit",   "num",  "0"),   # 0 = limitsiz; >0 = bepul sotuvchiga shu sondan ortiq faol mahsulot mumkin emas (Pro = cheksiz)
     ("mon_pay_click_enabled",    "bool", "0"),  # Click to'lov provayderi
     ("mon_pay_payme_enabled",    "bool", "0"),  # Payme to'lov provayderi
+    ("mon_pay_paynet_enabled",   "bool", "0"),  # Paynet to'lov provayderi
 ]
 _MON_KEYS = {k: typ for k, typ, _ in MONETIZATION_SPEC}
 
@@ -3356,9 +3410,15 @@ def monetization_public():
         "commission": on and c["mon_commission_enabled"],
         "commission_percent": c["mon_commission_percent"] if (on and c["mon_commission_enabled"]) else 0,
         "boost": on and c["mon_boost_enabled"],
+        "boost_price": c["mon_boost_price"] if (on and c["mon_boost_enabled"]) else 0,
+        "boost_days": int(c["mon_boost_days"]),
         "subscription": on and c["mon_subscription_enabled"],
+        "subscription_price": c["mon_subscription_price"] if (on and c["mon_subscription_enabled"]) else 0,
+        "subscription_days": int(c["mon_subscription_days"]),
+        "free_product_limit": int(c["mon_free_product_limit"]) if (on and c["mon_subscription_enabled"]) else 0,
         "pay_click": on and c["mon_pay_click_enabled"],
         "pay_payme": on and c["mon_pay_payme_enabled"],
+        "pay_paynet": on and c["mon_pay_paynet_enabled"],
     }
 
 
@@ -3392,6 +3452,482 @@ async def api_admin_monetization_set(request: Request, authorization: str = Head
                 raise HTTPException(status_code=400, detail="bad_percent")
             db.set_setting(k, num)
     return {"ok": True, "config": monetization_config()}
+
+
+# ============================================================
+# TO'LOVLAR — Click / Payme (monetizatsiya #18)
+# Boost va Pro-obuna shu rel orqali to'lanadi. Provayder kalitlari .env'dan; yo'q
+# bo'lsa endpointlar "sozlanmagan" deydi (sandbox-ready). Kalit yo'q payti sinov
+# uchun admin-only "qo'lda tasdiqlash" yo'li bor (/api/pay/dev-confirm).
+# ============================================================
+import json as _json
+import time as _time
+
+CLICK_SERVICE_ID   = os.getenv("CLICK_SERVICE_ID", "")
+CLICK_MERCHANT_ID  = os.getenv("CLICK_MERCHANT_ID", "")
+CLICK_SECRET_KEY   = os.getenv("CLICK_SECRET_KEY", "")
+PAYME_MERCHANT_ID  = os.getenv("PAYME_MERCHANT_ID", "")
+PAYME_KEY          = os.getenv("PAYME_KEY", "")  # kassir kaliti (webhook Basic-auth paroli)
+PAYME_CHECKOUT_URL = os.getenv("PAYME_CHECKOUT_URL", "https://checkout.paycom.uz")
+CLICK_CHECKOUT_URL = os.getenv("CLICK_CHECKOUT_URL", "https://my.click.uz/services/pay")
+# Payme kabinetida "hisob (account)" maydonining nomi shu bo'lishi kerak (default: payment_id).
+# Kabinetda boshqacha atalса (masalan order_id), .env'da PAYME_ACCOUNT_FIELD bilan moslang.
+PAYME_ACCOUNT_FIELD = os.getenv("PAYME_ACCOUNT_FIELD", "payment_id")
+
+# Paynet (merchant JSON-RPC, Payme'ga o'xshash naqsh). Webhook Basic-auth: LOGIN:PASSWORD.
+# DIQQAT: Paynet merchant protokoli (metod nomlari/imzo) Payme bilan deyarli bir xil, ammo
+# kabinetdan olingan hujjat bilan TASDIQLANISHI shart — bayroq ulanmaguncha o'chiq turadi.
+PAYNET_MERCHANT_ID  = os.getenv("PAYNET_MERCHANT_ID", "")
+PAYNET_LOGIN        = os.getenv("PAYNET_LOGIN", "")
+PAYNET_PASSWORD     = os.getenv("PAYNET_PASSWORD", "")
+PAYNET_CHECKOUT_URL = os.getenv("PAYNET_CHECKOUT_URL", "")  # bo'sh = redirect-checkout yo'q
+
+
+def _click_configured():
+    return bool(CLICK_SERVICE_ID and CLICK_MERCHANT_ID and CLICK_SECRET_KEY)
+
+
+def _payme_configured():
+    return bool(PAYME_MERCHANT_ID and PAYME_KEY)
+
+
+def _paynet_configured():
+    return bool(PAYNET_MERCHANT_ID and PAYNET_LOGIN and PAYNET_PASSWORD)
+
+
+def _fulfill_payment(payment):
+    """To'lov 'paid' bo'lganda maqsadni bajaradi (idempotent — chaqiruvchi state'ni
+    'paid'ga o'tkazgandan keyin chaqiradi). boost → mahsulotni ko'taradi; subscription → Pro uzaytiradi."""
+    cfg = monetization_config()
+    purpose = payment.get("purpose")
+    try:
+        if purpose == "boost" and payment.get("ref_id"):
+            db.set_product_boost(payment["ref_id"], int(cfg["mon_boost_days"]) or 7)
+        elif purpose == "subscription":
+            db.set_pro_until(payment["user_id"], int(cfg["mon_subscription_days"]) or 30)
+    except Exception as e:
+        logging.error(f"to'lov bajarish xatosi (payment {payment.get('id')}): {e}")
+
+
+_PAY_DONE_TXT = {
+    "boost": {"uz": "🚀 To'lov qabul qilindi — mahsulotingiz endi tepada ko'rinadi!",
+              "ru": "🚀 Оплата принята — ваш товар теперь показывается вверху!"},
+    "subscription": {"uz": "⭐ To'lov qabul qilindi — Pro obuna faollashtirildi!",
+                     "ru": "⭐ Оплата принята — Pro-подписка активирована!"},
+}
+
+
+async def _notify_payment_done(payment):
+    """To'lov muvaffaqiyatli bo'lganda foydalanuvchiga botdan xabar (u Payme/Click
+    ilovasida to'lasa, Mini App o'zi bilmaydi — shuning uchun push muhim)."""
+    try:
+        u = db.get_user_by_id(payment["user_id"])
+        if not u or not dict(u).get("telegram_id"):
+            return
+        lang = get_user_lang(u) or DEFAULT_LANG
+        msg = _PAY_DONE_TXT.get(payment.get("purpose"), {})
+        txt = msg.get(lang) or msg.get("uz")
+        if txt:
+            await _tg_call("sendMessage", {"chat_id": dict(u)["telegram_id"], "text": txt})
+    except Exception as e:
+        logging.warning(f"to'lov xabar yuborish xato (payment {payment.get('id')}): {e}")
+
+
+def _mark_paid_and_fulfill(payment, provider, txn_id=None, meta=None):
+    """Pending→paid o'tkazadi (faqat bir marta) va maqsadni bajaradi. paid bo'lganini qaytaradi."""
+    fresh = db.get_payment(payment["id"])
+    if not fresh:
+        return False
+    if fresh["state"] == "paid":
+        return True  # idempotent — webhook qayta keldi
+    db.set_payment_state(payment["id"], "paid", provider=provider, provider_txn_id=txn_id, meta=meta)
+    _fulfill_payment(fresh)
+    # Botdan xabar (async; webhook async kontekstda ishlaydi). Loop bo'lmasa — jim o'tadi.
+    try:
+        asyncio.get_running_loop().create_task(_notify_payment_done(fresh))
+    except RuntimeError:
+        pass
+    return True
+
+
+def _payment_checkout_urls(payment, pub):
+    """Faol provayderlar uchun checkout URL'lari (so'm → Payme tiyin)."""
+    urls = {}
+    pid = payment["id"]
+    amount = float(payment["amount"])
+    if pub.get("pay_click") and _click_configured():
+        urls["click"] = (f"{CLICK_CHECKOUT_URL}?service_id={CLICK_SERVICE_ID}"
+                         f"&merchant_id={CLICK_MERCHANT_ID}&amount={amount:.0f}"
+                         f"&transaction_param={pid}")
+    if pub.get("pay_payme") and _payme_configured():
+        tiyin = int(round(amount * 100))
+        raw = f"m={PAYME_MERCHANT_ID};ac.{PAYME_ACCOUNT_FIELD}={pid};a={tiyin}"
+        token = base64.b64encode(raw.encode()).decode()
+        urls["payme"] = f"{PAYME_CHECKOUT_URL}/{token}"
+    if pub.get("pay_paynet") and _paynet_configured() and PAYNET_CHECKOUT_URL:
+        # Paynet'da redirect-checkout bo'lsa link beramiz; bo'lmasa mijoz Paynet ilovasidan
+        # to'lov ID (payment_id) bo'yicha to'laydi — link shart emas (webhook baribir keladi).
+        urls["paynet"] = (f"{PAYNET_CHECKOUT_URL}?merchant_id={PAYNET_MERCHANT_ID}"
+                          f"&payment_id={pid}&amount={amount:.0f}")
+    return urls
+
+
+def _new_purchase_response(user, payment, pub):
+    """Sotuvchiga to'lov boshlash javobi: checkout URL'lar + (kalit yo'q/admin bo'lsa) dev-confirm."""
+    urls = _payment_checkout_urls(payment, pub)
+    resp = {"ok": True, "payment_id": payment["id"], "amount": payment["amount"], "providers": urls}
+    # Sinov yo'li (qo'lda tasdiqlash) FAQAT adminga — real pul ko'chmaydi. Oddiy sotuvchi
+    # provayder ulanmagan bo'lsa to'lay olmaydi (pay_no_provider) — bu to'g'ri (teshik yo'q).
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    if is_admin:
+        resp["dev_confirm"] = True
+    return resp
+
+
+@app.post("/api/seller/boost/{product_id}")
+def api_seller_boost(product_id: int, authorization: str = Header(None)):
+    """Mahsulotni boost qilish uchun to'lov boshlaydi. Bayroq yoqilmagan bo'lsa 403."""
+    user = dict(_buyer_from_auth(authorization))
+    pub = monetization_public()
+    if not pub.get("boost"):
+        raise HTTPException(status_code=403, detail="boost_disabled")
+    prod = _own_product_or_403(user, product_id)
+    price = float(pub.get("boost_price") or 0)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="boost_price_unset")
+    pid = db.create_payment(_owner_id(user), "boost", price, ref_id=prod["id"])
+    payment = db.get_payment(pid)
+    return _new_purchase_response(user, payment, pub)
+
+
+@app.post("/api/seller/subscribe")
+def api_seller_subscribe(authorization: str = Header(None)):
+    """Pro-obuna uchun to'lov boshlaydi. Bayroq yoqilmagan bo'lsa 403."""
+    user = dict(_buyer_from_auth(authorization))
+    pub = monetization_public()
+    if not pub.get("subscription"):
+        raise HTTPException(status_code=403, detail="subscription_disabled")
+    price = float(pub.get("subscription_price") or 0)
+    if price <= 0:
+        raise HTTPException(status_code=400, detail="subscription_price_unset")
+    pid = db.create_payment(_owner_id(user), "subscription", price)
+    payment = db.get_payment(pid)
+    return _new_purchase_response(user, payment, pub)
+
+
+@app.get("/api/seller/payments")
+def api_seller_payments(authorization: str = Header(None)):
+    """Sotuvchining to'lovlari tarixi (ega bo'yicha)."""
+    user = dict(_buyer_from_auth(authorization))
+    return {"payments": db.get_payments_by_user(_owner_id(user), limit=50)}
+
+
+@app.get("/api/pay/status/{payment_id}")
+def api_pay_status(payment_id: int, authorization: str = Header(None)):
+    """To'lov holati — Mini App provayder linkini ochgandan keyin shu yerda poll qiladi
+    (Payme/Click ilovasida to'lov tugasa, webhook 'paid' qiladi)."""
+    user = dict(_buyer_from_auth(authorization))
+    payment = db.get_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="not_found")
+    if not (payment["user_id"] == _owner_id(user)
+            or user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID):
+        raise HTTPException(status_code=403, detail="not_allowed")
+    return {"state": payment["state"], "purpose": payment["purpose"]}
+
+
+@app.post("/api/pay/dev-confirm/{payment_id}")
+def api_pay_dev_confirm(payment_id: int, authorization: str = Header(None)):
+    """SINOV: to'lovni qo'lda 'paid' qiladi (provider='manual'). FAQAT ADMIN — aks holda
+    provayder ulanmagan paytda har kim bepul boost/obuna olishi mumkin edi (teshik).
+    Real provayder pulini ko'chirmaydi; faqat oqimni sinash uchun."""
+    user = dict(_buyer_from_auth(authorization))
+    payment = db.get_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="not_found")
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="not_allowed")
+    if payment["state"] == "cancelled":
+        raise HTTPException(status_code=409, detail="cancelled")
+    _mark_paid_and_fulfill(payment, "manual")
+    return {"ok": True, "payment": db.get_payment(payment_id)}
+
+
+# ---- Click webhook (prepare + complete) ----
+def _click_sign(params, keys):
+    """Click imzosi: md5 of concat(params[k] for k in keys) + SECRET (tartibga ko'ra)."""
+    raw = "".join(str(params.get(k, "")) for k in keys)
+    return hashlib.md5((raw + CLICK_SECRET_KEY).encode()).hexdigest()
+
+
+@app.post("/api/pay/click")
+async def api_pay_click(request: Request):
+    """Click Merchant API: action=0 (prepare), action=1 (complete). Imzo (sign_string) tekshiriladi."""
+    if not _click_configured():
+        return {"error": -9, "error_note": "not_configured"}
+    form = dict((await request.form()))
+    action = str(form.get("action", ""))
+    payment_id = form.get("merchant_trans_id") or form.get("transaction_param")
+    click_trans_id = form.get("click_trans_id")
+    err = {"click_trans_id": click_trans_id, "merchant_trans_id": payment_id}
+
+    # Imzo tekshiruvi
+    if action == "0":
+        sign_keys = ["click_trans_id", "service_id", "merchant_trans_id", "amount", "action", "sign_time"]
+    else:
+        sign_keys = ["click_trans_id", "service_id", "merchant_trans_id",
+                     "merchant_prepare_id", "amount", "action", "sign_time"]
+    if form.get("sign_string") != _click_sign(form, sign_keys):
+        return {**err, "error": -1, "error_note": "SIGN CHECK FAILED"}
+
+    payment = db.get_payment(int(payment_id)) if payment_id and str(payment_id).isdigit() else None
+    if not payment:
+        return {**err, "error": -5, "error_note": "Order not found"}
+    if abs(float(form.get("amount", 0)) - float(payment["amount"])) > 0.5:
+        return {**err, "error": -2, "error_note": "Incorrect amount"}
+    if payment["state"] == "cancelled":
+        return {**err, "error": -9, "error_note": "Transaction cancelled"}
+
+    if action == "0":  # prepare
+        return {**err, "merchant_prepare_id": payment["id"], "error": 0, "error_note": "Success"}
+    if action == "1":  # complete
+        _mark_paid_and_fulfill(payment, "click", txn_id=click_trans_id)
+        return {**err, "merchant_confirm_id": payment["id"], "error": 0, "error_note": "Success"}
+    return {**err, "error": -3, "error_note": "Action not found"}
+
+
+# ---- Payme webhook (JSON-RPC) ----
+def _payme_auth_ok(authorization):
+    """Authorization: Basic base64('Paycom:<PAYME_KEY>')."""
+    if not authorization or not authorization.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:]).decode()
+    except Exception:
+        return False
+    return decoded.split(":", 1)[-1] == PAYME_KEY
+
+
+def _payme_err(rid, code, msg):
+    return {"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": {"ru": msg, "uz": msg, "en": msg}}}
+
+
+def _ts_ms(value):
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except Exception:
+        return int(_time.time() * 1000)
+
+
+@app.post("/api/pay/payme")
+async def api_pay_payme(request: Request, authorization: str = Header(None)):
+    """Payme Merchant JSON-RPC: CheckPerformTransaction / CreateTransaction /
+    PerformTransaction / CancelTransaction / CheckTransaction."""
+    body = await request.json()
+    rid = body.get("id") if isinstance(body, dict) else None
+    if not _payme_configured() or not _payme_auth_ok(authorization):
+        return _payme_err(rid, -32504, "Insufficient privileges")
+    method = body.get("method")
+    params = body.get("params") or {}
+
+    def _payment_from_account():
+        acc = params.get("account") or {}
+        pid = acc.get("payment_id")
+        if not pid or not str(pid).isdigit():
+            return None
+        return db.get_payment(int(pid))
+
+    if method == "CheckPerformTransaction":
+        p = _payment_from_account()
+        if not p:
+            return _payme_err(rid, -31050, "Payment not found")
+        if int(round(float(p["amount"]) * 100)) != int(params.get("amount", 0)):
+            return _payme_err(rid, -31001, "Incorrect amount")
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        return {"jsonrpc": "2.0", "id": rid, "result": {"allow": True}}
+
+    if method == "CreateTransaction":
+        txn = params.get("id")
+        existing = db.get_payment_by_txn("payme", txn)
+        if existing:
+            meta = _json.loads(existing.get("provider_meta") or "{}")
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "create_time": meta.get("create_time", _ts_ms(existing["created_at"])),
+                "transaction": str(existing["id"]),
+                "state": 1 if existing["state"] == "pending" else 2}}
+        p = _payment_from_account()
+        if not p:
+            return _payme_err(rid, -31050, "Payment not found")
+        if int(round(float(p["amount"]) * 100)) != int(params.get("amount", 0)):
+            return _payme_err(rid, -31001, "Incorrect amount")
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        ct = int(params.get("time") or _time.time() * 1000)
+        db.set_payment_state(p["id"], "pending", provider="payme", provider_txn_id=txn,
+                             meta=_json.dumps({"create_time": ct}))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "create_time": ct, "transaction": str(p["id"]), "state": 1}}
+
+    if method == "PerformTransaction":
+        p = db.get_payment_by_txn("payme", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        if p["state"] == "paid":
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "transaction": str(p["id"]), "perform_time": meta.get("perform_time", _ts_ms(p.get("paid_at"))),
+                "state": 2}}
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        pt = int(_time.time() * 1000)
+        meta["perform_time"] = pt
+        _mark_paid_and_fulfill(p, "payme", txn_id=params.get("id"), meta=_json.dumps(meta))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "transaction": str(p["id"]), "perform_time": pt, "state": 2}}
+
+    if method == "CancelTransaction":
+        p = db.get_payment_by_txn("payme", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        ct = meta.get("cancel_time") or int(_time.time() * 1000)
+        meta["cancel_time"] = ct
+        meta["cancel_reason"] = params.get("reason")
+        # paid bo'lgandan keyin bekor = state -2, aks holda -1
+        post = (p["state"] == "paid")
+        if p["state"] != "cancelled":
+            db.set_payment_state(p["id"], "cancelled", meta=_json.dumps(meta))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "transaction": str(p["id"]), "cancel_time": ct, "state": -2 if post else -1}}
+
+    if method == "CheckTransaction":
+        p = db.get_payment_by_txn("payme", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        state = {"pending": 1, "paid": 2, "cancelled": -1}[p["state"]]
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "create_time": meta.get("create_time", _ts_ms(p["created_at"])),
+            "perform_time": meta.get("perform_time", 0),
+            "cancel_time": meta.get("cancel_time", 0),
+            "transaction": str(p["id"]), "state": state, "reason": meta.get("cancel_reason")}}
+
+    return _payme_err(rid, -32601, "Method not found")
+
+
+# ---- Paynet webhook (JSON-RPC, Payme'ga o'xshash) ----
+# DIQQAT: Paynet merchant protokoli kabinetdan olingan hujjat bilan TASDIQLANISHI shart.
+# Quyidagi metod nomlari (CheckPerformTransaction/CreateTransaction/PerformTransaction/
+# CancelTransaction/CheckTransaction) Payme bilan bir xil deb taxmin qilingan — Paynet
+# boshqacha atasa, shu yerda moslab o'zgartiriladi (bayroq ulanmaguncha jonli emas).
+def _paynet_auth_ok(authorization):
+    """Authorization: Basic base64('LOGIN:PASSWORD')."""
+    if not authorization or not authorization.startswith("Basic "):
+        return False
+    try:
+        decoded = base64.b64decode(authorization[6:]).decode()
+    except Exception:
+        return False
+    return decoded == f"{PAYNET_LOGIN}:{PAYNET_PASSWORD}"
+
+
+@app.post("/api/pay/paynet")
+async def api_pay_paynet(request: Request, authorization: str = Header(None)):
+    """Paynet merchant JSON-RPC. Payme handleri bilan bir xil holat-mashinasi (payments
+    daftari), faqat auth LOGIN:PASSWORD. Provider='paynet' bilan yoziladi."""
+    body = await request.json()
+    rid = body.get("id") if isinstance(body, dict) else None
+    if not _paynet_configured() or not _paynet_auth_ok(authorization):
+        return _payme_err(rid, -32504, "Insufficient privileges")
+    method = body.get("method")
+    params = body.get("params") or {}
+
+    def _pmt():
+        acc = params.get("account") or {}
+        pid = acc.get("payment_id")
+        return db.get_payment(int(pid)) if pid and str(pid).isdigit() else None
+
+    if method == "CheckPerformTransaction":
+        p = _pmt()
+        if not p:
+            return _payme_err(rid, -31050, "Payment not found")
+        if int(round(float(p["amount"]) * 100)) != int(params.get("amount", 0)):
+            return _payme_err(rid, -31001, "Incorrect amount")
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        return {"jsonrpc": "2.0", "id": rid, "result": {"allow": True}}
+
+    if method == "CreateTransaction":
+        txn = params.get("id")
+        existing = db.get_payment_by_txn("paynet", txn)
+        if existing:
+            meta = _json.loads(existing.get("provider_meta") or "{}")
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "create_time": meta.get("create_time", _ts_ms(existing["created_at"])),
+                "transaction": str(existing["id"]),
+                "state": 1 if existing["state"] == "pending" else 2}}
+        p = _pmt()
+        if not p:
+            return _payme_err(rid, -31050, "Payment not found")
+        if int(round(float(p["amount"]) * 100)) != int(params.get("amount", 0)):
+            return _payme_err(rid, -31001, "Incorrect amount")
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        ct = int(params.get("time") or _time.time() * 1000)
+        db.set_payment_state(p["id"], "pending", provider="paynet", provider_txn_id=txn,
+                             meta=_json.dumps({"create_time": ct}))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "create_time": ct, "transaction": str(p["id"]), "state": 1}}
+
+    if method == "PerformTransaction":
+        p = db.get_payment_by_txn("paynet", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        if p["state"] == "paid":
+            return {"jsonrpc": "2.0", "id": rid, "result": {
+                "transaction": str(p["id"]), "perform_time": meta.get("perform_time", _ts_ms(p.get("paid_at"))),
+                "state": 2}}
+        if p["state"] != "pending":
+            return _payme_err(rid, -31008, "Transaction not allowed")
+        pt = int(_time.time() * 1000)
+        meta["perform_time"] = pt
+        _mark_paid_and_fulfill(p, "paynet", txn_id=params.get("id"), meta=_json.dumps(meta))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "transaction": str(p["id"]), "perform_time": pt, "state": 2}}
+
+    if method == "CancelTransaction":
+        p = db.get_payment_by_txn("paynet", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        ct = meta.get("cancel_time") or int(_time.time() * 1000)
+        meta["cancel_time"] = ct
+        meta["cancel_reason"] = params.get("reason")
+        post = (p["state"] == "paid")
+        if p["state"] != "cancelled":
+            db.set_payment_state(p["id"], "cancelled", meta=_json.dumps(meta))
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "transaction": str(p["id"]), "cancel_time": ct, "state": -2 if post else -1}}
+
+    if method == "CheckTransaction":
+        p = db.get_payment_by_txn("paynet", params.get("id"))
+        if not p:
+            return _payme_err(rid, -31003, "Transaction not found")
+        meta = _json.loads(p.get("provider_meta") or "{}")
+        state = {"pending": 1, "paid": 2, "cancelled": -1}[p["state"]]
+        return {"jsonrpc": "2.0", "id": rid, "result": {
+            "create_time": meta.get("create_time", _ts_ms(p["created_at"])),
+            "perform_time": meta.get("perform_time", 0),
+            "cancel_time": meta.get("cancel_time", 0),
+            "transaction": str(p["id"]), "state": state, "reason": meta.get("cancel_reason")}}
+
+    return _payme_err(rid, -32601, "Method not found")
 
 
 @app.get("/api/admin/stats")
@@ -3461,6 +3997,11 @@ def api_admin_financial(authorization: str = Header(None)):
     total = sum(s["revenue"] for s in sellers.values())
     month_total = sum(s["month_revenue"] for s in sellers.values())
     top = sorted(sellers.items(), key=lambda x: x[1]["revenue"], reverse=True)[:10]
+    # #18 Platforma daromadi: komissiya (buyurtmalardan) + boost/obuna to'lovlari
+    commission_total = sum(float(o.get("commission_amount") or 0) for o in delivered)
+    pay_summary = {p["purpose"]: {"count": p["cnt"], "total": round(p["total"])}
+                   for p in (db.get_paid_payments_summary() or [])}
+    platform_revenue = round(commission_total + sum(v["total"] for v in pay_summary.values()))
     return {
         "delivered_count": len(delivered),
         "total_revenue": round(total),
@@ -3469,6 +4010,10 @@ def api_admin_financial(authorization: str = Header(None)):
         "top_sellers": [{"name": n, "revenue": round(s["revenue"]), "count": s["count"]} for n, s in top],
         "by_payment": dict(pay),
         "by_delivery": dict(dlv),
+        # platforma o'z daromadi (monetizatsiya)
+        "commission_total": round(commission_total),
+        "payments_by_purpose": pay_summary,
+        "platform_revenue": platform_revenue,
     }
 
 

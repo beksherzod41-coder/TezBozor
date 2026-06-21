@@ -437,6 +437,9 @@ class Database:
             ("products", "status",         "TEXT DEFAULT 'active'"),  # active|reserve|deleted|mod_blocked
             ("products", "mod_reason",      "TEXT"),                   # #5 avto-moderatsiya bloklash sababi
             ("products", "min_price",       "REAL"),                   # #8 MAXFIY oxirgi narx (savdolashish floor'i; xaridorga ko'rinmaydi)
+            ("products", "boosted_until",   "TIMESTAMP"),              # #18 boost (pullik ko'tarish) tugash vaqti (UTC); NULL/o'tgan = boost yo'q
+            ("orders",   "commission_amount", "REAL"),                 # #18 platforma komissiyasi (berish paytida hisoblanadi)
+            ("users",    "pro_until",        "TIMESTAMP"),             # #18 Pro-obuna tugash vaqti (UTC); ega (owner)da saqlanadi
             ("reviews",  "product_id",     "INTEGER"),            # baho qaysi mahsulotga
             ("reviews",  "product_rating", "INTEGER"),            # mahsulot uchun 1-5
             ("reviews",  "seller_reply",   "TEXT"),               # sotuvchining ochiq javobi (NULL = javob yo'q)
@@ -896,6 +899,30 @@ class Database:
         """)
         conn.commit()
 
+        # ===== TO'LOVLAR DAFTARI (monetizatsiya #18) =====
+        # Boost / Pro-obuna uchun to'lov yozuvlari. Click/Payme webhooklari shu yozuvni
+        # 'paid' qiladi va maqsadini (purpose) bajaradi (boost qo'yadi / pro_until uzaytiradi).
+        # provider: 'click' | 'payme' | 'manual' (admin qo'lda/test tasdiqi).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                purpose TEXT NOT NULL,            -- 'boost' | 'subscription'
+                ref_id INTEGER,                   -- boost uchun product_id (obuna uchun NULL)
+                amount REAL NOT NULL,
+                provider TEXT,                    -- 'click' | 'payme' | 'manual'
+                provider_txn_id TEXT,             -- provayder tranzaksiya ID (idempotentlik)
+                provider_meta TEXT,               -- provayderga xos JSON (masalan Payme holat/vaqtlar/cancel reason)
+                state TEXT DEFAULT 'pending'      -- 'pending' | 'paid' | 'cancelled'
+                    CHECK(state IN ('pending','paid','cancelled')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                paid_at TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        conn.commit()
+
         # ===== INDEKSLAR (tezlik #3) =====
         # SQLite indekssiz har so'rovda to'liq jadval skan qiladi. Eng og'ir yo'l —
         # search_products: har mahsulot uchun reviews bo'yicha 3 ta korrelyatsion
@@ -916,6 +943,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_product_audit_product ON product_audit(product_id)",
             "CREATE INDEX IF NOT EXISTS idx_favorites_buyer ON favorites(buyer_id)",
             "CREATE INDEX IF NOT EXISTS idx_favorites_product ON favorites(product_id)",
+            "CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_payments_txn ON payments(provider, provider_txn_id)",
         ]:
             try:
                 cursor.execute(idx_sql)
@@ -1560,11 +1589,13 @@ class Database:
             sql += " AND p.seller_id=?"
             params.append(seller_id)
 
+        # #18 Boost — yoqilgan boost mahsulotlar har qanday saralashda eng tepada (gegemon).
+        boost = "(p.boosted_until IS NOT NULL AND p.boosted_until>datetime('now')) DESC, "
         order_map = {
-            'rating':     ' ORDER BY avg_rating DESC, p.created_at DESC',
-            'price_asc':  ' ORDER BY p.price ASC',
-            'price_desc': ' ORDER BY p.price DESC',
-            'newest':     ' ORDER BY p.created_at DESC',
+            'rating':     ' ORDER BY ' + boost + 'avg_rating DESC, p.created_at DESC',
+            'price_asc':  ' ORDER BY ' + boost + 'p.price ASC',
+            'price_desc': ' ORDER BY ' + boost + 'p.price DESC',
+            'newest':     ' ORDER BY ' + boost + 'p.created_at DESC',
         }
         sql += order_map.get(sort_by, order_map['rating'])
 
@@ -3142,6 +3173,120 @@ class Database:
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP",
             (key, "" if value is None else str(value)))
         conn.commit()
+
+    # ===== TO'LOVLAR (monetizatsiya #18) =====
+    def create_payment(self, user_id, purpose, amount, ref_id=None, provider=None):
+        """Yangi 'pending' to'lov yozuvi yaratadi; id qaytaradi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO payments (user_id, purpose, ref_id, amount, provider) "
+            "VALUES (?,?,?,?,?)",
+            (user_id, purpose, ref_id, float(amount), provider))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_payment(self, payment_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM payments WHERE id=?", (payment_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def get_payment_by_txn(self, provider, txn_id):
+        """Provayder tranzaksiya ID bo'yicha (idempotentlik — webhook qayta kelsa)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM payments WHERE provider=? AND provider_txn_id=?",
+                       (provider, str(txn_id)))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def set_payment_state(self, payment_id, state, provider=None, provider_txn_id=None, meta=None):
+        """To'lov holatini yangilaydi. 'paid' bo'lsa paid_at qo'yiladi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sets = ["state=?", "updated_at=CURRENT_TIMESTAMP"]
+        vals = [state]
+        if provider is not None:
+            sets.append("provider=?"); vals.append(provider)
+        if provider_txn_id is not None:
+            sets.append("provider_txn_id=?"); vals.append(str(provider_txn_id))
+        if meta is not None:
+            sets.append("provider_meta=?"); vals.append(meta)
+        if state == "paid":
+            sets.append("paid_at=CURRENT_TIMESTAMP")
+        vals.append(payment_id)
+        cursor.execute(f"UPDATE payments SET {', '.join(sets)} WHERE id=?", vals)
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_payments_by_user(self, user_id, limit=50):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM payments WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+                       (user_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_paid_payments_summary(self):
+        """Admin moliyaviy hisobot uchun: maqsad kesimida jami to'langan summa/son."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT purpose, COUNT(*) AS cnt, COALESCE(SUM(amount),0) AS total "
+            "FROM payments WHERE state='paid' GROUP BY purpose")
+        return [dict(r) for r in cursor.fetchall()]
+
+    # ===== BOOST (#18 pullik ko'tarish) =====
+    def set_product_boost(self, product_id, days):
+        """Mahsulotni 'days' kunga boost qiladi (boosted_until = hozir + days)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE products SET boosted_until=datetime('now', ?) WHERE id=?",
+            (f"+{int(days)} days", product_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    # ===== KOMISSIYA (#18) =====
+    def set_order_commission(self, order_id, amount):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET commission_amount=? WHERE id=?",
+                       (round(float(amount), 2), order_id))
+        conn.commit()
+
+    def get_commission_owed_by_seller(self, seller_id):
+        """Sotuvchining platformaga jami komissiya qarzi (yetkazilgan buyurtmalardan)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(commission_amount),0) FROM orders "
+            "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL",
+            (seller_id,))
+        return float(cursor.fetchone()[0] or 0)
+
+    # ===== PRO OBUNA (#18) =====
+    def set_pro_until(self, user_id, days):
+        """Pro-obunani 'days' kunga uzaytiradi (mavjud muddatdan davom ettiradi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET pro_until="
+            "datetime(CASE WHEN pro_until IS NOT NULL AND pro_until>datetime('now') "
+            "THEN pro_until ELSE datetime('now') END, ?) WHERE id=?",
+            (f"+{int(days)} days", user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def count_active_products(self, seller_id):
+        """Sotuvchining faol (ko'rinadigan) mahsulotlari soni — Pro limit tekshiruvi uchun."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM products WHERE seller_id=? "
+            "AND COALESCE(status,'active')='active'", (seller_id,))
+        return int(cursor.fetchone()[0] or 0)
 
     def update_product_fields(self, product_id, **fields):
         """Mahsulot maydonlarini yangilaydi. fields — dict ko'rinishida."""
