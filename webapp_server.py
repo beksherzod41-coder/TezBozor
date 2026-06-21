@@ -3663,6 +3663,25 @@ def api_pay_dev_confirm(payment_id: int, authorization: str = Header(None)):
     return {"ok": True, "payment": db.get_payment(payment_id)}
 
 
+@app.post("/api/pay/dev-cancel/{payment_id}")
+def api_pay_dev_cancel(payment_id: int, authorization: str = Header(None)):
+    """Admin kutilayotgan to'lovni QO'LDA bekor qiladi (rad etish). FAQAT ADMIN.
+    To'langan to'lovni bekor qilib bo'lmaydi (409) — boost/obuna allaqachon berilgan."""
+    user = dict(_buyer_from_auth(authorization))
+    payment = db.get_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="not_found")
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="not_allowed")
+    if payment["state"] == "paid":
+        raise HTTPException(status_code=409, detail="already_paid")
+    if payment["state"] == "cancelled":
+        return {"ok": True, "payment": payment}  # idempotent
+    db.set_payment_state(payment_id, "cancelled")
+    return {"ok": True, "payment": db.get_payment(payment_id)}
+
+
 # ---- Click webhook (prepare + complete) ----
 def _click_sign(params, keys):
     """Click imzosi: md5 of concat(params[k] for k in keys) + SECRET (tartibga ko'ra)."""

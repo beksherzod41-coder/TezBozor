@@ -224,6 +224,26 @@ def test_admin_sees_and_confirms_pending_payment(env):
     assert any(p.get("id") == pay_id for p in paid)
 
 
+def test_admin_can_reject_pending_payment(env):
+    """Admin kutilayotgan to'lovni tasdiqlamasdan BEKOR qiladi → 'cancelled',
+    boost BERILMAYDI. To'langanini bekor qilib bo'lmaydi (409)."""
+    env.post("/api/admin/monetization", headers=hdr(7003),
+             json={"mon_enabled": True, "mon_boost_enabled": True, "mon_boost_price": 5000})
+    pid_pay = env.post(f"/api/seller/boost/{env.PID}", headers=hdr(7002), json={}).json()["payment_id"]
+    # xaridor bekor qila olmaydi
+    assert env.post(f"/api/pay/dev-cancel/{pid_pay}", headers=hdr(7001), json={}).status_code == 403
+    # admin bekor qiladi
+    assert env.post(f"/api/pay/dev-cancel/{pid_pay}", headers=hdr(7003), json={}).status_code == 200
+    assert env.db.get_payment(pid_pay)["state"] == "cancelled"
+    assert not env.db.get_product_by_id(env.PID).get("boosted_until"), "rad etilgach boost berilmasligi shart"
+    # bekor qilingan to'lovni endi tasdiqlab bo'lmaydi
+    assert env.post(f"/api/pay/dev-confirm/{pid_pay}", headers=hdr(7003), json={}).status_code == 409
+    # to'langanni bekor qilib bo'lmaydi
+    pid2 = env.post(f"/api/seller/boost/{env.PID}", headers=hdr(7002), json={}).json()["payment_id"]
+    env.post(f"/api/pay/dev-confirm/{pid2}", headers=hdr(7003), json={})
+    assert env.post(f"/api/pay/dev-cancel/{pid2}", headers=hdr(7003), json={}).status_code == 409
+
+
 # ---------------- AUTH HIMOYASI ----------------
 def test_auth_guards(env):
     assert env.get("/api/me").status_code == 401                      # imzosiz
