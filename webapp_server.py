@@ -3428,6 +3428,15 @@ def api_admin_monetization_get(authorization: str = Header(None)):
     return monetization_config()
 
 
+@app.get("/api/admin/payments")
+def api_admin_payments(state: str = Query("pending"), authorization: str = Header(None)):
+    """Admin to'lovlar ro'yxati (default: kutilayotganlar). Provayder ulanmagan paytda
+    admin shu ekranda sotuvchining boost/Pro to'lovini qo'lda tasdiqlaydi (dev-confirm)."""
+    _admin_from_auth(authorization)
+    st = state if state in ("pending", "paid", "cancelled") else None
+    return {"payments": db.get_payments_admin(state=st, limit=100)}
+
+
 @app.post("/api/admin/monetization")
 async def api_admin_monetization_set(request: Request, authorization: str = Header(None)):
     """Faqat kelgan kalitlar yangilanadi (qisman update). Noma'lum kalit e'tiborsiz."""

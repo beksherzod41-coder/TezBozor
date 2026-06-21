@@ -3237,6 +3237,22 @@ class Database:
             "FROM payments WHERE state='paid' GROUP BY purpose")
         return [dict(r) for r in cursor.fetchall()]
 
+    def get_payments_admin(self, state=None, limit=100):
+        """Admin uchun barcha to'lovlar (sotuvchi ismi bilan), ixtiyoriy state filtri.
+        Kutilayotgan to'lovlarni qo'lda tasdiqlash ekrani uchun."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sql = ("SELECT p.*, u.name AS user_name, u.telegram_username, u.telegram_id, "
+               "u.shop_name FROM payments p LEFT JOIN users u ON p.user_id=u.id")
+        params = []
+        if state:
+            sql += " WHERE p.state=?"
+            params.append(state)
+        sql += " ORDER BY p.created_at DESC LIMIT ?"
+        params.append(limit)
+        cursor.execute(sql, params)
+        return [dict(r) for r in cursor.fetchall()]
+
     # ===== BOOST (#18 pullik ko'tarish) =====
     def set_product_boost(self, product_id, days):
         """Mahsulotni 'days' kunga boost qiladi (boosted_until = hozir + days)."""

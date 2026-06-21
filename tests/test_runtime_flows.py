@@ -201,6 +201,29 @@ def test_seller_payments_history(env):
         "sotuvchi to'lov tarixi boost to'lovini ko'rsatishi shart"
 
 
+# ---------------- ADMIN KUTILAYOTGAN TO'LOVNI TASDIQLAYDI (2026-06-21) ----------------
+def test_admin_sees_and_confirms_pending_payment(env):
+    """Provayder ulanmaganda sotuvchining boost to'lovi 'pending' qoladi → admin
+    /api/admin/payments'da ko'radi va dev-confirm bilan tasdiqlaydi → 'paid' bo'ladi."""
+    env.post("/api/admin/monetization", headers=hdr(7003),
+             json={"mon_enabled": True, "mon_boost_enabled": True, "mon_boost_price": 5000})
+    r = env.post(f"/api/seller/boost/{env.PID}", headers=hdr(7002), json={})
+    pay_id = r.json()["payment_id"]
+    # admin pending ro'yxatida ko'rinadi (sotuvchi ismi bilan)
+    pend = rows(env.get("/api/admin/payments?state=pending", headers=hdr(7003)).json())
+    row = next((p for p in pend if p.get("id") == pay_id), None)
+    assert row and row.get("state") == "pending" and row.get("user_name"), "admin pending to'lovni ko'rishi shart"
+    # xaridor bu endpointga kira olmaydi
+    assert env.get("/api/admin/payments", headers=hdr(7001)).status_code == 403
+    # admin tasdiqlaydi
+    assert env.post(f"/api/pay/dev-confirm/{pay_id}", headers=hdr(7003), json={}).status_code == 200
+    # endi pending'da yo'q, paid'da bor
+    pend2 = rows(env.get("/api/admin/payments?state=pending", headers=hdr(7003)).json())
+    paid = rows(env.get("/api/admin/payments?state=paid", headers=hdr(7003)).json())
+    assert not any(p.get("id") == pay_id for p in pend2), "tasdiqlangach pending'dan chiqishi shart"
+    assert any(p.get("id") == pay_id for p in paid)
+
+
 # ---------------- AUTH HIMOYASI ----------------
 def test_auth_guards(env):
     assert env.get("/api/me").status_code == 401                      # imzosiz

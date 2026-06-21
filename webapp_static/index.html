@@ -745,6 +745,11 @@ const I18N = {
   adm_audit_deleted:{uz:"O'chirildi",ru:"Удалён"}, adm_audit_purged:{uz:"Yashirildi",ru:"Скрыт"},
   adm_settings:{uz:"⚙️ Sozlamalar",ru:"⚙️ Настройки"},
   adm_monetization:{uz:"💰 Monetizatsiya",ru:"💰 Монетизация"},
+  adm_payments:{uz:"💳 To'lovlar",ru:"💳 Платежи"},
+  adm_pay_confirm:{uz:"✅ To'lovni tasdiqlash",ru:"✅ Подтвердить оплату"},
+  adm_pay_confirm_q:{uz:"To'lovni tasdiqlaysizmi? ({amt}) — boost/obuna darhol faollashadi.",ru:"Подтвердить оплату? ({amt}) — продвижение/подписка активируется сразу."},
+  adm_pay_done:{uz:"✅ To'lov tasdiqlandi",ru:"✅ Оплата подтверждена"},
+  adm_pay_none:{uz:"To'lovlar yo'q",ru:"Платежей нет"},
   adm_moderation:{uz:"🛡 Moderatsiya",ru:"🛡 Модерация"},
   adm_fraud:{uz:"🚨 Firibgarlik",ru:"🚨 Мошенничество"},
   adm_analytics:{uz:"📊 Voronka",ru:"📊 Воронка"}, adm_financial:{uz:"💵 Moliya",ru:"💵 Финансы"},
@@ -4680,7 +4685,7 @@ function loadAdmin(){
               ['users','adm_users'],['shops','adm_shops'],['channels','adm_channels'],
               ['orders','adm_orders'],['products','adm_products'],['deleted','adm_deleted'],
               ['audit','adm_audit'],['broadcast','adm_broadcast'],
-              ['admins','adm_admins'],['monetization','adm_monetization'],['settings','adm_settings']];
+              ['admins','adm_admins'],['monetization','adm_monetization'],['payments','adm_payments'],['settings','adm_settings']];
   v.innerHTML=`<div class="vhead">${L('adm_title')}</div>
     <div class="chips" id="admSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding-bottom:6px">${segs.map(s=>`<div class="chip${s[0]===admSeg?' active':''}" data-seg="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}</div>
     <div id="admBody"><div class="loading">...</div></div>`;
@@ -4688,7 +4693,7 @@ function loadAdmin(){
   const fn={stats:admStats,requests:admRequests,disputes:admDisputes,users:admUsers,
             shops:admShops,channels:admChannels,orders:admOrders,products:admProducts,
             deleted:admDeleted,audit:admAudit,broadcast:admBroadcast,
-            admins:admAdmins,monetization:admMonetization,moderation:admModeration,fraud:admFraud,
+            admins:admAdmins,monetization:admMonetization,payments:admPayments,moderation:admModeration,fraud:admFraud,
             analytics:admAnalytics,financial:admFinancial,sentiment:admSentiment,settings:admSettings}[admSeg];
   if(fn) fn();
 }
@@ -5146,6 +5151,42 @@ function renderMon(cfg){
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){} }
     catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); inp.value=cfg[key]||0; }
   });
+}
+
+// Admin TO'LOVLARNI TASDIQLASH: provayder ulanmaganda sotuvchining boost/Pro to'lovi
+// "kutilmoqda"da qoladi → admin shu yerda qo'lda tasdiqlaydi (dev-confirm).
+let admPayState='pending';
+async function admPayments(){
+  const b=admBox(); b.innerHTML=`<div class="loading">...</div>`;
+  const tabs=[['pending','pay_state_pending'],['paid','pay_state_paid'],['cancelled','pay_state_cancelled']];
+  try{
+    const r=await api('/api/admin/payments?state='+admPayState);
+    const list=(r&&r.payments)||[];
+    const tabHtml=`<div class="chips" style="padding:0 12px 8px;gap:7px">`+tabs.map(t=>
+      `<div class="chip${admPayState===t[0]?' active':''}" data-paytab="${t[0]}" style="flex:0 0 auto">${L(t[1])}</div>`).join('')+`</div>`;
+    const cards=list.length? `<div class="olist" style="padding:0 0 16px">`+list.map(p=>{
+      const purpose=L('pay_purpose_'+(p.purpose||''))||esc(p.purpose||'—');
+      const who=esc(p.shop_name||p.user_name||('#'+p.user_id));
+      const un=p.telegram_username?(' · @'+esc(String(p.telegram_username).replace('@',''))):'';
+      return `<div class="ocard">
+        <div class="orow1"><span class="oname" style="font-size:14px">${purpose}</span><span style="font-weight:600">${money(p.amount)}</span></div>
+        <div class="ometa">🏪 ${who}${un}</div>
+        <div class="ometa" style="font-size:12px">🗓 ${fmtDate(p.paid_at||p.created_at)}${p.provider?' · '+esc(p.provider):''}</div>
+        ${p.state==='pending'?`<button class="oact ok" data-payok="${p.id}" data-amt="${esc(money(p.amount))}" style="width:100%;margin-top:8px">${L('adm_pay_confirm')}</button>`:''}
+      </div>`;
+    }).join('')+`</div>` : admEmpty(L('adm_pay_none'));
+    b.innerHTML=`<div>${tabHtml}${cards}</div>`;
+    b.querySelectorAll('[data-paytab]').forEach(c=>c.onclick=()=>{ admPayState=c.dataset.paytab; admPayments(); });
+    b.querySelectorAll('[data-payok]').forEach(btn=>btn.onclick=()=>{
+      const id=btn.dataset.payok;
+      const go=async()=>{ try{ await apiSend('/api/pay/dev-confirm/'+id,'POST',{});
+        try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+        tg.showAlert(L('adm_pay_done')); admPayments(); }
+        catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); } };
+      if(tg.showConfirm) tg.showConfirm(L('adm_pay_confirm_q').replace('{amt}',btn.dataset.amt), ok=>{ if(ok) go(); });
+      else go();
+    });
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 
 // #21 — ZAHIRA ADMIN: joriy adminlar ro'yxati + qidirib admin qo'shish.
