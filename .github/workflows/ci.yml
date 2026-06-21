@@ -31,3 +31,46 @@ jobs:
 
       - name: Run tests
         run: pytest -ra -q
+
+  # PostgreSQL shim'ni HAQIQIY Postgres'ga qarshi tekshiradi (db_backend.py).
+  # Lokal'da PG yo'qligi uchun bu testlar faqat shu yerda ishlaydi.
+  pg-shim:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tezbozor
+          POSTGRES_PASSWORD: tezbozor
+          POSTGRES_DB: marketplace_test
+        ports:
+          - 5432:5432
+        # Baza tayyor bo'lguncha kutadi
+        options: >-
+          --health-cmd "pg_isready -U tezbozor"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install 'psycopg[binary]>=3.1' pytest
+
+      - name: Run PG shim integration tests
+        env:
+          DATABASE_URL_TEST: postgresql://tezbozor:tezbozor@localhost:5432/marketplace_test
+        # Modul DATABASE_URL_TEST yo'q bo'lsa skip bo'lardi; bu yerda u o'rnatilgan,
+        # shuning uchun integratsiya testlari haqiqatan ishlashi shart.
+        run: pytest -ra -q tests/test_pg_shim_integration.py tests/test_db_backend.py
