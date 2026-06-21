@@ -20,6 +20,10 @@ uchun cutover ehtiyotkor bo'lsin.
 
 ## VPS qadamlari
 ```bash
+# 0) Webhook kutubxonasi (PTB [webhooks] extra — tornado). requirements.txt'da bor,
+#    lekin eski o'rnatishda bo'lmasligi mumkin — aks holda run_webhook RuntimeError beradi:
+python3.14 -m pip install "python-telegram-bot[job-queue,webhooks]==22.7" --break-system-packages
+
 # 1) Maxfiy yo'l + sirni generatsiya
 SECRET_PATH="tg/$(openssl rand -hex 16)"
 SECRET_TOKEN="$(openssl rand -hex 32)"

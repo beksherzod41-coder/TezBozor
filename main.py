@@ -15202,8 +15202,11 @@ def main():
     webhook_url = (os.getenv("WEBHOOK_URL") or "").strip()
     if webhook_url:
         port = int(os.getenv("WEBHOOK_PORT", "8443"))
-        # url_path = WEBHOOK_PATH yoki URL'ning oxirgi bo'lagi (maxfiy token-yo'l)
-        url_path = (os.getenv("WEBHOOK_PATH") or "").strip() or webhook_url.rstrip("/").rsplit("/", 1)[-1]
+        # url_path = WEBHOOK_PATH yoki URL'ning TO'LIQ yo'li (faqat oxirgi bo'lak EMAS —
+        # nginx ko'p bo'lakli '/tg/<secret>' ni o'zgarmasdan uzatadi, PTB aynan shu
+        # path'ni kutadi; aks holda 404). Boshidagi '/' olib tashlanadi.
+        from urllib.parse import urlparse as _urlparse
+        url_path = (os.getenv("WEBHOOK_PATH") or "").strip() or _urlparse(webhook_url).path.lstrip("/")
         secret = (os.getenv("WEBHOOK_SECRET") or "").strip() or None
         logging.info("Webhook rejimi: %s (127.0.0.1:%s, path=%s)", webhook_url, port, url_path)
         app.run_webhook(

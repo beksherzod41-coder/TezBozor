@@ -1,4 +1,5 @@
-python-telegram-bot[job-queue]==22.7
+# [webhooks] — WEBHOOK_URL bilan webhook rejimi uchun (tornado); polling'da ham zarar yo'q
+python-telegram-bot[job-queue,webhooks]==22.7
 python-dotenv==1.0.0
 openpyxl==3.1.5
 Pillow>=10.0.0
