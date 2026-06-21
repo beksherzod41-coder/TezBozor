@@ -3264,6 +3264,14 @@ class Database:
         conn.commit()
         return cursor.rowcount > 0
 
+    def clear_product_boost(self, product_id):
+        """Boostni darhol bekor qiladi (boosted_until=NULL) — to'lov qaytarib olinganda."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE products SET boosted_until=NULL WHERE id=?", (product_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+
     # ===== KOMISSIYA (#18) =====
     def set_order_commission(self, order_id, amount):
         conn = self.get_connection()
@@ -3292,6 +3300,14 @@ class Database:
             "datetime(CASE WHEN pro_until IS NOT NULL AND pro_until>datetime('now') "
             "THEN pro_until ELSE datetime('now') END, ?) WHERE id=?",
             (f"+{int(days)} days", user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def clear_pro(self, user_id):
+        """Pro obunani darhol bekor qiladi (pro_until=NULL) — to'lov qaytarib olinganda."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET pro_until=NULL WHERE id=?", (user_id,))
         conn.commit()
         return cursor.rowcount > 0
 

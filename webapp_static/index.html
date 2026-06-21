@@ -752,6 +752,9 @@ const I18N = {
   adm_pay_reject:{uz:"❌ Rad etish",ru:"❌ Отклонить"},
   adm_pay_reject_q:{uz:"To'lovni rad etasizmi? Boost/obuna BERILMAYDI.",ru:"Отклонить оплату? Продвижение/подписка НЕ выдаётся."},
   adm_pay_rejected:{uz:"❌ To'lov bekor qilindi",ru:"❌ Платёж отменён"},
+  adm_pay_revoke:{uz:"↩️ Bekor qilish (qaytarish)",ru:"↩️ Отменить (возврат)"},
+  adm_pay_revoke_q:{uz:"Tasdiqlangan to'lovni qaytarib olasizmi? Boost/Pro obuna OLIB TASHLANADI va daromaddan chiqadi. (soxta chek uchun)",ru:"Отменить подтверждённую оплату? Продвижение/Pro будут СНЯТЫ и убраны из дохода. (для поддельного чека)"},
+  adm_pay_revoked:{uz:"↩️ To'lov qaytarildi, imtiyoz olib tashlandi",ru:"↩️ Оплата возвращена, привилегия снята"},
   adm_pay_none:{uz:"To'lovlar yo'q",ru:"Платежей нет"},
   adm_moderation:{uz:"🛡 Moderatsiya",ru:"🛡 Модерация"},
   adm_fraud:{uz:"🚨 Firibgarlik",ru:"🚨 Мошенничество"},
@@ -5179,6 +5182,7 @@ async function admPayments(){
           <button class="oact ok" data-payok="${p.id}" data-amt="${esc(money(p.amount))}" style="flex:1">${L('adm_pay_confirm')}</button>
           <button class="oact no" data-payno="${p.id}" style="flex:1;background:#fdebef;color:var(--sale)">${L('adm_pay_reject')}</button>
         </div>`:''}
+        ${p.state==='paid'?`<button class="oact no" data-payrev="${p.id}" style="width:100%;margin-top:8px;background:#fdebef;color:var(--sale)">${L('adm_pay_revoke')}</button>`:''}
       </div>`;
     }).join('')+`</div>` : admEmpty(L('adm_pay_none'));
     b.innerHTML=`<div>${tabHtml}${cards}</div>`;
@@ -5199,6 +5203,15 @@ async function admPayments(){
         tg.showAlert(L('adm_pay_rejected')); admPayments(); }
         catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); } };
       if(tg.showConfirm) tg.showConfirm(L('adm_pay_reject_q'), ok=>{ if(ok) go(); });
+      else go();
+    });
+    b.querySelectorAll('[data-payrev]').forEach(btn=>btn.onclick=()=>{
+      const id=btn.dataset.payrev;
+      const go=async()=>{ try{ await apiSend('/api/pay/dev-revoke/'+id,'POST',{});
+        try{ tg.HapticFeedback.notificationOccurred('warning'); }catch(e){}
+        tg.showAlert(L('adm_pay_revoked')); admPayments(); }
+        catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); } };
+      if(tg.showConfirm) tg.showConfirm(L('adm_pay_revoke_q'), ok=>{ if(ok) go(); });
       else go();
     });
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }

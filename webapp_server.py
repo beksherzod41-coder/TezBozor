@@ -3518,6 +3518,27 @@ def _fulfill_payment(payment):
         logging.error(f"to'lov bajarish xatosi (payment {payment.get('id')}): {e}")
 
 
+def _revoke_payment_benefit(payment):
+    """_fulfill_payment teskarisi: berilgan imtiyozni qaytarib oladi (soxta chek/qaytarish).
+    boost → mahsulot boostini o'chiradi; subscription → Pro'ni darhol bekor qiladi."""
+    purpose = payment.get("purpose")
+    try:
+        if purpose == "boost" and payment.get("ref_id"):
+            db.clear_product_boost(payment["ref_id"])
+        elif purpose == "subscription":
+            db.clear_pro(payment["user_id"])
+    except Exception as e:
+        logging.error(f"to'lov qaytarish xatosi (payment {payment.get('id')}): {e}")
+
+
+_PAY_REVOKED_TXT = {
+    "boost": {"uz": "⚠️ Reklama boost to'lovingiz bekor qilindi (chek tasdiqlanmadi).",
+              "ru": "⚠️ Оплата продвижения отменена (чек не подтверждён)."},
+    "subscription": {"uz": "⚠️ Pro obuna to'lovingiz bekor qilindi (chek tasdiqlanmadi).",
+                     "ru": "⚠️ Оплата Pro-подписки отменена (чек не подтверждён)."},
+}
+
+
 _PAY_DONE_TXT = {
     "boost": {"uz": "🚀 To'lov qabul qilindi — mahsulotingiz endi tepada ko'rinadi!",
               "ru": "🚀 Оплата принята — ваш товар теперь показывается вверху!"},
@@ -3679,6 +3700,35 @@ def api_pay_dev_cancel(payment_id: int, authorization: str = Header(None)):
     if payment["state"] == "cancelled":
         return {"ok": True, "payment": payment}  # idempotent
     db.set_payment_state(payment_id, "cancelled")
+    return {"ok": True, "payment": db.get_payment(payment_id)}
+
+
+@app.post("/api/pay/dev-revoke/{payment_id}")
+async def api_pay_dev_revoke(payment_id: int, authorization: str = Header(None)):
+    """TASDIQLANGAN (paid) to'lovni QAYTARIB OLADI — soxta chek bo'lsa. FAQAT ADMIN.
+    Berilgan imtiyoz (boost/Pro) olib tashlanadi + to'lov 'cancelled' bo'ladi → platforma
+    daromadidan ham tushadi (get_paid_payments_summary faqat state='paid' sanaydi)."""
+    user = dict(_buyer_from_auth(authorization))
+    payment = db.get_payment(payment_id)
+    if not payment:
+        raise HTTPException(status_code=404, detail="not_found")
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="not_allowed")
+    if payment["state"] != "paid":
+        raise HTTPException(status_code=409, detail="not_paid")  # faqat to'langanni qaytarish mumkin
+    _revoke_payment_benefit(payment)               # boost/Pro'ni olib tashlash
+    db.set_payment_state(payment_id, "cancelled")  # daromaddan ham chiqadi
+    try:                                           # sotuvchini xabardor qilish
+        u = db.get_user_by_id(payment["user_id"])
+        if u and dict(u).get("telegram_id"):
+            lang = get_user_lang(u) or DEFAULT_LANG
+            msg = _PAY_REVOKED_TXT.get(payment.get("purpose"), {})
+            txt = msg.get(lang) or msg.get("uz")
+            if txt:
+                await _tg_call("sendMessage", {"chat_id": dict(u)["telegram_id"], "text": txt})
+    except Exception as e:
+        logging.warning(f"qaytarish xabari xato (payment {payment_id}): {e}")
     return {"ok": True, "payment": db.get_payment(payment_id)}
 
 

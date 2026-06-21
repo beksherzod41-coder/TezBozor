@@ -244,6 +244,46 @@ def test_admin_can_reject_pending_payment(env):
     assert env.post(f"/api/pay/dev-cancel/{pid2}", headers=hdr(7003), json={}).status_code == 409
 
 
+def test_admin_revokes_paid_payment_and_revenue_drops(env):
+    """Soxta chek: admin TASDIQLANGAN (paid) boostni qaytarib oladi → boost olib tashlanadi,
+    to'lov 'cancelled', platforma daromadidan ham chiqadi."""
+    env.post("/api/admin/monetization", headers=hdr(7003),
+             json={"mon_enabled": True, "mon_boost_enabled": True, "mon_boost_price": 5000})
+    pay_id = env.post(f"/api/seller/boost/{env.PID}", headers=hdr(7002), json={}).json()["payment_id"]
+    env.post(f"/api/pay/dev-confirm/{pay_id}", headers=hdr(7003), json={})
+    # to'langach: boost bor + daromadda bor
+    assert env.db.get_product_by_id(env.PID).get("boosted_until")
+    fin1 = env.get("/api/admin/financial", headers=hdr(7003)).json()
+    assert fin1.get("platform_revenue", 0) >= 5000
+    # xaridor qaytara olmaydi
+    assert env.post(f"/api/pay/dev-revoke/{pay_id}", headers=hdr(7001), json={}).status_code == 403
+    # admin qaytaradi
+    assert env.post(f"/api/pay/dev-revoke/{pay_id}", headers=hdr(7003), json={}).status_code == 200
+    assert env.db.get_payment(pay_id)["state"] == "cancelled"
+    assert not env.db.get_product_by_id(env.PID).get("boosted_until"), "qaytarilgach boost olib tashlanishi shart"
+    # daromaddan chiqdi
+    fin2 = env.get("/api/admin/financial", headers=hdr(7003)).json()
+    assert fin2.get("platform_revenue", 0) == fin1["platform_revenue"] - 5000, "bekor summa daromaddan chiqishi shart"
+    # pending to'lovni qaytarib bo'lmaydi (faqat paid)
+    p2 = env.post(f"/api/seller/boost/{env.PID}", headers=hdr(7002), json={}).json()["payment_id"]
+    assert env.post(f"/api/pay/dev-revoke/{p2}", headers=hdr(7003), json={}).status_code == 409
+
+
+def test_admin_revokes_paid_subscription(env):
+    """Pro obuna ham qaytariladi: pro_until olib tashlanadi."""
+    env.post("/api/admin/monetization", headers=hdr(7003),
+             json={"mon_enabled": True, "mon_subscription_enabled": True, "mon_subscription_price": 20000})
+    r = env.post("/api/seller/subscribe", headers=hdr(7002), json={})
+    if r.status_code != 200:
+        import pytest as _pt
+        _pt.skip("subscribe endpoint mavjud emas/o'chiq")
+    pay_id = r.json()["payment_id"]
+    env.post(f"/api/pay/dev-confirm/{pay_id}", headers=hdr(7003), json={})
+    assert env.db.get_user_by_id(env.SELLER).get("pro_until")
+    assert env.post(f"/api/pay/dev-revoke/{pay_id}", headers=hdr(7003), json={}).status_code == 200
+    assert not env.db.get_user_by_id(env.SELLER).get("pro_until"), "qaytarilgach Pro olib tashlanishi shart"
+
+
 # ---------------- AUTH HIMOYASI ----------------
 def test_auth_guards(env):
     assert env.get("/api/me").status_code == 401                      # imzosiz
