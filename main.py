@@ -15195,7 +15195,28 @@ def main():
     # MUHIM: allowed_updates'ni ANIQ ko'rsatamiz — aks holda Telegram a'zolik
     # yangilanishlarini (my_chat_member) yubormaydi va bot guruhga qo'shilganini sezmaydi.
     # Update.ALL_TYPES barcha turdagi yangilanishlarni (jumladan my_chat_member) yoqadi.
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    #
+    # REJIM (dual-mode): WEBHOOK_URL env o'rnatilgan bo'lsa — webhook, aks holda polling.
+    # DEFAULT = polling (WEBHOOK_URL yo'q) → hozirgi xatti-harakat AYNAN o'zgarmaydi.
+    # Webhook cutover faqat VPS'da, nginx route + set_webhook bilan — WEBHOOK_MIGRATION.md.
+    webhook_url = (os.getenv("WEBHOOK_URL") or "").strip()
+    if webhook_url:
+        port = int(os.getenv("WEBHOOK_PORT", "8443"))
+        # url_path = WEBHOOK_PATH yoki URL'ning oxirgi bo'lagi (maxfiy token-yo'l)
+        url_path = (os.getenv("WEBHOOK_PATH") or "").strip() or webhook_url.rstrip("/").rsplit("/", 1)[-1]
+        secret = (os.getenv("WEBHOOK_SECRET") or "").strip() or None
+        logging.info("Webhook rejimi: %s (127.0.0.1:%s, path=%s)", webhook_url, port, url_path)
+        app.run_webhook(
+            listen="127.0.0.1",          # nginx oldida turadi (TLS terminatsiya nginx'da)
+            port=port,
+            url_path=url_path,
+            webhook_url=webhook_url,
+            secret_token=secret,         # Telegram so'rovini header bilan tasdiqlaydi
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=False,
+        )
+    else:
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
