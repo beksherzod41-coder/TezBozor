@@ -504,7 +504,12 @@ def get_active_mode(user, context):
         return 'buyer'
     if user['role'] == 'admin':
         return 'admin'
-    return context.user_data.get('active_mode') or user['role']
+    mode = context.user_data.get('active_mode')
+    # Saqlangan 'seller' rejimi — faqat haqiqatan sotuvchi bo'lsa amal qiladi (do'koni bor
+    # yoki roli seller). Aks holda (sotuvchilik bekor qilingan) xavfsiz xaridorga tushadi.
+    if mode == 'seller' and not (user['role'] == 'seller' or is_seller_capable(user)):
+        return 'buyer'
+    return mode or user['role']
 
 
 import re as _re
@@ -669,6 +674,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return ConversationHandler.END
         # handled=False → yangi foydalanuvchi, staff_invite saqlandi, ro'yxat davom etadi
 
+    # Deeplink: /start contact_<telegram_id> — ADMIN foydalanuvchi bilan bog'lanadi.
+    # Bot tg://user?id= mention'ini yuboradi → Telegram uni hal qiladi (user bot bilan
+    # muloqotda bo'lgani uchun ishlaydi), admin bosib SHAXSIY chatni ochadi. Faqat admin.
+    if user and context.args and context.args[0].strip().startswith("contact_"):
+        clang = get_user_lang(user)
+        is_admin = user.get('role') == 'admin' or update.effective_user.id == ADMIN_ID
+        if not is_admin:
+            await update.message.reply_text(t(clang, 'contact_admin_only'))
+            return ConversationHandler.END
+        try:
+            target_tg = int(context.args[0].strip()[len("contact_"):])
+        except (ValueError, TypeError):
+            target_tg = None
+        target = db.get_user_by_telegram_id(target_tg) if target_tg else None
+        if not target:
+            await update.message.reply_text(t(clang, 'contact_user_not_found'))
+            return ConversationHandler.END
+        lines = [f"👤 <b>{html.escape(target.get('name') or '—')}</b>"]
+        if target.get('shop_name'):
+            lines.append(f"🏪 {html.escape(target['shop_name'])}")
+        if target.get('telegram_username'):
+            lines.append(f"🔗 @{html.escape(str(target['telegram_username']).lstrip('@'))}")
+        if target.get('phone_number'):
+            lines.append(f"📞 {html.escape(target['phone_number'])}")
+        # Bosiladigan mention — shaxsiy chatni ochadi (user botda bo'lgani uchun resolve bo'ladi)
+        lines.append(f'\n<a href="tg://user?id={target_tg}">💬 {t(clang, "contact_open_chat")}</a>')
+        await update.message.reply_text("\n".join(lines), parse_mode='HTML')
+        return ConversationHandler.END
+
     if user and user['role'] != 'admin' and update.effective_user.id == ADMIN_ID:
         db.update_user(user['id'], role='admin')
         user['role'] = 'admin'
@@ -679,10 +713,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(t(user, 'blocked'))
             return ConversationHandler.END
 
-        # Avvalgi conversation state'ni tozalaymiz (tilni saqlab qolamiz)
+        # Avvalgi conversation state'ni tozalaymiz (til + tanlangan rejimni saqlab qolamiz).
+        # active_mode'ni asraymiz — foydalanuvchi o'zi almashtirmaguncha oxirgi panelda
+        # qoladi (app bilan bir xil). PicklePersistence buni qayta ishga tushishda ham tiklaydi.
+        _saved_mode = context.user_data.get('active_mode')
         context.user_data.clear()
         lang = get_user_lang(user)
         context.user_data['lang'] = lang
+        if _saved_mode:
+            context.user_data['active_mode'] = _saved_mode
 
         # ReplyKeyboard ni yangilaymiz — har doim to'g'ri tugmalar ko'rinsin
         active = get_active_mode(user, context)
@@ -2784,6 +2823,33 @@ async def buyer_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 
+# #16 SODIQLIK — app (_loyalty_for) bilan AYNAN bir xil formula va darajalar.
+# ball = xarajat/10000 + yetkazilgan_buyurtma*5 + referal*50
+LOYALTY_TIERS = [(0, 'bronze', '🥉'), (200, 'silver', '🥈'),
+                 (1000, 'gold', '🥇'), (5000, 'diamond', '💎')]
+
+
+def _loyalty_line(user, lang):
+    """Xaridor profiliga qo'shiladigan sodiqlik bloki: ball + daraja + keyingi darajagacha.
+    Mavjud ma'lumotdan hisoblanadi (xarid + referal) — alohida schema yo'q."""
+    tot = db.get_buyer_order_totals(user['id'])
+    spent = float(tot.get('spent') or 0)
+    delivered = int(tot.get('delivered_orders') or 0)
+    refs = int(user.get('referral_count') or 0)
+    points = int(spent // 10000) + delivered * 5 + refs * 50
+    cur, nxt = LOYALTY_TIERS[0], None
+    for i, tier in enumerate(LOYALTY_TIERS):
+        if points >= tier[0]:
+            cur = tier
+            nxt = LOYALTY_TIERS[i + 1] if i + 1 < len(LOYALTY_TIERS) else None
+    if nxt:
+        nxt_line = t(lang, 'loyalty_to_next', n=nxt[0] - points, tier=t(lang, 'loy_' + nxt[1]))
+    else:
+        nxt_line = t(lang, 'loyalty_max')
+    return t(lang, 'loyalty_profile', emoji=cur[2], tier=t(lang, 'loy_' + cur[1]),
+             points=points, next=nxt_line)
+
+
 async def buyer_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.get_user_by_telegram_id(update.effective_user.id)
     lang = get_lang(update, context)
@@ -2799,6 +2865,7 @@ async def buyer_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
              name=user['name'], phone=user['phone_number'],
              refs=user.get('referral_count') or 0,
              date=fmt_datetime(user['created_at']))
+    text += _loyalty_line(user, lang)   # #16 — sodiqlik darajasi (app bilan parite)
 
     if update.callback_query:
         await update.callback_query.answer()
@@ -6760,6 +6827,15 @@ async def review_reply_submit(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(t(lang, 'review_reply_not_yours'))
 
 
+def _pro_gate_kb(lang):
+    """Pro qulfi xabari klaviaturasi — Mini App'ni ochish (Pro o'sha yerda olinadi)."""
+    rows = []
+    if MINIAPP_URL:
+        rows.append([InlineKeyboardButton(t(lang, 'pro_open_app'), web_app=WebAppInfo(url=MINIAPP_URL))])
+    rows.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
+    return InlineKeyboardMarkup(rows)
+
+
 async def seller_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sotuvchi statistikasi: buyurtmalar, daromad, mahsulotlar — hafta/oy/jami."""
     query = update.callback_query
@@ -6800,6 +6876,11 @@ async def seller_export_excel(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = db.get_user_by_telegram_id(update.effective_user.id)
     if not user:
         await query.message.reply_text(t(lang, 'user_not_found'))
+        return
+    # #18 Pro — Excel yuklab olish Pro imkoniyat (app bilan bir xil qoida; bot bypass YO'Q)
+    if db.pro_locked(db.resolve_owner_id(user['id'])):
+        await query.message.reply_text(t(lang, 'pro_locked_bot'), parse_mode='HTML',
+                                       reply_markup=_pro_gate_kb(lang))
         return
 
     try:
@@ -7142,6 +7223,13 @@ async def seller_add_product_start(update: Update, context: ContextTypes.DEFAULT
                 [InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")],
             ])
         )
+        return ConversationHandler.END
+
+    # #18 Pro — bepul mahsulot limiti (app create_product gate'i bilan bir xil; Pro = cheksiz)
+    owner_id = db.resolve_owner_id(user['id']) if user else None
+    flim = db.mon_limit('mon_free_product_limit')
+    if owner_id and flim > 0 and not db.is_pro(owner_id) and db.count_active_products(owner_id) >= flim:
+        await _show(t(lang, 'pro_locked_limit_bot'), parse_mode='HTML', reply_markup=_pro_gate_kb(lang))
         return ConversationHandler.END
 
     context.user_data['adding_product'] = True
@@ -8236,6 +8324,14 @@ async def sched_pick_minute(update, context):
     owner_id = product.get('seller_id')
     user = db.get_user_by_telegram_id(update.effective_user.id)
     created_by = user['id'] if user else owner_id
+
+    # #18 Pro — bepul rejalashtirish limiti (app schedule gate'i bilan bir xil; Pro = cheksiz)
+    slim = db.mon_limit('mon_free_scheduled_limit')
+    if slim > 0 and not db.is_pro(owner_id) and db.count_pending_scheduled_posts(owner_id) >= slim:
+        await query.edit_message_text(t(lang, 'pro_locked_limit_bot'), parse_mode='HTML',
+                                      reply_markup=_pro_gate_kb(lang))
+        context.user_data.pop('sched', None)
+        return
 
     sched_id = db.create_scheduled_post(
         product_id, owner_id, target_utc.strftime("%Y-%m-%d %H:%M:%S"),

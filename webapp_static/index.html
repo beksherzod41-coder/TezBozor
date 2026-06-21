@@ -329,6 +329,9 @@
 </style>
 </head>
 <body>
+  <div id="notifBanner" onclick="openNotifs()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);align-items:center;justify-content:space-between;gap:8px">
+    <span id="notifBannerText">📩</span><span style="opacity:.9">Ochish ›</span>
+  </div>
   <div id="viewCatalog">
     <div class="topbar">
       <div class="searchwrap">
@@ -434,7 +437,7 @@
   <div class="checkout" id="chatview" style="z-index:130">
     <div class="cohead"><span id="chatTitle">💬 Xabarlar</span><span class="x" id="chatClose">✕</span></div>
     <div class="chatwrap" id="chatWrap"></div>
-    <div class="chatbar"><input id="chatInp" placeholder="Xabar yozing..." maxlength="2000"><button id="chatSend">➤</button></div>
+    <div class="chatbar" id="chatBar"><input id="chatInp" placeholder="Xabar yozing..." maxlength="2000"><button id="chatSend">➤</button></div>
   </div>
 
   <div class="checkout" id="reviewform">
@@ -496,6 +499,22 @@
   <div class="checkout" id="contactform">
     <div class="cohead"><span id="ttl_contactform">📞 Admin bilan bog'lanish</span><span class="x" id="caClose">✕</span></div>
     <div id="contactBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="proinfoview">
+    <div class="cohead"><span id="ttl_proinfoview">⭐ Pro obuna</span><span class="x" id="proinfoClose">✕</span></div>
+    <div id="proinfoBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="notifview" style="z-index:140">
+    <div class="cohead"><span id="ttl_notifview">🔔 Xabarnomalar</span><span class="x" id="notifClose">✕</span></div>
+    <div id="notifBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="supportview" style="z-index:150">
+    <div class="cohead"><span id="supportTitle">📩 Murojaat</span><span class="x" id="supportClose">✕</span></div>
+    <div class="chatwrap" id="supportWrap"></div>
+    <div class="chatbar" id="supportBar"><input id="supportInp" placeholder="Xabar yozing..." maxlength="2000"><button id="supportSend">➤</button></div>
   </div>
 
   <div class="checkout" id="aiview">
@@ -705,6 +724,27 @@ const I18N = {
   cd_left:{uz:"⏳ Tasdiqlashga {t} qoldi",ru:"⏳ На подтверждение осталось {t}"},
   cd_expired:{uz:"⌛ Muddat tugadi — avto-bekor qilinmoqda",ru:"⌛ Время вышло — авто-отмена"},
   pcs:{uz:"dona",ru:"шт"}, debt:{uz:"Qarz",ru:"Долг"}, write_msg:{uz:"💬 Xabar yozish",ru:"💬 Написать"},
+  // Murojaat sabablari + xabarnoma + support
+  bp_contact_reason:{uz:"Murojaat sababini tanlang:",ru:"Выберите причину обращения:"},
+  rsn_order:{uz:"📦 Buyurtma",ru:"📦 Заказ"}, rsn_payment:{uz:"💳 To'lov",ru:"💳 Оплата"},
+  rsn_seller:{uz:"🏪 Sotuvchi shikoyati",ru:"🏪 Жалоба на продавца"}, rsn_product:{uz:"🛍 Mahsulot/e'lon",ru:"🛍 Товар/объявление"},
+  rsn_account:{uz:"👤 Akkaunt",ru:"👤 Аккаунт"}, rsn_suggestion:{uz:"💡 Taklif",ru:"💡 Предложение"}, rsn_other:{uz:"✍️ Boshqa",ru:"✍️ Другое"},
+  notif_title:{uz:"🔔 Xabarnomalar",ru:"🔔 Уведомления"},
+  notif_have:{uz:"{n} ta yangi xabar",ru:"{n} новых сообщений"},
+  notif_empty:{uz:"Xabarnoma yo'q",ru:"Нет уведомлений"},
+  notif_mark_all:{uz:"✓ Hammasini o'qildi deb belgilash",ru:"✓ Отметить все прочитанными"},
+  support_closed:{uz:"Murojaat yopilgan. Yangi savol bo'lsa — Admin bilan bog'lanishdan qayta yozing.",ru:"Обращение закрыто. Новый вопрос — снова через «Связь с админом»."},
+  support_close_btn:{uz:"Murojaatni yopish",ru:"Закрыть обращение"},
+  support_none:{uz:"Murojaat yo'q",ru:"Обращений нет"},
+  support_open:{uz:"🟢 Ochiq",ru:"🟢 Открыто"}, support_closed_s:{uz:"⚪️ Yopiq",ru:"⚪️ Закрыто"},
+  adm_support:{uz:"📩 Murojaatlar",ru:"📩 Обращения"},
+  bp_reason_req:{uz:"Iltimos, murojaat sababini tanlang.",ru:"Пожалуйста, выберите причину обращения."},
+  bp_text_bad:{uz:"Murojaat matnli yoki raqamli bo'lishi kerak (faqat belgi/emoji mumkin emas).",ru:"Обращение должно содержать текст или цифры (только символы/эмодзи нельзя)."},
+  bp_tpl_hint:{uz:"Tayyor gaplardan birini tanlang (keyin tahrirlash mumkin):",ru:"Выберите готовую фразу (потом можно изменить):"},
+  support_ai_btn:{uz:"🤖 AI javob tayyorla",ru:"🤖 AI-ответ"},
+  support_ai_loading:{uz:"🤖 O'qimoqda...",ru:"🤖 Читаю..."},
+  support_ai_hint:{uz:"AI suhbatni o'qib javob taklif qiladi — tahrirlab yoki qayta bosib o'zgartiring, so'ng yuboring.",ru:"AI читает переписку и предлагает ответ — отредактируйте или перегенерируйте, затем отправьте."},
+  support_ai_off:{uz:"AI hozircha sozlanmagan (DEEPSEEK_API_KEY).",ru:"AI пока не настроен (DEEPSEEK_API_KEY)."},
   cancel_order:{uz:"❌ Bekor qilish",ru:"❌ Отменить"}, rate_order:{uz:"⭐ Baholash",ru:"⭐ Оценить"},
   req_cancel:{uz:"❌ Bekor qilishni so'rash",ru:"❌ Запросить отмену"},
   cancel_reason_ph:{uz:"Bekor qilish sababi...",ru:"Причина отмены..."},
@@ -746,6 +786,8 @@ const I18N = {
   adm_settings:{uz:"⚙️ Sozlamalar",ru:"⚙️ Настройки"},
   adm_monetization:{uz:"💰 Monetizatsiya",ru:"💰 Монетизация"},
   adm_payments:{uz:"💳 To'lovlar",ru:"💳 Платежи"},
+  adm_contact_tg:{uz:"💬 Telegram",ru:"💬 Telegram"},
+  adm_no_contact:{uz:"Bog'lanish ma'lumoti topilmadi.",ru:"Контактные данные не найдены."},
   adm_pay_confirm:{uz:"✅ To'lovni tasdiqlash",ru:"✅ Подтвердить оплату"},
   adm_pay_confirm_q:{uz:"To'lovni tasdiqlaysizmi? ({amt}) — boost/obuna darhol faollashadi.",ru:"Подтвердить оплату? ({amt}) — продвижение/подписка активируется сразу."},
   adm_pay_done:{uz:"✅ To'lov tasdiqlandi",ru:"✅ Оплата подтверждена"},
@@ -795,6 +837,9 @@ const I18N = {
   mon_sub_price:{uz:"Obuna narxi (so'm/oy)",ru:"Цена подписки (сум/мес)"},
   mon_sub_days:{uz:"Obuna muddati (kun)",ru:"Срок подписки (дней)"},
   mon_free_limit:{uz:"Bepul mahsulot limiti (0=cheksiz)",ru:"Лимит товаров на бесплатном (0=без лимита)"},
+  mon_pro_free_boosts:{uz:"Pro: oyiga bepul boost (0=yo'q)",ru:"Pro: бесплатных boost в месяц (0=нет)"},
+  mon_free_reels:{uz:"Bepul AI reels/oy (0=Pro-only)",ru:"Бесплатных AI reels/мес (0=только Pro)"},
+  mon_free_scheduled:{uz:"Bepul rejalashtirilgan post (0=Pro-only)",ru:"Бесплатных запланир. постов (0=только Pro)"},
   mon_pay_click:{uz:"Click to'lovi",ru:"Оплата Click"}, mon_pay_payme:{uz:"Payme to'lovi",ru:"Оплата Payme"}, mon_pay_paynet:{uz:"Paynet to'lovi",ru:"Оплата Paynet"},
   mon_pay_hint:{uz:"To'lov provayderini yoqish uchun avval merchant hisobi va kalitlar kerak (keyingi bosqich).",ru:"Для включения провайдера нужны мерчант-аккаунт и ключи (следующий этап)."},
   mon_saved:{uz:"✅ Saqlandi",ru:"✅ Сохранено"}, mon_off_note:{uz:"Hozir hammasi O'CHIQ — foydalanuvchilar uchun bepul.",ru:"Сейчас всё ВЫКЛ — бесплатно для пользователей."},
@@ -932,6 +977,9 @@ const I18N = {
   an_weekday:{uz:"📅 Hafta kuni bo'yicha buyurtmalar",ru:"📅 Заказы по дням недели"},
   an_daily:{uz:"💰 So'nggi 7 kun daromadi",ru:"💰 Доход за 7 дней"},
   an_sold_n:{uz:"{n} dona",ru:"{n} шт"}, an_no_data:{uz:"Hozircha ma'lumot yo'q",ru:"Пока нет данных"},
+  an_pro_lock_title:{uz:"🔒 Chuqur tahlil — Pro",ru:"🔒 Глубокая аналитика — Pro"},
+  an_pro_lock_desc:{uz:"Hafta kuni bo'yicha buyurtmalar va so'nggi 7 kun daromadi Pro obunada ochiladi — qaysi kun va vaqtda ko'proq sotilishini bilib, omborni to'g'ri rejalashtiring.",ru:"Заказы по дням недели и доход за 7 дней доступны в Pro — узнайте, когда продаётся больше, и планируйте запасы точнее."},
+  an_pro_lock_btn:{uz:"⭐ Pro obunani ochish",ru:"⭐ Оформить Pro"},
   loy_title:{uz:"Sodiqlik darajasi",ru:"Уровень лояльности"}, loy_points:{uz:"ball",ru:"баллов"},
   loy_bronze:{uz:"Bronza",ru:"Бронза"}, loy_silver:{uz:"Kumush",ru:"Серебро"}, loy_gold:{uz:"Oltin",ru:"Золото"}, loy_diamond:{uz:"Olmos",ru:"Алмаз"},
   loy_to_next:{uz:"{n} ball → {tier}",ru:"{n} баллов → {tier}"}, loy_max:{uz:"Eng yuqori daraja! 🎉",ru:"Высший уровень! 🎉"},
@@ -983,6 +1031,12 @@ const I18N = {
   sp_boost:{uz:"Boost — tepaga ko'tarish",ru:"Boost — поднять вверх"}, sp_boosted:{uz:"Boost faol",ru:"Boost активен"},
   sp_boost_confirm:{uz:"Bu mahsulotni {d} kunga tepaga ko'taramizmi? Narxi: {p}",ru:"Поднять этот товар вверх на {d} дн.? Цена: {p}"},
   sp_boost_done:{uz:"🚀 Boost yoqildi!",ru:"🚀 Boost включён!"},
+  boost_pro_confirm:{uz:"Bu mahsulotni tepaga ko'taramizmi? Pro bepul boostingiz ishlatiladi (qolsa).",ru:"Поднять товар вверх? Будет использован бесплатный Pro-boost (если остался)."},
+  boost_free_done:{uz:"🚀 Bepul Pro boost qo'llandi! Bu oy yana qoldi: {n}",ru:"🚀 Бесплатный Pro-boost применён! Осталось в этом месяце: {n}"},
+  pro_feature_locked:{uz:"⭐ Bu imkoniyat Pro obunada ochiladi.",ru:"⭐ Эта возможность доступна в Pro-подписке."},
+  pro_badge:{uz:"✅ Pro",ru:"✅ Pro"},
+  pro_reels_lock:{uz:"Bepul reels limiti tugadi. Cheksiz AI reels uchun Pro obunani oching.",ru:"Лимит бесплатных reels исчерпан. Откройте Pro для безлимитных AI reels."},
+  pro_unlock_btn:{uz:"⭐ Pro obunani ochish",ru:"⭐ Оформить Pro"},
   free_limit_reached:{uz:"Bepul rejada mahsulot limitiga yetdingiz. Cheksiz qo'shish uchun Pro obunani oching.",ru:"Достигнут лимит товаров на бесплатном тарифе. Оформите Pro для безлимита."},
   pay_title:{uz:"To'lov",ru:"Оплата"}, pay_choose:{uz:"To'lov usulini tanlang",ru:"Выберите способ оплаты"},
   pay_opened:{uz:"To'lov sahifasi ochildi. To'lagach, bu yerga qaytib yangilang.",ru:"Открыта страница оплаты. После оплаты вернитесь и обновите."},
@@ -992,7 +1046,34 @@ const I18N = {
   pro_done:{uz:"⭐ Pro obuna faollashtirildi!",ru:"⭐ Pro подписка активирована!"},
   pro_title:{uz:"⭐ Pro obuna",ru:"⭐ Pro подписка"}, pro_active:{uz:"Pro faol",ru:"Pro активен"},
   pro_until:{uz:"Amal qiladi:",ru:"Действует до:"}, pro_get:{uz:"Pro obunani olish",ru:"Оформить Pro"},
-  pro_perk:{uz:"Cheksiz mahsulot + ustuvor ko'rinish",ru:"Безлимит товаров + приоритет"},
+  pro_perk:{uz:"♾️ Cheksiz mahsulot · 🚀 oyiga bepul boostlar · ✅ Pro nishon · 📊 kengaytirilgan analitika (raqobat narxi, AI dinamik narx, hafta kuni/daromad) · 🤖 cheksiz AI reels · ⏰ cheksiz rejalashtirilgan post · 🔝 saralashda ustunlik",ru:"♾️ Безлимит товаров · 🚀 бесплатные boost'ы в месяц · ✅ значок Pro · 📊 расширенная аналитика (цены конкурентов, ИИ-динамическая цена, дни недели/доход) · 🤖 безлимит AI reels · ⏰ безлимит запланированных постов · 🔝 приоритет в выдаче"},
+  pro_teaser:{uz:"Do'koningiz uchun kuchli imkoniyatlar",ru:"Мощные возможности для вашего магазина"},
+  pro_open_btn:{uz:"⭐ Pro obunani olish",ru:"⭐ Оформить Pro"},
+  pro_view_benefits:{uz:"⭐ Pro imkoniyatlarini ko'rish",ru:"⭐ Посмотреть возможности Pro"},
+  pro_info_intro:{uz:"Pro olsangiz quyidagilarni olasiz. Har biriда limit aniq ko'rsatilgan:",ru:"С Pro вы получаете следующее. Лимит каждого указан явно:"},
+  pro_info_note:{uz:"Limitlar admin tomonidan sozlanishi mumkin.",ru:"Лимиты могут настраиваться администратором."},
+  pro_buy_btn:{uz:"⭐ Pro obunani sotib olish",ru:"⭐ Купить Pro-подписку"},
+  pro_days:{uz:"kun",ru:"дн"},
+  prk_unlim:{uz:"Cheksiz — hech qanday cheklov yo'q.",ru:"Безлимит — без ограничений."},
+  prk_products:{uz:"Cheksiz mahsulot",ru:"Безлимит товаров"},
+  prk_products_lim:{uz:"Bepul rejada {n} ta mahsulot; Pro'da — cheksiz.",ru:"На бесплатном — {n} товаров; на Pro — без лимита."},
+  prk_boost:{uz:"Bepul boostlar",ru:"Бесплатные boost'ы"},
+  prk_boost_lim:{uz:"Oyiga {n} ta BEPUL boost. Undan ortig'iga — odatdagi narx.",ru:"{n} БЕСПЛАТНЫХ boost в месяц. Сверх — по обычной цене."},
+  prk_boost_none:{uz:"Bepul boost yo'q (admin o'chirgan).",ru:"Бесплатных boost нет (отключено админом)."},
+  prk_badge:{uz:"Pro nishon",ru:"Значок Pro"},
+  prk_badge_d:{uz:"Do'koningizda ✅ Pro belgisi — ko'proq ishonch va sotuv. Cheksiz.",ru:"Значок ✅ Pro у магазина — больше доверия и продаж. Без лимита."},
+  prk_analytics:{uz:"Kengaytirilgan analitika",ru:"Расширенная аналитика"},
+  prk_analytics_d:{uz:"Raqobat narxi, AI dinamik narx, hafta kuni/daromad. AI dinamik narx — soatiga 30 (texnik limit).",ru:"Цены конкурентов, ИИ-динамическая цена, дни недели/доход. ИИ-цена — 30/час (тех. лимит)."},
+  prk_reels:{uz:"AI reels ssenariy",ru:"AI reels-сценарии"},
+  prk_reels_lim:{uz:"Bepul: oyiga {n} ta; Pro: cheksiz (soatiga 20 — texnik anti-abuse).",ru:"Бесплатно: {n}/мес; Pro: безлимит (20/час — тех. защита)."},
+  prk_reels_only:{uz:"Pro: cheksiz (soatiga 20 — texnik). Bepul rejada yopiq.",ru:"Pro: безлимит (20/час — тех.). На бесплатном закрыто."},
+  prk_sched:{uz:"Rejalashtirilgan postlar",ru:"Запланированные посты"},
+  prk_sched_lim:{uz:"Bepul: {n} ta faol; Pro: cheksiz.",ru:"Бесплатно: {n} активных; Pro: безлимит."},
+  prk_sched_only:{uz:"Pro: cheksiz. Bepul rejada yopiq.",ru:"Pro: безлимит. На бесплатном закрыто."},
+  prk_rank:{uz:"Saralashda ustunlik",ru:"Приоритет в выдаче"},
+  prk_rank_d:{uz:"Pro do'konlar qidiruvda yuqorida (faqat pulli boost ulardan ham tepada).",ru:"Pro-магазины выше в поиске (только платный boost выше них)."},
+  prk_excel:{uz:"Excel hisobot",ru:"Excel-отчёт"},
+  prk_excel_d:{uz:"Buyurtma/mahsulotlarni chiroyli Excel'ga yuklab olish. Cheksiz.",ru:"Выгрузка заказов/товаров в красивый Excel. Без лимита."},
   comm_owed:{uz:"Platformaga komissiya:",ru:"Комиссия платформе:"},
   sp_add_product:{uz:"➕ Mahsulot qo'shish",ru:"➕ Добавить товар"},
   sp_pending_approval:{uz:"⏳ Tasdiq kutyapti ({n}) — xodim joylagan",ru:"⏳ Ждут подтверждения ({n}) — добавил сотрудник"},
@@ -1030,6 +1111,7 @@ const I18N = {
   sp_ov_stock:{uz:"📦 Zahira",ru:"📦 Запас"},
   sp_chan_add_group:{uz:"➕ Botni guruhga qo'shish",ru:"➕ Добавить бота в группу"},
   sp_exp_orders:{uz:"🧾 Buyurtmalar (Excel)",ru:"🧾 Заказы (Excel)"}, sp_exp_products:{uz:"📦 Mahsulotlar (Excel)",ru:"📦 Товары (Excel)"},
+  sp_exp_full:{uz:"📊 To'liq hisobot (4 sahifa)",ru:"📊 Полный отчёт (4 листа)"},
   sd_ledger_btn:{uz:"💳 Qarzlar daftari",ru:"💳 Книга долгов"}, sd_title:{uz:"Qarzlar",ru:"Долги"},
   sd_empty:{uz:"Ochiq qarz yo'q",ru:"Открытых долгов нет"}, sd_total:{uz:"Jami qarz",ru:"Всего долг"},
   sd_clear:{uz:"Bu xaridor qarzdor emas",ru:"У этого покупателя нет долга"},
@@ -1173,6 +1255,8 @@ const I18N = {
   bp_rate_shop:{uz:"Do'kon (sotuvchi) bahosi",ru:"Оценка магазина (продавца)"}, bp_rate_product:{uz:"Mahsulot bahosi",ru:"Оценка товара"},
   bp_comment_opt:{uz:"Izoh (ixtiyoriy)",ru:"Комментарий (необязательно)"}, bp_comment_ph:{uz:"Fikringiz...",ru:"Ваше мнение..."},
   bp_send_rating:{uz:"✅ Baho yuborish",ru:"✅ Отправить оценку"}, bp_already_reviewed:{uz:"Bu buyurtmani allaqachon baholagansiz.",ru:"Вы уже оценили этот заказ."},
+  bp_reviewed_badge:{uz:"✅ Baholangan — rahmat!",ru:"✅ Оценено — спасибо!"},
+  chat_closed:{uz:"Buyurtma yakunlandi — suhbat yopiq. Yozishmalar tarixi saqlanadi.",ru:"Заказ завершён — чат закрыт. История переписки сохранена."},
   bp_no_debts:{uz:"Qarzingiz yo'q",ru:"У вас нет долгов"}, bp_total_debt:{uz:"Jami qarz: ",ru:"Всего долг: "},
   bp_n_orders:{uz:"{n} ta buyurtma",ru:"{n} заказов"}, bp_n_products:{uz:"{n} mahsulot",ru:"{n} товаров"},
   bp_view_products:{uz:"Mahsulotlarni ko'rish ›",ru:"Смотреть товары ›"}, bp_no_shops:{uz:"Do'kon topilmadi",ru:"Магазины не найдены"},
@@ -1235,7 +1319,7 @@ function applyStaticI18n(){
     ttl_paymentsview:'sp_ov_payments',
     ttl_staffview:'sp_ov_staff',ttl_schedview:'sp_ov_sched',ttl_deliverform:'sp_ov_deliver',
     ttl_checkout:'bp_ov_checkout',ttl_cartview:'cart_title',
-    ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',
+    ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',ttl_proinfoview:'pro_title',ttl_notifview:'notif_title',
     ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title',
     ttl_adview:'sp_ov_adview',ttl_regionview:'bp_region_title',ttl_stockview:'sp_ov_stock',
     ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code',ttl_staffdetview:'sp_staff_detail_title',
@@ -1480,6 +1564,7 @@ async function openDetail(id){
           <div class="drow">
             ${r?`<span class="pill"><b>★</b> ${r.toFixed(1)}${rv?` · ${rv} ${L('reviews_word')}`:''}</span>`:''}
             <span class="pill">🏪 ${esc(p.shop_name||'')}</span>
+            ${p.seller_is_pro?`<span class="pill" style="background:#e6f4ff;color:#1592e2">${L('pro_badge')}</span>`:''}
             ${p.category_name?`<span class="pill">${p.category_emoji||'🏷'} ${esc(p.category_name)}</span>`:''}
             ${stockPill}
           </div>
@@ -1831,12 +1916,16 @@ async function loadChat(){
     chatMe=d.me;
     document.getElementById('chatTitle').textContent='💬 '+(d.counterparty||L('bp_messages'));
     const wrap=document.getElementById('chatWrap');
-    if(!d.messages.length){ wrap.innerHTML=`<div class="chatempty">${L('no_msgs')}<br>${L('first_write')}</div>`; return; }
+    // Buyurtma yakunlangach suhbat YOPIQ — input yashiriladi, polling to'xtaydi (tarix ko'rinadi).
+    const bar=document.getElementById('chatBar'); if(bar) bar.style.display=d.closed?'none':'';
+    if(d.closed){ clearInterval(chatPoll); chatPoll=null; }
+    const closedNote=d.closed?`<div class="chatempty" style="padding:14px 12px;font-size:12.5px">🔒 ${L('chat_closed')}</div>`:'';
+    if(!d.messages.length){ wrap.innerHTML=closedNote||`<div class="chatempty">${L('no_msgs')}<br>${L('first_write')}</div>`; return; }
     wrap.innerHTML=d.messages.map(m=>{
       const me=m.sender_id===chatMe;
       const tm=fmtDate(m.created_at); const hm=tm.length>=5?tm.slice(-5):tm;
       return `<div class="cbub ${me?'me':'them'}">${esc(m.message||'')}<div class="tm">${hm}</div></div>`;
-    }).join('');
+    }).join('')+closedNote;
     wrap.scrollTop=wrap.scrollHeight;
   }catch(e){ document.getElementById('chatWrap').innerHTML=`<div class="chatempty">⚠️ ${esc(e.message)}</div>`; }
 }
@@ -1848,7 +1937,10 @@ async function sendChatMessage(){
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
     await loadChat();
-  }catch(e){ tg.showAlert(L('bp_send_failed')+e.message); inp.value=text; }
+  }catch(e){
+    if((e.message||'')==='chat_closed'){ tg.showAlert(L('chat_closed')); await loadChat(); return; }
+    tg.showAlert(L('bp_send_failed')+e.message); inp.value=text;
+  }
 }
 function closeChat(){ document.getElementById('chatview').classList.remove('open'); clearInterval(chatPoll); chatPoll=null; chatOrderId=null; }
 document.getElementById('chatClose').onclick=closeChat;
@@ -2166,7 +2258,7 @@ document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
 function shopCardHtml(s){
   const r=s.avg_rating? `⭐ ${Number(s.avg_rating).toFixed(1)}`:'';
   return `<div class="ocard" data-shop="${s.id}" data-name="${esc(s.shop_name||'')}" style="cursor:pointer">
-    <div class="oname">🏪 ${esc(s.shop_name||'')}</div>
+    <div class="oname">🏪 ${esc(s.shop_name||'')}${s.is_pro?` <span class="ostatus" style="background:#e6f4ff;color:#1592e2">${L('pro_badge')}</span>`:''}</div>
     <div class="ometa">${L('bp_n_products').replace('{n}', s.product_count||0)}${r?' · '+r:''}</div>
     ${s.shop_address?`<div class="oshop">📍 ${esc(s.shop_address)}</div>`:''}
     <div style="color:var(--accent);font-size:13px;font-weight:600;margin-top:6px">${L('bp_view_products')}</div>
@@ -2331,7 +2423,8 @@ function orderCardHtml(o){
     ${(o.status==='confirmed' && o.delivery_type==='pickup' && !o.buyer_received)?`<button class="oact ok" data-pickup="${o.id}" style="width:100%;margin-top:8px">${L('bp_got_it')}</button>`:''}
     ${(o.status==='confirmed' && o.buyer_received)?`<div class="odebt" style="background:var(--bg);color:var(--ok)">${L('bp_got_waiting')}</div>`:''}
     ${cancelFlowHtml(o)}
-    ${o.status==='delivered'?`<button class="oact ok" data-review="${o.id}" style="width:100%;margin-top:8px">${L('rate_order')}</button>`:''}
+    ${(o.status==='delivered' && !o.has_review)?`<button class="oact ok" data-review="${o.id}" style="width:100%;margin-top:8px">${L('rate_order')}</button>`:''}
+    ${(o.status==='delivered' && o.has_review)?`<div class="odebt" style="background:var(--bg);color:var(--ok);margin-top:8px">${L('bp_reviewed_badge')}</div>`:''}
     ${((o.status==='delivered'||o.status==='cancelled') && o.product_id)?`<button class="oact ok" data-reorder="${o.product_id}" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('reorder_btn')}</button>`:''}
   </div>`;
 }
@@ -2662,9 +2755,10 @@ async function loadProfile(){
     if(isSeller && me.monetization && me.monetization.enabled){
       const mon=me.monetization, pro=me.pro||{}; const rows=[];
       if(mon.subscription){
-        if(pro.active) rows.push(`<div class="prow"><span>⭐ ${L('pro_active')}</span><b>${pro.until?fmtDate(pro.until):''}</b></div>`);
-        else rows.push(`<div class="prow"><span style="color:var(--hint)">${L('pro_perk')}</span></div>
-          <button class="oact ok full" id="proGetBtn" style="margin-top:8px">${L('pro_get')} · ${money(mon.subscription_price||0)}</button>`);
+        if(pro.active) rows.push(`<div class="prow"><span>⭐ ${L('pro_active')}</span><b>${pro.until?fmtDate(pro.until):''}</b></div>
+          <button class="oact soft full" id="proGetBtn" style="margin-top:8px">${L('pro_view_benefits')}</button>`);
+        else rows.push(`<div class="prow"><span style="color:var(--hint)">${L('pro_teaser')}</span></div>
+          <button class="oact ok full" id="proGetBtn" style="margin-top:8px">${L('pro_open_btn')}</button>`);
       }
       if(mon.commission && (me.commission_owed>0)) rows.push(`<div class="prow"><span>${L('comm_owed')}</span><b style="color:var(--sale)">${money(me.commission_owed)}</b></div>`);
       if(rows.length) monCard=`<div style="padding:12px 12px 0"><div class="cosec" style="margin:0"><div class="lbl">${L('pro_title')}</div>${rows.join('')}</div></div>`;
@@ -2720,7 +2814,7 @@ async function loadProfile(){
     loadLoyalty();   // #16 — sodiqlik nishoni
     setupAddToHome();   // 📲 ilovani bosh ekranga qo'shish (iOS + Android)
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
-    const pgb=document.getElementById('proGetBtn'); if(pgb) pgb.onclick=subscribePro;
+    const pgb=document.getElementById('proGetBtn'); if(pgb) pgb.onclick=openProInfo;
     v.querySelectorAll('#themeSeg [data-theme]').forEach(o=>o.onclick=()=>{
       setThemePref(o.dataset.theme);
       v.querySelectorAll('#themeSeg .opt').forEach(x=>x.classList.toggle('on', x.dataset.theme===THEME_PREF));
@@ -2875,6 +2969,8 @@ async function loadMe(){
   if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); loadCategories(); if(catMode==='products') loadProducts(); }
   applyMode();
   applyStaticI18n();
+  // Universal xabarnoma — top banner + davriy yangilash (kim bo'lishidan qat'i nazar)
+  if(ME){ refreshNotifs(); if(!_notifPoll) _notifPoll=setInterval(refreshNotifs, 45000); }
 }
 
 // ---------- RO'YXATDAN O'TISH (app ichida — yangi xaridor) ----------
@@ -2950,9 +3046,29 @@ function applyMode(){
 function switchMode(m){
   if(m==='admin' && !isAdminUser()) m='buyer';
   appMode = (m==='seller') ? 'seller' : (m==='admin' ? 'admin' : 'buyer');
+  // Foydalanuvchi tanlagan rejimni saqlaymiz — qayta kirganda/yangilaganda o'sha rejimda qoladi.
+  try{ localStorage.setItem('tezbozor_mode', appMode); }catch(e){}
   try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
   applyMode();
   switchTab(appMode==='seller' ? 'seller' : (appMode==='admin' ? 'admin' : 'catalog'));
+}
+
+// Qayta kirishda — saqlangan rejimni TIKLAYMIZ (faqat birinchi yuklashda).
+// Ruxsat o'zgargan bo'lsa (mas. sotuvchilik bekor qilingan) — xavfsiz buyer'ga tushadi.
+let _modeRestored=false;
+function restoreModeOnBoot(){
+  if(_modeRestored) return; _modeRestored=true;
+  if(!ME) return;  // ro'yxatdan o'tmagan — registratsiya oqimi ishlaydi
+  // Reklama/deep-link bilan kirilsa (product_/chat_) — o'sha kontentga yo'naltiramiz, rejimni majburlamaymiz.
+  try{
+    const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';
+    if(/^(product|chat)_\d+$/.test(String(sp))) return;
+  }catch(e){}
+  let saved='buyer';
+  try{ saved=localStorage.getItem('tezbozor_mode')||'buyer'; }catch(e){}
+  if(saved==='admin' && !isAdminUser()) saved='buyer';
+  if(saved==='seller' && !canManage()) saved='buyer';
+  if(saved!=='buyer') switchMode(saved);  // buyer allaqachon standart — keraksiz tab almashtirmaymiz
 }
 
 // #9 — sotuvchi rejimi tugmasida do'kon nomini ko'rsatamiz (mas. "Test MCHJ sotuvchisi rejimiga o'tish")
@@ -3026,29 +3142,179 @@ async function submitBecomeSeller(){
 }
 document.getElementById('becomeClose').onclick=()=>document.getElementById('becomeview').classList.remove('open');
 
-function openContact(){
+// Murojaat sabablari (backend SUPPORT_REASONS bilan bir xil kalitlar)
+const SUPPORT_REASONS=['order','payment','seller','product','account','suggestion','other'];
+// Sabab bo'yicha SHABLON gaplar (tanlasa textarea'ga tushadi, tahrirlash mumkin)
+const SUPPORT_TPL={
+  order:{uz:["Buyurtmam belgilangan vaqtda yetib kelmadi.","Buyurtmam holati uzoq vaqtdan beri o'zgarmayapti.","Buyurtmani bekor qilmoqchiman, yordam kerak.","Boshqa mahsulot keldi."],
+         ru:["Заказ не пришёл в срок.","Статус заказа долго не меняется.","Хочу отменить заказ, нужна помощь.","Пришёл другой товар."]},
+  payment:{uz:["To'lovim o'tdi, lekin tasdiqlanmadi.","Pulim yechildi, ammo buyurtma yo'q.","To'lovni qaytarib olishim kerak.","Ikki marta to'lov ketdi."],
+           ru:["Оплата прошла, но не подтвердилась.","Деньги списались, но заказа нет.","Нужен возврат оплаты.","Списание произошло дважды."]},
+  seller:{uz:["Sotuvchi javob bermayapti.","Sotuvchi noto'g'ri muomala qildi.","Sotuvchi kelishuvni bajarmadi."],
+          ru:["Продавец не отвечает.","Продавец повёл себя некорректно.","Продавец не выполнил договорённость."]},
+  product:{uz:["Mahsulot tavsifi haqiqatga to'g'ri kelmadi.","E'londa noto'g'ri ma'lumot bor.","Mahsulot sifatsiz chiqdi."],
+           ru:["Описание товара не соответствует.","В объявлении неверные данные.","Товар оказался некачественным."]},
+  account:{uz:["Akkauntimga kira olmayapman.","Profil ma'lumotimni o'zgartira olmadim.","Telefon raqamni yangilash kerak."],
+           ru:["Не могу войти в аккаунт.","Не получается изменить данные профиля.","Нужно обновить номер телефона."]},
+  suggestion:{uz:["Ilovaga yangi imkoniyat taklif qilmoqchiman.","Bir joyda noqulaylik bor, fikrim bor.","Umumiy fikr-mulohaza."],
+              ru:["Хочу предложить новую функцию.","Есть неудобство, хочу поделиться.","Общий отзыв."]},
+  other:{uz:[],ru:[]},
+};
+function _supTpls(r){ const o=SUPPORT_TPL[r]||{}; return o[LANG]||o.uz||[]; }
+function _alnumOk(s){ return (String(s||'').match(/[0-9A-Za-zЀ-ӿ]/g)||[]).length>=2; }
+let caReason='', caText='';
+function openContact(){ caReason=''; caText=''; renderContact(); document.getElementById('contactform').classList.add('open'); }
+function renderContact(){
   const body=document.getElementById('contactBody');
+  const chips=SUPPORT_REASONS.map(k=>`<button class="chip${k===caReason?' active':''}" data-rsn="${k}">${L('rsn_'+k)}</button>`).join('');
+  const TPL=caReason?_supTpls(caReason):[];
+  const tplBlock=(caReason && TPL.length)?`<div style="font-size:12.5px;color:var(--hint);margin-top:8px">${L('bp_tpl_hint')}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0">${TPL.map((t,i)=>`<button class="chip" data-tpli="${i}" style="white-space:normal;text-align:left;height:auto;line-height:1.35;padding:7px 10px">${esc(t)}</button>`).join('')}</div>`:'';
   body.innerHTML=`<div class="cobody">
-    <div style="font-size:13px;color:var(--hint)">${L('bp_contact_hint')}</div>
-    <textarea class="coaddr" id="caText" style="min-height:120px" placeholder="${L('bp_msg_ph')}"></textarea>
+    <div style="font-size:13px;color:var(--hint)">${L('bp_contact_reason')} <b style="color:var(--sale)">*</b></div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0">${chips}</div>
+    ${tplBlock}
+    <div style="font-size:13px;color:var(--hint);margin-top:8px">${L('bp_contact_hint')}</div>
+    <textarea class="coaddr" id="caText" style="min-height:110px" placeholder="${L('bp_msg_ph')}">${esc(caText)}</textarea>
   </div><div class="cobar"><button id="caSend">${L('bp_send_btn')}</button></div>`;
+  body.querySelectorAll('[data-rsn]').forEach(b=>b.onclick=()=>{ caText=(document.getElementById('caText').value||''); caReason=b.dataset.rsn; renderContact(); });
+  body.querySelectorAll('[data-tpli]').forEach(b=>b.onclick=()=>{ const ta=document.getElementById('caText'); ta.value=TPL[+b.dataset.tpli]; caText=ta.value; ta.focus(); });
+  const ta=document.getElementById('caText'); if(ta) ta.oninput=()=>{ caText=ta.value; };
   document.getElementById('caSend').onclick=sendContact;
-  document.getElementById('contactform').classList.add('open');
 }
 async function sendContact(){
+  if(!caReason){ tg.showAlert(L('bp_reason_req')); return; }
   const text=(document.getElementById('caText').value||'').trim();
   if(!text){ tg.showAlert(L('bp_msg_empty')); return; }
+  if(!_alnumOk(text)){ tg.showAlert(L('bp_text_bad')); return; }   // faqat belgi/emoji bo'lmasin
   const btn=document.getElementById('caSend'); btn.disabled=true; btn.textContent=L('sending');
   try{
-    const r=await fetch('/api/contact-admin',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({text})});
-    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    const r=await fetch('/api/contact-admin',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({text, reason:caReason})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); const m=d.detail||('HTTP '+r.status);
+      throw new Error(m==='reason_required'?L('bp_reason_req'):(m==='bad_text'?L('bp_text_bad'):m)); }
+    const d=await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     document.getElementById('contactform').classList.remove('open');
     tg.showAlert(L('bp_contact_sent'));
+    if(d.thread_id) openSupportThread(d.thread_id);   // suhbatni davom ettirish mumkin
   }catch(e){ btn.disabled=false; btn.textContent=L('bp_send_btn'); tg.showAlert(L('bp_send_failed')+e.message); }
 }
 function closeContact(){ document.getElementById('contactform').classList.remove('open'); }
 document.getElementById('caClose').onclick = closeContact;
+
+// ============ UNIVERSAL XABARNOMA (top banner + inbox) ============
+let NOTIF_UNREAD=0, _notifPoll=null;
+async function refreshNotifs(){
+  if(!AUTH) return;
+  try{
+    const d=await api('/api/my/notifications');
+    NOTIF_UNREAD=d.unread||0; renderNotifBanner();
+  }catch(e){}
+}
+function renderNotifBanner(){
+  const b=document.getElementById('notifBanner'); if(!b) return;
+  if(NOTIF_UNREAD>0){ document.getElementById('notifBannerText').textContent=`📩 ${L('notif_have').replace('{n}',NOTIF_UNREAD)}`; b.style.display='flex'; }
+  else b.style.display='none';
+}
+async function openNotifs(){
+  document.getElementById('notifview').classList.add('open');
+  const body=document.getElementById('notifBody');
+  body.innerHTML=`<div class="loading">${L('bp_loading')}</div>`;
+  try{
+    const d=await api('/api/my/notifications');
+    NOTIF_UNREAD=d.unread||0; renderNotifBanner();
+    const items=d.items||[];
+    if(!items.length){ body.innerHTML=`<div class="cartempty"><span class="big">🔔</span>${L('notif_empty')}</div>`; return; }
+    body.innerHTML=`<div class="cobody"><button class="oact soft full" id="notifAllRead" style="margin-bottom:8px">${L('notif_mark_all')}</button>`+
+      items.map(n=>`<div class="ocard" data-nid="${n.id}" data-nkind="${n.kind}" data-nref="${n.ref_id||''}" style="cursor:pointer;${n.is_read?'':'border-left:3px solid var(--accent)'}">
+        <div class="orow1"><span class="oname">${esc(n.title||'')}</span><span class="odate">${fmtDate(n.created_at)}</span></div>
+        ${n.body?`<div class="ometa" style="margin-top:3px">${esc(n.body)}</div>`:''}
+      </div>`).join('')+`</div>`;
+    document.getElementById('notifAllRead').onclick=async()=>{ await apiSend('/api/my/notifications/read-all','POST',{}); openNotifs(); };
+    body.querySelectorAll('[data-nid]').forEach(c=>c.onclick=async()=>{
+      try{ await apiSend('/api/my/notifications/'+c.dataset.nid+'/read','POST',{}); }catch(e){}
+      await refreshNotifs();
+      if(c.dataset.nkind==='support' && c.dataset.nref){ document.getElementById('notifview').classList.remove('open'); openSupportThread(c.dataset.nref); }
+      else if(c.dataset.nkind==='message' && c.dataset.nref){ document.getElementById('notifview').classList.remove('open'); openChat(c.dataset.nref); }
+      else openNotifs();
+    });
+  }catch(e){ body.innerHTML=`<div class="cartempty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('notifClose').onclick=()=>document.getElementById('notifview').classList.remove('open');
+
+// ============ MUROJAAT (support) — 2 tomonlama suhbat ============
+let SUP_ID=null, SUP_ADMIN=false, _supPoll=null;
+async function openSupportThread(tid){
+  SUP_ID=tid;
+  document.getElementById('supportview').classList.add('open');
+  document.getElementById('supportWrap').innerHTML=`<div class="chatempty">${L('bp_loading')}</div>`;
+  await loadSupportThread();
+  clearInterval(_supPoll); _supPoll=setInterval(loadSupportThread, 6000);
+}
+async function loadSupportThread(){
+  if(!SUP_ID) return;
+  try{
+    const d=await api('/api/support/thread/'+SUP_ID);
+    SUP_ADMIN=(ME&&ME.role==='admin')||false;
+    const rl=d.reason_label||{}; const rlabel=rl[LANG]||rl.uz||'';
+    const closed=(d.thread&&d.thread.status==='closed');
+    document.getElementById('supportTitle').textContent='📩 '+(rlabel||L('contact_admin'));
+    const wrap=document.getElementById('supportWrap');
+    const bar=document.getElementById('supportBar'); if(bar) bar.style.display=closed?'none':'';
+    const msgs=d.messages||[];
+    const closedNote=closed?`<div class="chatempty" style="padding:12px;font-size:12.5px">🔒 ${L('support_closed')}</div>`:'';
+    wrap.innerHTML=(msgs.length?msgs.map(m=>{
+      const mine=(m.sender_role==='admin')===SUP_ADMIN;
+      const tm=fmtDate(m.created_at); const hm=tm.length>=5?tm.slice(-5):tm;
+      return `<div class="cbub ${mine?'me':'them'}">${esc(m.text||'')}<div class="tm">${hm}</div></div>`;
+    }).join(''):`<div class="chatempty">${L('no_msgs')}</div>`)+closedNote+
+      (SUP_ADMIN&&!closed?`<div style="display:flex;gap:8px;margin:10px 8px">
+        <button class="oact ok" id="supAi" style="flex:1;margin:0">${L('support_ai_btn')}</button>
+        <button class="oact no" id="supClose" style="flex:0 0 auto;margin:0">${L('support_close_btn')}</button></div>
+        <div style="font-size:11.5px;color:var(--hint);text-align:center;margin:0 8px">${L('support_ai_hint')}</div>`:'');
+    const cb=document.getElementById('supClose'); if(cb) cb.onclick=async()=>{ if(confirm(L('support_close_btn')+'?')){ await apiSend('/api/support/thread/'+SUP_ID+'/close','POST',{}); loadSupportThread(); } };
+    const ai=document.getElementById('supAi'); if(ai) ai.onclick=aiSupportReply;
+    wrap.scrollTop=wrap.scrollHeight;
+  }catch(e){ document.getElementById('supportWrap').innerHTML=`<div class="chatempty">⚠️ ${esc(e.message)}</div>`; }
+}
+// ADMIN: AI suhbatni o'qib javob TAKLIF qiladi → input'ga tushadi. Yoqmasa qayta bosib
+// boshqa variant; baribir yoqmasa admin qo'lda yozadi/tahrirlaydi. Yuborish — qo'lda.
+async function aiSupportReply(){
+  const btn=document.getElementById('supAi'); if(btn){ btn.disabled=true; btn.textContent=L('support_ai_loading'); }
+  try{
+    const d=await apiSend('/api/support/thread/'+SUP_ID+'/ai-reply','POST',{});
+    const inp=document.getElementById('supportInp'); inp.value=d.reply||''; inp.focus();
+  }catch(e){ const m=(e.message||e); tg.showAlert(m==='ai_disabled'?L('support_ai_off'):(L('err')+': '+m)); }
+  if(btn){ btn.disabled=false; btn.textContent=L('support_ai_btn'); }
+}
+async function sendSupportMessage(){
+  const inp=document.getElementById('supportInp'); const text=(inp.value||'').trim(); if(!text) return;
+  if(!_alnumOk(text)){ tg.showAlert(L('bp_text_bad')); return; }
+  inp.value='';
+  try{
+    await apiSend('/api/support/thread/'+SUP_ID+'/message','POST',{text});
+    await loadSupportThread();
+  }catch(e){ const m=(e.message||e); tg.showAlert(m==='bad_text'?L('bp_text_bad'):(L('bp_send_failed')+m)); inp.value=text; }
+}
+document.getElementById('supportClose').onclick=()=>{ document.getElementById('supportview').classList.remove('open'); clearInterval(_supPoll); _supPoll=null; SUP_ID=null; };
+document.getElementById('supportSend').onclick=sendSupportMessage;
+document.getElementById('supportInp').addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); sendSupportMessage(); }});
+
+// ============ ADMIN MUROJAATLAR INBOX ============
+async function openAdminSupport(){
+  const b=admBox();
+  try{
+    const d=await api('/api/support/threads');
+    const list=d.threads||[];
+    if(!list.length){ b.innerHTML=admEmpty(L('support_none')); return; }
+    b.innerHTML=`<div class="olist">`+list.map(t=>`<div class="ocard" data-stid="${t.id}" style="cursor:pointer;${t.status==='open'?'border-left:3px solid var(--accent)':''}">
+      <div class="orow1"><span class="oname">📩 ${esc(t.user_name||'')}</span><span class="odate">${fmtDate(t.last_at||t.created_at)}</span></div>
+      <div class="ometa">${esc(L('rsn_'+(t.reason||'other')))} · ${t.status==='open'?L('support_open'):L('support_closed_s')}</div>
+      ${t.last_text?`<div class="ometa" style="margin-top:3px;color:var(--text)">“${esc(String(t.last_text).slice(0,80))}”</div>`:''}
+    </div>`).join('')+`</div>`;
+    b.querySelectorAll('[data-stid]').forEach(x=>x.onclick=()=>openSupportThread(x.dataset.stid));
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
 
 // ---------- AI YORDAMCHI ----------
 let aiMsgs=[], aiMode='buyer';
@@ -3483,7 +3749,8 @@ async function addSchedule(){
   const btn=document.getElementById('schAdd'); btn.disabled=true; btn.textContent='...';
   try{
     const r=await fetch('/api/seller/product/'+pid+'/schedule',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({scheduled_at:iso})});
-    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail==='time_in_past'?L('sp_time_past'):(d.detail||('HTTP '+r.status))); }
+    if(!r.ok){ const d=await r.json().catch(()=>({}));
+      throw new Error(d.detail==='time_in_past'?L('sp_time_past'):(d.detail==='pro_required'?L('pro_feature_locked'):(d.detail||('HTTP '+r.status)))); }
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     loadScheduled();
   }catch(e){ btn.disabled=false; btn.textContent=L('sp_schedule_btn'); tg.showAlert(L('sp_error')+e.message); }
@@ -3611,7 +3878,8 @@ async function loadSellerStats(){
       ${row(L('sp_this_month'), s.month_orders||0, s.month_revenue||0)}
       <div style="display:flex;gap:10px">${card(L('sp_products_count'), s.products_count||0)}${card(L('sp_rating'), '⭐ '+(s.avg_rating||0))}${card(L('sp_open_debt'), money(s.open_debt_total||0), (s.open_debt_total>0?'var(--sale)':''))}</div>
       <button class="oact ok" id="sellDebtBtn" style="width:100%;background:${s.open_debt_total>0?'var(--sale)':'var(--accent-soft)'};color:${s.open_debt_total>0?'#fff':'var(--accent)'};box-shadow:none">${L('sd_ledger_btn')}${s.open_debt_total>0?' · '+money(s.open_debt_total):''}</button>
-      <div class="lbl" style="padding:6px 2px 2px">📊 ${L('adm_export')}</div>
+      <div class="lbl" style="padding:6px 2px 2px">📊 ${L('adm_export')}${(ME&&ME.monetization&&ME.monetization.subscription&&!(ME.pro&&ME.pro.active))?` · <span style="color:#1592e2">${L('pro_badge')}</span>`:''}</div>
+      <button class="oact ok" data-sexp="full" style="width:100%;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;box-shadow:none;margin-bottom:8px">${L('sp_exp_full')}</button>
       <div style="display:flex;gap:8px">
         <button class="oact ok" data-sexp="orders" style="flex:1">${L('sp_exp_orders')}</button>
         <button class="oact ok" data-sexp="products" style="flex:1">${L('sp_exp_products')}</button>
@@ -3648,14 +3916,23 @@ async function loadSellerAnalytics(){
           <span style="flex:0 0 auto;color:var(--hint)">${L('an_sold_n').replace('{n}',p.sold)} · <b style="color:var(--ok)">${money(p.revenue)}</b></span>
         </div>`).join('')+`</div>`;
     }
-    // Hafta kuni
-    const wdTotal=(a.by_weekday||[]).reduce((s,x)=>s+x,0);
-    if(wdTotal>0) h+=`<div class="cosec"><div class="lbl">${L('an_weekday')}</div>${_bars(a.by_weekday, wdLabels, v=>v)}</div>`;
-    // So'nggi 7 kun daromadi
-    if(a.daily_7 && a.daily_7.length){
-      const vals=a.daily_7.map(d=>d.revenue||0);
-      const labs=a.daily_7.map(d=>String(d.date||'').slice(5));  // MM-DD
-      if(vals.some(v=>v>0)) h+=`<div class="cosec"><div class="lbl">${L('an_daily')}</div>${_bars(vals, labs, v=>v>=1000?Math.round(v/1000)+'k':v)}</div>`;
+    if(a.pro_locked){
+      // #18 Pro — chuqur tahlil qulflangan: teaser karta + Pro tugmasi
+      h+=`<div class="cosec" style="text-align:center">
+        <div class="lbl" style="font-weight:800">${L('an_pro_lock_title')}</div>
+        <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 2px 12px">${L('an_pro_lock_desc')}</div>
+        <button class="oact ok full" onclick="subscribePro()" style="margin-top:4px">${L('an_pro_lock_btn')}</button>
+      </div>`;
+    }else{
+      // Hafta kuni
+      const wdTotal=(a.by_weekday||[]).reduce((s,x)=>s+x,0);
+      if(wdTotal>0) h+=`<div class="cosec"><div class="lbl">${L('an_weekday')}</div>${_bars(a.by_weekday, wdLabels, v=>v)}</div>`;
+      // So'nggi 7 kun daromadi
+      if(a.daily_7 && a.daily_7.length){
+        const vals=a.daily_7.map(d=>d.revenue||0);
+        const labs=a.daily_7.map(d=>String(d.date||'').slice(5));  // MM-DD
+        if(vals.some(v=>v>0)) h+=`<div class="cosec"><div class="lbl">${L('an_daily')}</div>${_bars(vals, labs, v=>v>=1000?Math.round(v/1000)+'k':v)}</div>`;
+      }
     }
     box.innerHTML=h;
   }catch(e){ box.innerHTML=''; }
@@ -3731,7 +4008,10 @@ async function sellerExport(kind, btn){
   try{
     const r=await apiSend('/api/seller/export/'+kind,'POST');
     tg.showAlert(L('adm_exp_sent').replace('{n}', r.rows!=null?r.rows:''));
-  }catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); }
+  }catch(e){
+    if((e.message||'')==='pro_required'){ if(btn){btn.disabled=false;btn.textContent=old;} subscribePro(); return; }
+    tg.showAlert(L('err')+': '+(e.message||e));
+  }
   if(btn){ btn.disabled=false; btn.textContent=old; }
 }
 
@@ -4064,10 +4344,14 @@ async function startPayment(resp, onDone){
 
 function boostProduct(pid){
   const m = (ME && ME.monetization) || {};
-  const msg = L('sp_boost_confirm').replace('{p}', money(m.boost_price||0)).replace('{d}', m.boost_days||7);
+  // Pro do'kon bepul boostga ega bo'lishi mumkin — shunda narxsiz tasdiq ko'rsatamiz.
+  const proFree = !!(ME && ME.pro && ME.pro.active) && (m.pro_free_boosts||0)>0;
+  const msg = proFree ? L('boost_pro_confirm')
+    : L('sp_boost_confirm').replace('{p}', money(m.boost_price||0)).replace('{d}', m.boost_days||7);
   const go=async()=>{
     try{
       const resp = await apiSend('/api/seller/boost/'+pid,'POST',{});
+      if(resp && resp.free){ tg.showAlert(L('boost_free_done').replace('{n}', resp.remaining)); loadSellerProducts(); return; }
       await startPayment(resp, ()=>{ tg.showAlert(L('sp_boost_done')); loadSellerProducts(); });
     }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
   };
@@ -4085,6 +4369,43 @@ function subscribePro(){
   };
   if(tg.showConfirm) tg.showConfirm(msg, ok=>{ if(ok) go(); }); else if(confirm(msg)) go();
 }
+
+// ⭐ Pro obuna ma'lumot ekrani — har imtiyoz + ANIQ limiti ko'rsatiladi, eng pastda
+// narx bilan "sotib olish" tugmasi (narx ro'yxat ichida ko'rinmaydi, faqat pastda).
+function openProInfo(){
+  const m=(ME&&ME.monetization)||{}, pro=(ME&&ME.pro)||{};
+  const fpl=m.free_product_limit||0, pfb=m.pro_free_boosts||0, frl=m.free_reels_limit||0, fsl=m.free_scheduled_limit||0;
+  // [emoji, nom, limit-izoh] — bepul vs Pro farqi aniq yoziladi
+  const perks=[
+    ['♾️', L('prk_products'),  fpl>0?L('prk_products_lim').replace('{n}',fpl):L('prk_unlim')],
+    ['🚀', L('prk_boost'),     pfb>0?L('prk_boost_lim').replace('{n}',pfb):L('prk_boost_none')],
+    ['✅', L('prk_badge'),     L('prk_badge_d')],
+    ['📊', L('prk_analytics'), L('prk_analytics_d')],
+    ['🤖', L('prk_reels'),     frl>0?L('prk_reels_lim').replace('{n}',frl):L('prk_reels_only')],
+    ['⏰', L('prk_sched'),     fsl>0?L('prk_sched_lim').replace('{n}',fsl):L('prk_sched_only')],
+    ['🔝', L('prk_rank'),      L('prk_rank_d')],
+    ['📑', L('prk_excel'),     L('prk_excel_d')],
+  ];
+  const price=money(m.subscription_price||0), days=m.subscription_days||30;
+  const head = pro.active
+    ? `<div class="cosec" style="background:var(--accent-soft);text-align:center"><b style="color:var(--accent)">⭐ ${L('pro_active')}</b>${pro.until?` · ${fmtDate(pro.until)}`:''}</div>`
+    : `<div style="font-size:13px;color:var(--hint);text-align:center;padding:2px 4px 6px">${L('pro_info_intro')}</div>`;
+  const list = perks.map(p=>`<div class="cosec" style="display:flex;gap:11px;align-items:flex-start;margin:0 0 8px">
+      <div style="font-size:20px;flex:0 0 auto">${p[0]}</div>
+      <div style="min-width:0"><div style="font-weight:700;font-size:14px">${esc(p[1])}</div>
+        <div style="font-size:12.5px;color:var(--hint);margin-top:2px;line-height:1.45">${esc(p[2])}</div></div>
+    </div>`).join('');
+  const footer = pro.active ? '' :
+    `<div class="cobar"><button id="proBuyBtn" style="display:flex;flex-direction:column;line-height:1.25">
+      <span>${L('pro_buy_btn')}</span><span style="font-size:12px;opacity:.92;font-weight:600">${price} / ${days} ${L('pro_days')}</span></button></div>`;
+  document.getElementById('proinfoBody').innerHTML=`<div class="cobody">${head}${list}
+    <div style="font-size:11.5px;color:var(--hint);text-align:center;margin-top:4px">${L('pro_info_note')}</div></div>${footer}`;
+  const bb=document.getElementById('proBuyBtn'); if(bb) bb.onclick=()=>{ closeProInfo(); subscribePro(); };
+  document.getElementById('proinfoview').classList.add('open');
+  document.getElementById('proinfoview').scrollTop=0;
+}
+function closeProInfo(){ document.getElementById('proinfoview').classList.remove('open'); }
+document.getElementById('proinfoClose').onclick=closeProInfo;
 
 // ---------- MAHSULOT FORMASI (qo'shish / tahrirlash) ----------
 function openProductForm(prod){
@@ -4260,6 +4581,12 @@ function renderProductForm(){
 // #2 — raqobatchi narx maslahati (mahsulot tahrirlanayotganda)
 function _renderPriceInsight(){
   const box=document.getElementById('priceInsight'); if(!box) return;
+  if(pf.priceInsightLocked){
+    box.innerHTML=`<div style="background:var(--accent-soft);border-radius:10px;padding:9px 11px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <span style="font-size:12px;color:var(--accent);font-weight:700">${L('pi_head')} · ${L('pro_badge')}</span>
+      <button class="oact ok" style="width:auto;padding:6px 10px;margin:0" onclick="subscribePro()">${L('pro_unlock_btn')}</button></div>`;
+    return;
+  }
   const d=pf.priceInsight; if(!d || !d.available){ box.innerHTML=''; return; }
   let msg, color;
   if(d.verdict==='expensive'){ msg=L('pi_expensive').replace('{d}', Math.abs(d.diff_pct)); color='var(--sale)'; }
@@ -4271,8 +4598,8 @@ function _renderPriceInsight(){
     <div style="font-size:12px;color:${color};margin-top:4px">${esc(msg)}</div></div>`;
 }
 async function loadPriceInsight(id){
-  try{ pf.priceInsight = await api('/api/seller/product/'+id+'/price-insight'); _renderPriceInsight(); }
-  catch(e){}
+  try{ pf.priceInsight = await api('/api/seller/product/'+id+'/price-insight'); pf.priceInsightLocked=false; _renderPriceInsight(); }
+  catch(e){ if((e.message||'')==='pro_required'){ pf.priceInsightLocked=true; _renderPriceInsight(); } }
 }
 
 async function onPhotoPick(e){
@@ -4465,7 +4792,7 @@ async function adSchedule(){
   try{
     await apiSend('/api/seller/product/'+adState.pid+'/schedule','POST',{scheduled_at:iso, caption:adState.caption});
     closeAdView(); tg.showAlert(L('sp_ad_scheduled'));
-  }catch(e){ const m=(e.message||e); tg.showAlert(L('sp_ad_failed')+(m==='time_in_past'?L('sp_ad_past'):m)); }
+  }catch(e){ const m=(e.message||e); tg.showAlert(L('sp_ad_failed')+(m==='time_in_past'?L('sp_ad_past'):(m==='pro_required'?L('pro_feature_locked'):m))); }
 }
 async function adAutorep(){
   const hour=Number(document.getElementById('adRepHour').value);
@@ -4510,17 +4837,27 @@ function openReelsView(pid){
   loadReelsScript();
 }
 async function loadReelsScript(){
-  reelsState.loading = true; renderReelsView();
+  reelsState.loading = true; reelsState.locked = false; renderReelsView();
   try{
     const d = await api('/api/seller/product/'+reelsState.pid+'/reels');
     reelsState.script = d.script || '';
-  }catch(e){ reelsState.script=''; tg.showAlert(L('reels_failed')+(e.message||e)); }
+  }catch(e){
+    reelsState.script='';
+    if((e.message||'')==='pro_required'){ reelsState.locked = true; }
+    else tg.showAlert(L('reels_failed')+(e.message||e));
+  }
   reelsState.loading = false; renderReelsView();
 }
 function renderReelsView(){
   const body = document.getElementById('reelsBody');
   if(reelsState.loading){
     body.innerHTML = `<div class="loading" style="padding:40px;text-align:center">⏳ ${L('reels_loading')}</div>`;
+    return;
+  }
+  if(reelsState.locked){
+    body.innerHTML = `<div class="cobody"><div class="cosec" style="text-align:center">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 2px 12px">${L('pro_reels_lock')}</div>
+      <button class="oact ok full" onclick="subscribePro()">${L('pro_unlock_btn')}</button></div></div>`;
     return;
   }
   body.innerHTML = `<div class="cobody">
@@ -4554,16 +4891,26 @@ function openDynPriceView(pid){
   loadDynPrice();
 }
 async function loadDynPrice(){
-  dynpState.loading = true; renderDynPriceView();
+  dynpState.loading = true; dynpState.locked = false; renderDynPriceView();
   try{
     dynpState.data = await api('/api/seller/product/'+dynpState.pid+'/dynamic-price');
-  }catch(e){ dynpState.data=null; tg.showAlert(L('dynp_failed')+(e.message||e)); }
+  }catch(e){
+    dynpState.data=null;
+    if((e.message||'')==='pro_required'){ dynpState.locked = true; }
+    else tg.showAlert(L('dynp_failed')+(e.message||e));
+  }
   dynpState.loading = false; renderDynPriceView();
 }
 function renderDynPriceView(){
   const body = document.getElementById('dynpriceBody');
   if(dynpState.loading){
     body.innerHTML = `<div class="loading" style="padding:40px;text-align:center">⏳ ${L('dynp_loading')}</div>`;
+    return;
+  }
+  if(dynpState.locked){
+    body.innerHTML = `<div class="cobody"><div class="cosec" style="text-align:center">
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 2px 12px">${L('pro_feature_locked')}</div>
+      <button class="oact ok full" onclick="subscribePro()">${L('pro_unlock_btn')}</button></div></div>`;
     return;
   }
   const d = dynpState.data;
@@ -4706,7 +5053,7 @@ let admSeg='stats', admUsersOffset=0, admUsersList=[], DISP_ID=null;
 
 function loadAdmin(){
   const v=document.getElementById('viewAdmin');
-  const segs=[['stats','adm_stats'],['analytics','adm_analytics'],['sentiment','adm_sentiment'],['financial','adm_financial'],['moderation','adm_moderation'],['fraud','adm_fraud'],['requests','adm_requests'],['disputes','adm_disputes'],
+  const segs=[['support','adm_support'],['stats','adm_stats'],['analytics','adm_analytics'],['sentiment','adm_sentiment'],['financial','adm_financial'],['moderation','adm_moderation'],['fraud','adm_fraud'],['requests','adm_requests'],['disputes','adm_disputes'],
               ['users','adm_users'],['shops','adm_shops'],['channels','adm_channels'],
               ['orders','adm_orders'],['products','adm_products'],['deleted','adm_deleted'],
               ['audit','adm_audit'],['broadcast','adm_broadcast'],
@@ -4719,7 +5066,7 @@ function loadAdmin(){
             shops:admShops,channels:admChannels,orders:admOrders,products:admProducts,
             deleted:admDeleted,audit:admAudit,broadcast:admBroadcast,
             admins:admAdmins,monetization:admMonetization,payments:admPayments,moderation:admModeration,fraud:admFraud,
-            analytics:admAnalytics,financial:admFinancial,sentiment:admSentiment,settings:admSettings}[admSeg];
+            analytics:admAnalytics,financial:admFinancial,sentiment:admSentiment,settings:admSettings,support:openAdminSupport}[admSeg];
   if(fn) fn();
 }
 
@@ -5160,6 +5507,9 @@ function renderMon(cfg){
     ${cfg.mon_subscription_enabled?_monNum(L('mon_sub_price'),'mon_subscription_price',cfg.mon_subscription_price):''}
     ${cfg.mon_subscription_enabled?_monNum(L('mon_sub_days'),'mon_subscription_days',cfg.mon_subscription_days):''}
     ${cfg.mon_subscription_enabled?_monNum(L('mon_free_limit'),'mon_free_product_limit',cfg.mon_free_product_limit):''}
+    ${cfg.mon_subscription_enabled?_monNum(L('mon_pro_free_boosts'),'mon_pro_free_boosts',cfg.mon_pro_free_boosts):''}
+    ${cfg.mon_subscription_enabled?_monNum(L('mon_free_reels'),'mon_free_reels_limit',cfg.mon_free_reels_limit):''}
+    ${cfg.mon_subscription_enabled?_monNum(L('mon_free_scheduled'),'mon_free_scheduled_limit',cfg.mon_free_scheduled_limit):''}
     ${_monRow(L('mon_pay_click'),'mon_pay_click_enabled',cfg.mon_pay_click_enabled,L('mon_pay_hint'))}
     ${_monRow(L('mon_pay_payme'),'mon_pay_payme_enabled',cfg.mon_pay_payme_enabled)}
     ${_monRow(L('mon_pay_paynet'),'mon_pay_paynet_enabled',cfg.mon_pay_paynet_enabled)}
@@ -5178,6 +5528,22 @@ function renderMon(cfg){
   });
 }
 
+// Foydalanuvchining Telegram SHAXSIY chatini ochadi: username bo'lsa t.me (ishonchli),
+// bo'lmasa ID bo'yicha (tg://user?id) — manzil yozmagan bo'lsa ham. Telefon esa alohida
+// tel: tugma sifatida (har doim ishonchli zaxira, ro'yxatda telefon majburiy).
+function openTgUser(username, tgid){
+  username=(username||'').trim();
+  if(username){   // username bor → to'g'ridan-to'g'ri t.me (ishonchli)
+    try{ tg.openTelegramLink('https://t.me/'+username); return; }catch(e){}
+    try{ window.open('https://t.me/'+username,'_blank'); return; }catch(e){}
+  }
+  if(tgid && BOT_USERNAME){   // username yo'q → BOT deep-link: bot bosiladigan mention yuboradi
+    try{ tg.openTelegramLink('https://t.me/'+BOT_USERNAME+'?start=contact_'+tgid); return; }catch(e){}
+  }
+  if(tgid){ try{ window.open('tg://user?id='+tgid,'_blank'); return; }catch(e){} }   // oxirgi chora
+  tg.showAlert(L('adm_no_contact'));
+}
+
 // Admin TO'LOVLARNI TASDIQLASH: provayder ulanmaganda sotuvchining boost/Pro to'lovi
 // "kutilmoqda"da qoladi → admin shu yerda qo'lda tasdiqlaydi (dev-confirm).
 let admPayState='pending';
@@ -5193,10 +5559,16 @@ async function admPayments(){
       const purpose=L('pay_purpose_'+(p.purpose||''))||esc(p.purpose||'—');
       const who=esc(p.shop_name||p.user_name||('#'+p.user_id));
       const un=p.telegram_username?(' · @'+esc(String(p.telegram_username).replace('@',''))):'';
+      const unraw=p.telegram_username?String(p.telegram_username).replace('@',''):'';
+      const contactBtns=`<div class="drow" style="margin-top:8px;gap:8px">
+        <button class="oact ok" data-tgun="${esc(unraw)}" data-tgid="${esc(String(p.telegram_id||''))}" style="flex:1;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('adm_contact_tg')}</button>
+        ${p.phone_number?`<a class="oact ok" href="tel:${esc(p.phone_number)}" style="flex:1;text-align:center;text-decoration:none;display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent);box-shadow:none">📞 ${esc(p.phone_number)}</a>`:''}
+      </div>`;
       return `<div class="ocard">
         <div class="orow1"><span class="oname" style="font-size:14px">${purpose}</span><span style="font-weight:600">${money(p.amount)}</span></div>
         <div class="ometa">🏪 ${who}${un}</div>
         <div class="ometa" style="font-size:12px">🗓 ${fmtDate(p.paid_at||p.created_at)}${p.provider?' · '+esc(p.provider):''}</div>
+        ${contactBtns}
         ${p.state==='pending'?`<div class="drow" style="margin-top:8px;gap:8px">
           <button class="oact ok" data-payok="${p.id}" data-amt="${esc(money(p.amount))}" style="flex:1">${L('adm_pay_confirm')}</button>
           <button class="oact no" data-payno="${p.id}" style="flex:1;background:#fdebef;color:var(--sale)">${L('adm_pay_reject')}</button>
@@ -5206,6 +5578,7 @@ async function admPayments(){
     }).join('')+`</div>` : admEmpty(L('adm_pay_none'));
     b.innerHTML=`<div>${tabHtml}${cards}</div>`;
     b.querySelectorAll('[data-paytab]').forEach(c=>c.onclick=()=>{ admPayState=c.dataset.paytab; admPayments(); });
+    b.querySelectorAll('[data-tgid]').forEach(btn=>btn.onclick=()=>openTgUser(btn.dataset.tgun, btn.dataset.tgid));
     b.querySelectorAll('[data-payok]').forEach(btn=>btn.onclick=()=>{
       const id=btn.dataset.payok;
       const go=async()=>{ try{ await apiSend('/api/pay/dev-confirm/'+id,'POST',{});
@@ -5441,7 +5814,7 @@ function admBroadcast(){
 document.getElementById('bcastClose').onclick=()=>document.getElementById('bcastview').classList.remove('open');
 
 applyStaticI18n();
-loadMe();
+loadMe().then(restoreModeOnBoot);
 loadCategories();
 loadProducts();
 loadPending();   // #23 — kutilayotgan ishlar eslatmasi

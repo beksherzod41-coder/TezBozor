@@ -1272,6 +1272,23 @@ _TEXTS = {
                "Рефералы: {refs}\n"
                "Дата регистрации: {date}"),
     },
+    # #16 SODIQLIK — botda ham (app bilan bir xil ball/daraja). Profil oxiriga qo'shiladi.
+    'loyalty_profile': {
+        'uz': "\n\n{emoji} Sodiqlik darajasi: {tier} · {points} ball\n{next}",
+        'ru': "\n\n{emoji} Уровень лояльности: {tier} · {points} баллов\n{next}",
+    },
+    'loyalty_to_next': {
+        'uz': "🎯 Keyingi darajagacha: {n} ball → {tier}",
+        'ru': "🎯 До следующего уровня: {n} баллов → {tier}",
+    },
+    'loyalty_max': {
+        'uz': "🎉 Eng yuqori daraja!",
+        'ru': "🎉 Высший уровень!",
+    },
+    'loy_bronze': {'uz': "Bronza", 'ru': "Бронза"},
+    'loy_silver': {'uz': "Kumush", 'ru': "Серебро"},
+    'loy_gold':   {'uz': "Oltin", 'ru': "Золото"},
+    'loy_diamond': {'uz': "Olmos", 'ru': "Алмаз"},
     'referral_link_title': {
         'uz': ("🔗 <b>Mening taklif havolam</b>\n\n"
                "Havola (bosing va nusxalang):\n"
@@ -2360,6 +2377,24 @@ _TEXTS = {
                "💰 Общий доход: <b>{total_revenue}</b>"),
     },
     'btn_detailed_excel': {'uz': "📥 Batafsil hisobot (Excel)", 'ru': "📥 Подробный отчёт (Excel)"},
+    'pro_locked_bot': {
+        'uz': ("⭐ Bu <b>Pro</b> imkoniyat.\n\nKengaytirilgan hisobot, Excel yuklab olish, "
+               "chuqur tahlil va boshqa imkoniyatlar Pro obunada ochiladi. "
+               "Pro obunani ilovadan rasmiylashtiring:"),
+        'ru': ("⭐ Это возможность <b>Pro</b>.\n\nРасширенный отчёт, выгрузка в Excel, "
+               "глубокая аналитика и другие функции доступны в Pro-подписке. "
+               "Оформите Pro в приложении:"),
+    },
+    'pro_locked_limit_bot': {
+        'uz': ("⭐ Bepul rejada limitingizga yetdingiz.\n\nCheksiz qo'shish uchun "
+               "<b>Pro</b> obunani ilovadan rasmiylashtiring:"),
+        'ru': ("⭐ Достигнут лимит бесплатного тарифа.\n\nДля безлимита оформите "
+               "<b>Pro</b>-подписку в приложении:"),
+    },
+    'pro_open_app': {'uz': "⭐ Ilovada Pro olish", 'ru': "⭐ Оформить Pro в приложении"},
+    'contact_admin_only': {'uz': "Bu havola faqat admin uchun.", 'ru': "Эта ссылка только для админа."},
+    'contact_user_not_found': {'uz': "Foydalanuvchi topilmadi.", 'ru': "Пользователь не найден."},
+    'contact_open_chat': {'uz': "Shaxsiy chatni ochish", 'ru': "Открыть личный чат"},
 
     # --- EXCEL EKSPORT (chat xabarlari) ---
     'excel_preparing': {'uz': "⏳ Excel tayyorlanmoqda...", 'ru': "⏳ Готовится Excel..."},

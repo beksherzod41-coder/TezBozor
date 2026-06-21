@@ -1287,6 +1287,86 @@ async def generate_review_reply(*, product, comment, shop_rating=None,
 
 
 # ============================================================
+# MUROJAATGA ADMIN JAVOBI (support) — AI suhbatni O'QIB javob tuzadi
+# ============================================================
+_SUPPORT_REPLY_SYSTEM = {
+    'uz': (
+        "Sen — TezBozor marketplace qo'llab-quvvatlash (support) xizmatining admin yordamchisisan. "
+        "Quyidagi suhbatni DIQQAT bilan o'qib, foydalanuvchining ANIQ savoli/muammosiga to'g'ridan-to'g'ri, "
+        "foydali va aniq javob yoz. Qoidalar:\n"
+        "• Shablon javob YOZMA — aynan shu savolga, suhbat mazmuniga qarab javob ber.\n"
+        "• Muammoni hal qilishga qaratilgan amaliy qadamlar yoki aniq tushuntirish ber.\n"
+        "• Ma'lumot yetishmasa — foydalanuvchidan kerakli aniqlik (masalan buyurtma raqami)ni xushmuomalalik bilan so'ra.\n"
+        "• Iliq, hurmatli, qisqa ohang. 1 emoji mumkin. HTML/markdown/hashtag ISHLATMA.\n"
+        "• Faqat javob matnini qaytar, izohsiz. 600 belgidan oshmasin."
+    ),
+    'ru': (
+        "Ты — помощник администратора службы поддержки маркетплейса TezBozor. "
+        "Внимательно прочитай переписку и напиши прямой, полезный и конкретный ответ на КОНКРЕТНЫЙ "
+        "вопрос/проблему пользователя. Правила:\n"
+        "• НЕ пиши шаблонный ответ — отвечай именно на этот вопрос, по сути переписки.\n"
+        "• Дай практические шаги решения или чёткое объяснение.\n"
+        "• Если данных не хватает — вежливо уточни нужное (например номер заказа).\n"
+        "• Тёплый, уважительный, краткий тон. Можно 1 эмодзи. БЕЗ HTML/markdown/хештегов.\n"
+        "• Верни только текст ответа, без пояснений. Не более 600 символов."
+    ),
+}
+
+
+async def generate_support_reply(*, reason_label="", messages=None, lang="uz") -> str:
+    """Murojaat suhbatini (foydalanuvchi↔admin) O'QIB, foydalanuvchining oxirgi savoliga
+    mos admin javobini tuzadi. Shablon emas — kontekstga qarab. Xato/o'chiq bo'lsa None."""
+    if not is_enabled():
+        return None
+    lang = lang if lang in ('uz', 'ru') else 'uz'
+    messages = messages or []
+    # Suhbat transkripti — kim yozgani aniq ko'rsatiladi
+    you = "Foydalanuvchi" if lang == 'uz' else "Пользователь"
+    adm = "Admin" if lang == 'uz' else "Админ"
+    lines = []
+    for m in messages[-12:]:
+        who = adm if (m.get("sender_role") == "admin") else you
+        txt = (m.get("text") or "").strip()
+        if txt:
+            lines.append(f"{who}: {txt}")
+    if not lines:
+        return None
+    hdr = (f"Murojaat sababi: {reason_label}\n" if reason_label else "")
+    convo = ("Suhbat:\n" if lang == 'uz' else "Переписка:\n") + "\n".join(lines)
+    user_msg = hdr + convo
+
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _SUPPORT_REPLY_SYSTEM[lang]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 400,
+        "temperature": 0.7,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Support javobi API xatosi {resp.status_code}")
+                return None
+            data = resp.json()
+            text = (data["choices"][0]["message"].get("content") or "").strip()
+            if not text:
+                return None
+            text = _strip_hashtags(text)
+            if len(text) > 600:
+                text = text[:600].rstrip()
+            return text or None
+    except Exception as e:
+        log.warning(f"Support javobi yaratishda xato: {e}")
+        return None
+
+
+# ============================================================
 # PROFILNI TO'LDIRISHGA ILTIMOS (admin → foydalanuvchi)
 # ============================================================
 _PROFILE_FILL_SYSTEM = {

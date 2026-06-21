@@ -91,6 +91,12 @@ def _rows(result):
         d = dict(r)
         for k in _SECRET_PRODUCT_FIELDS:
             d.pop(k, None)
+        # #18 Pro nishon — xom pro_until vaqtini bool'ga aylantiramiz (mahsulot kartasi:
+        # seller_pro_until; do'kon kartasi: pro_until). Frontend faqat bool ko'radi.
+        if "seller_pro_until" in d:
+            d["seller_is_pro"] = _pro_until_active(d.pop("seller_pro_until"))
+        if "pro_until" in d:
+            d["is_pro"] = _pro_until_active(d.pop("pro_until"))
         out.append(d)
     return out
 
@@ -433,28 +439,271 @@ async def api_ai(body: AiAsk, authorization: str = Header(None)):
     return {"text": res.get("text"), "products": _rows(res.get("products") or []) or None}
 
 
+# ============================================================
+# UNIVERSAL XABARNOMA + MUROJAAT (support) tizimi
+# Foydalanuvchiga kelgan HAR qanday xabar → `notifications` (app top banner) + bir
+# martalik Telegram push. Murojaat = 2 tomonlama suhbat (foydalanuvchi↔admin).
+# ============================================================
+def _notify_db(user_id, kind, title, body="", ref_id=None):
+    """Faqat app-banner xabarnomasi (Telegram push'i mavjud nuqtalarда qo'shimcha — bot
+    o'zi push yuboradi). title/body string YOKI (uz, ru) tuple bo'lishi mumkin — tuple bo'lsa
+    qabul qiluvchi tilida saqlanadi. Sync; xatoda jim o'tadi (asosiy oqimni buzmaydi)."""
+    if not user_id:
+        return
+    try:
+        ru = False
+        if isinstance(title, tuple) or isinstance(body, tuple):
+            u = db.get_user_by_id(user_id)
+            ru = (get_user_lang(u) == "ru") if u else False
+        t = (title[1] if ru else title[0]) if isinstance(title, tuple) else title
+        b = (body[1] if ru else body[0]) if isinstance(body, tuple) else body
+        db.create_notification(user_id, kind, t, b, ref_id)
+    except Exception as e:
+        logging.warning(f"notif_db xato (user {user_id}): {e}")
+
+
+async def _notify_user(user_id, title, body, kind="info", ref_id=None, push=True):
+    """Foydalanuvchiga xabarnoma: DB'ga yozadi (app banner) + Telegram push (bir marta)."""
+    if not user_id:
+        return
+    try:
+        db.create_notification(user_id, kind, title, body, ref_id)
+    except Exception as e:
+        logging.warning(f"notif yozish xato (user {user_id}): {e}")
+    if not push:
+        return
+    try:
+        u = db.get_user_by_id(user_id)
+        tg = dict(u).get("telegram_id") if u else None
+        if tg:
+            text = f"<b>{html.escape(title or '')}</b>"
+            if body:
+                text += f"\n{html.escape(body)}"
+            await _tg_call("sendMessage", {"chat_id": tg, "text": text, "parse_mode": "HTML"})
+    except Exception as e:
+        logging.warning(f"notif push xato (user {user_id}): {e}")
+
+
+# Sotuvchi Pro/Boost "sotib olish" tugmasini bosganda — unga yuboriladigan TASDIQ
+# (real pul shu yerda ko'chmaydi; admin keyin to'lov bo'yicha qo'lda bog'lanadi).
+_PURCHASE_PENDING = {
+    "boost": {
+        "uz": ("🚀 Boost so'rovingiz qabul qilindi",
+               "To'lov masalasida admin tez orada siz bilan bog'lanadi."),
+        "ru": ("🚀 Запрос на продвижение принят",
+               "Администратор скоро свяжется с вами по оплате."),
+    },
+    "subscription": {
+        "uz": ("⭐ Pro obuna so'rovingiz qabul qilindi",
+               "To'lov masalasida admin tez orada siz bilan bog'lanadi."),
+        "ru": ("⭐ Запрос на Pro-подписку принят",
+               "Администратор скоро свяжется с вами по оплате."),
+    },
+}
+
+
+async def _notify_purchaser_pending(user, kind, ref_id=None):
+    """Pro/Boost sotib olish boshlanganda sotuvchiga 'so'rov qabul qilindi, admin to'lov
+    bo'yicha bog'lanadi' tasdig'i (app banner + Telegram push). Xatoda jim o'tadi."""
+    msg = _PURCHASE_PENDING.get(kind)
+    if not msg:
+        return
+    try:
+        lang = get_user_lang(user) or DEFAULT_LANG
+        title, body = msg.get(lang) or msg["uz"]
+        await _notify_user(user["id"], title, body, kind="payment", ref_id=ref_id)
+    except Exception as e:
+        logging.warning(f"purchaser pending notify xato (user {user.get('id')}): {e}")
+
+
+def _admin_user_ids():
+    """Barcha admin foydalanuvchi id'lari (role='admin' + asosiy ADMIN_ID)."""
+    ids = set()
+    try:
+        for a in db.get_all_users(role="admin"):
+            ids.add(a["id"])
+    except Exception:
+        pass
+    if ADMIN_ID:
+        try:
+            au = db.get_user_by_telegram_id(ADMIN_ID)
+            if au:
+                ids.add(dict(au)["id"])
+        except Exception:
+            pass
+    return ids
+
+
+async def _notify_admins(title, body, kind="info", ref_id=None):
+    for aid in _admin_user_ids():
+        await _notify_user(aid, title, body, kind, ref_id)
+
+
+def _notify_admins_db(kind, title, body="", ref_id=None):
+    """Faqat app-banner barcha adminларга (Telegram push'i alohida yuborilgan nuqtalarда)."""
+    for aid in _admin_user_ids():
+        _notify_db(aid, kind, title, body, ref_id)
+
+
+def _has_text_content(s):
+    """Matnда kamida 2 ta harf/raqam bormi (faqat belgi/emoji bo'lsa False).
+    isalnum lotin va kirill (o'zbekcha) harflarni ham, raqamlarni ham qabul qiladi."""
+    return sum(1 for c in (s or "") if c.isalnum()) >= 2
+
+
+# Murojaat sabablari (kalit + UZ/RU). Frontend ham shu kalitlardan foydalanadi.
+SUPPORT_REASONS = {
+    "order":      {"uz": "Buyurtma muammosi",        "ru": "Проблема с заказом"},
+    "payment":    {"uz": "To'lov muammosi",          "ru": "Проблема с оплатой"},
+    "seller":     {"uz": "Sotuvchi ustidan shikoyat", "ru": "Жалоба на продавца"},
+    "product":    {"uz": "Mahsulot/e'lon muammosi",   "ru": "Проблема с товаром"},
+    "account":    {"uz": "Akkaunt/sozlama",           "ru": "Аккаунт/настройки"},
+    "suggestion": {"uz": "Taklif/fikr",               "ru": "Предложение/отзыв"},
+    "other":      {"uz": "Boshqa",                    "ru": "Другое"},
+}
+
+
 class ContactIn(BaseModel):
     text: str
+    reason: Optional[str] = None
 
 
 @app.post("/api/contact-admin")
 async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
+    """Murojaat ochadi (support_thread + birinchi xabar) → adminlarga banner+push.
+    Sabab MAJBURIY; matn faqat harf/raqamli bo'lishi shart (belgi/emoji-only rad)."""
     user = dict(_buyer_from_auth(authorization))
     _rate_limit("contact", user.get("id"), 5, 600)
+    if body.reason not in SUPPORT_REASONS:
+        raise HTTPException(status_code=400, detail="reason_required")
     text = (body.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="empty")
     if len(text) > 2000:
         raise HTTPException(status_code=400, detail="too_long")
-    if not ADMIN_ID:
-        raise HTTPException(status_code=503, detail="no_admin")
-    uname = user.get("telegram_username")
-    contact = f"@{uname}" if uname else (user.get("phone_number") or "")
-    msg = (f"📩 Foydalanuvchi murojaati (Mini App)\n"
-           f"👤 {html.escape(user.get('name') or '')} {html.escape(contact)}\n"
-           f"🆔 {user.get('telegram_id')}\n\n{html.escape(text)}")
-    await _tg_call("sendMessage", {"chat_id": ADMIN_ID, "text": msg, "parse_mode": "HTML"})
+    if not _has_text_content(text):
+        raise HTTPException(status_code=400, detail="bad_text")
+    reason = body.reason
+    tid = db.create_support_thread(user["id"], reason, text)
+    rlabel = SUPPORT_REASONS[reason]["uz"]
+    await _notify_admins(f"📩 Yangi murojaat — {rlabel}",
+                         f"{user.get('name') or ''}: {text[:120]}", kind="support", ref_id=tid)
+    return {"ok": True, "thread_id": tid}
+
+
+@app.get("/api/support/reasons")
+def api_support_reasons(authorization: str = Header(None)):
+    require_auth(authorization)
+    return {"reasons": [{"key": k, "uz": v["uz"], "ru": v["ru"]} for k, v in SUPPORT_REASONS.items()]}
+
+
+@app.get("/api/my/notifications")
+def api_my_notifications(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    return {"items": db.get_user_notifications(user["id"]),
+            "unread": db.count_unread_notifications(user["id"])}
+
+
+@app.post("/api/my/notifications/{notif_id}/read")
+def api_notif_read(notif_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    db.mark_notification_read(notif_id, user["id"])
+    return {"ok": True, "unread": db.count_unread_notifications(user["id"])}
+
+
+@app.post("/api/my/notifications/read-all")
+def api_notif_read_all(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    db.mark_all_notifications_read(user["id"])
     return {"ok": True}
+
+
+def _support_access_or_403(user, thread):
+    """Murojaatga kirish: egasi yoki admin. is_admin qaytaradi."""
+    if not thread:
+        raise HTTPException(status_code=404, detail="not_found")
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    if not is_admin and thread["user_id"] != user["id"]:
+        raise HTTPException(status_code=403, detail="not_allowed")
+    return is_admin
+
+
+@app.get("/api/support/threads")
+def api_support_threads(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    is_admin = user.get("role") == "admin" or user.get("telegram_id") == ADMIN_ID
+    threads = db.list_support_threads(None if is_admin else user["id"])
+    return {"threads": threads, "is_admin": is_admin,
+            "open_count": (db.count_open_support() if is_admin else None)}
+
+
+@app.get("/api/support/thread/{thread_id}")
+def api_support_thread(thread_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    thread = db.get_support_thread(thread_id)
+    _support_access_or_403(user, thread)
+    return {"thread": thread, "messages": db.get_support_messages(thread_id),
+            "reason_label": SUPPORT_REASONS.get(thread.get("reason") or "other", {})}
+
+
+class SupportMsgIn(BaseModel):
+    text: str
+
+
+@app.post("/api/support/thread/{thread_id}/message")
+async def api_support_message(thread_id: int, body: SupportMsgIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    thread = db.get_support_thread(thread_id)
+    is_admin = _support_access_or_403(user, thread)
+    text = (body.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(text) > 2000:
+        raise HTTPException(status_code=400, detail="too_long")
+    if not _has_text_content(text):
+        raise HTTPException(status_code=400, detail="bad_text")
+    _rate_limit("support_msg", user["id"], 20, 600)
+    db.add_support_message(thread_id, "admin" if is_admin else "user", user["id"], text)
+    if is_admin:
+        await _notify_user(thread["user_id"], "📩 Admin javob berdi", text[:120],
+                           kind="support", ref_id=thread_id)
+    else:
+        await _notify_admins("📩 Murojaatга javob", f"{user.get('name') or ''}: {text[:120]}",
+                             kind="support", ref_id=thread_id)
+    return {"ok": True}
+
+
+@app.post("/api/support/thread/{thread_id}/close")
+def api_support_close(thread_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    thread = db.get_support_thread(thread_id)
+    is_admin = _support_access_or_403(user, thread)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="admin_only")
+    db.set_support_status(thread_id, "closed")
+    return {"ok": True}
+
+
+@app.post("/api/support/thread/{thread_id}/ai-reply")
+async def api_support_ai_reply(thread_id: int, authorization: str = Header(None)):
+    """ADMIN uchun: AI suhbatni O'QIB, foydalanuvchi savoliga mos javob TAKLIF qiladi
+    (yubormaydi — admin ko'rib, tahrirlab yoki qayta generatsiya qilib o'zi yuboradi)."""
+    user = dict(_buyer_from_auth(authorization))
+    thread = db.get_support_thread(thread_id)
+    is_admin = _support_access_or_403(user, thread)
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="admin_only")
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    _rate_limit("support_ai", user["id"], 30, 600)
+    msgs = db.get_support_messages(thread_id)
+    rlabel = SUPPORT_REASONS.get(thread.get("reason") or "other", {}).get("uz", "")
+    lang = get_user_lang(user) or DEFAULT_LANG
+    reply = await ai_assistant.generate_support_reply(
+        reason_label=rlabel, messages=msgs, lang=lang)
+    if not reply:
+        raise HTTPException(status_code=502, detail="ai_error")
+    return {"reply": reply}
 
 
 class BecomeSellerIn(BaseModel):
@@ -591,6 +840,7 @@ def api_product_detail(product_id: int, authorization: str = Header(None)):
     if not product:
         raise HTTPException(status_code=404, detail="not found")
     product = dict(product)
+    product["seller_is_pro"] = _is_pro(product.get("seller_id"))   # #18 Pro nishon (do'kon)
     product["images"] = db.get_product_images(product_id)  # file_id ro'yxati
     # #19 — hudud yorlig'i (kanal e'loni pariteti: app'da ham "Viloyat → Tuman" ko'rinsin)
     product["region_label"] = db.get_region_label(product.get("seller_region_id")) or ""
@@ -694,6 +944,10 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
     deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
     db.set_order_deadline(order_id, deadline)
     db.mark_order_notify_pending(order_id)
+    # App-banner: sotuvchiga yangi buyurtma (bot Telegram push'ini fon-job yuboradi)
+    pname = product.get("name") or ""
+    _notify_db(product["seller_id"], "order", ("🛒 Yangi buyurtma", "🛒 Новый заказ"),
+               (f"{pname} · {order.quantity} dona", f"{pname} · {order.quantity} шт"), ref_id=order_id)
     return {"ok": True, "order_id": order_id, "total": total}
 
 
@@ -1046,9 +1300,13 @@ async def api_review(order_id: int, body: ReviewIn, authorization: str = Header(
     comment = (body.comment or "").strip() or None
     db.create_review(order_id, order["seller_id"], user["id"], sr, comment,
                      order.get("product_id"), pr)
+    stars = "⭐" * sr
+    pname = order.get("product_name") or ""
+    _notify_db(order["seller_id"], "review", ("⭐ Yangi baho", "⭐ Новая оценка"),
+               (f"{stars} {pname}" + (f" · {comment}" if comment else ""),
+                f"{stars} {pname}" + (f" · {comment}" if comment else "")), ref_id=order_id)
     try:
         if order.get("seller_tg"):
-            stars = "⭐" * sr
             txt = f"{stars} {fmt_order_id(order_id)} — yangi baho"
             if comment:
                 txt += f"\n💬 {html.escape(comment)}"
@@ -1084,6 +1342,10 @@ async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
                 "text": t(slang, "order_cancelled_notify", oid=fmt_order_id(order_id),
                           pname=html.escape(order.get("product_name") or "")),
                 "parse_mode": "HTML"})
+        # App-banner: sotuvchiga "xaridor bekor qildi"
+        pn = order.get("product_name") or ""
+        _notify_db(order["seller_id"], "order", ("❌ Xaridor buyurtmani bekor qildi", "❌ Покупатель отменил заказ"),
+                   (pn, pn), ref_id=order_id)
         cid = order.get("notify_chat_id")
         mid = order.get("notify_message_id")
         if cid and mid:
@@ -1346,6 +1608,9 @@ async def api_cancel_respond(order_id: int, body: CancelRespondIn, authorization
         return {"ok": True, "cancelled": True}
     # rad — admin hakamligiga
     db.dispute_order_cancel(order_id)
+    _pn = order.get("product_name") or ""
+    _notify_admins_db("dispute", ("⚖️ Yangi nizo — hal kutyapti", "⚖️ Новый спор — ждёт решения"),
+                      (_pn, _pn), ref_id=order_id)
     if order.get("seller_tg"):
         await _tg_call("sendMessage", {"chat_id": order["seller_tg"],
                        "text": t(slang, "cancel_denied_notify", oid=oid, pname=pname),
@@ -1408,6 +1673,10 @@ async def api_confirm_pickup(order_id: int, authorization: str = Header(None)):
     return {"ok": True}
 
 
+# Yakunlangan buyurtmalar — suhbat yopiq (yangi xabar yo'q, faqat tarix ko'rinadi).
+_CHAT_CLOSED_STATUSES = ("delivered", "cancelled")
+
+
 @app.get("/api/order/{order_id}/messages")
 def api_order_messages(order_id: int, authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
@@ -1420,7 +1689,10 @@ def api_order_messages(order_id: int, authorization: str = Header(None)):
         cp = order.get("courier_name") or order.get("shop_name")
     else:
         cp = order.get("buyer_name")
+    # Buyurtma yakunlangach (yetkazildi/bekor) suhbat YOPIQ — yangi xabar yozib bo'lmaydi
+    # (tarix ko'rinadi). Bu "chat ochiq qoldi" muammosini yopadi.
     return {"me": user["id"], "counterparty": cp or "—",
+            "closed": order.get("status") in _CHAT_CLOSED_STATUSES,
             "messages": _rows(db.get_messages_by_order(order_id))}
 
 
@@ -1440,6 +1712,9 @@ async def api_send_message(order_id: int, body: MsgIn, authorization: str = Head
     if not order:
         raise HTTPException(status_code=404, detail="not_found")
     _order_party_or_403(user, order)
+    # Yakunlangan buyurtmada suhbat yopiq — yangi xabar qabul qilinmaydi.
+    if order.get("status") in _CHAT_CLOSED_STATUSES:
+        raise HTTPException(status_code=409, detail="chat_closed")
 
     # #13 — yo'naltirish: xaridordan — kuryer biriktirilgan bo'lsa kuryerga, aks holda
     # sotuvchiga; kuryer/sotuvchidan — har doim xaridorga. Xabarlar bitta tred bo'lib
@@ -1461,6 +1736,10 @@ async def api_send_message(order_id: int, body: MsgIn, authorization: str = Head
         receiver_tg = order.get("buyer_tg")
         sender_role = "seller"
     db.create_message(order_id, user["id"], receiver_id, text)
+    # App-banner: qabul qiluvchiga yangi chat xabari (Telegram push'i ham quyida yuboriladi)
+    _sn = user.get("name") or ""
+    _notify_db(receiver_id, "message", ("💬 Yangi xabar", "💬 Новое сообщение"),
+               (f"{_sn}: {text[:100]}", f"{_sn}: {text[:100]}"), ref_id=order_id)
 
     # Qabul qiluvchini Telegram orqali xabardor qilamiz (uning tilida) + bot'dan javob tugmasi
     try:
@@ -1683,70 +1962,349 @@ def api_assign_courier(order_id: int, body: CourierAssign, authorization: str = 
     return {"ok": True, "courier_id": body.courier_id}
 
 
+# Excel hisobotda inglizcha enum qiymatlarni (status/yetkazish/to'lov/rol) UZ/RU'ga
+# o'giradi — hisobot ichida ingliz so'z qolmasin.
+_XL_LABELS = {
+    "status": {
+        "pending":       ("Yangi", "Новый"),
+        "confirmed":     ("Tasdiqlangan", "Подтверждён"),
+        "delivered":     ("Yetkazildi", "Доставлен"),
+        "cancelled":     ("Bekor qilindi", "Отменён"),
+        "active":        ("Sotuvda", "В продаже"),
+        "pending_owner": ("Tasdiq kutyapti", "Ждёт подтверждения"),
+        "mod_blocked":   ("Moderatsiyada", "На модерации"),
+        "scheduled":     ("Rejalashtirilgan", "Запланирован"),
+        "deleted":       ("O'chirilgan", "Удалён"),
+        "purged":        ("O'chirilgan", "Удалён"),
+        "sold":          ("Sotilgan", "Продан"),
+    },
+    "delivery": {
+        "pickup":   ("Olib ketish", "Самовывоз"),
+        "delivery": ("Yetkazib berish", "Доставка"),
+    },
+    "settlement": {
+        "paid":        ("To'liq to'landi", "Оплачено полностью"),
+        "debt":        ("Qarzga", "В долг"),
+        "installment": ("Bo'lib to'lash", "Рассрочка"),
+        "partial":     ("Qisman", "Частично"),
+    },
+    "payment": {
+        "cash":     ("Naqd", "Наличные"),
+        "terminal": ("Terminal", "Терминал"),
+        "p2p":      ("Karta (P2P)", "Карта (P2P)"),
+        "card":     ("Karta", "Карта"),
+    },
+    "role": {
+        "buyer":   ("Xaridor", "Покупатель"),
+        "seller":  ("Sotuvchi", "Продавец"),
+        "admin":   ("Administrator", "Администратор"),
+        "courier": ("Kuryer", "Курьер"),
+    },
+}
+
+
+def _xl_loc(cat, value, ru):
+    """Enum qiymatni UZ (ru=False) yoki RU (ru=True) yorlig'iga o'giradi. Noma'lum → xom."""
+    if value is None or value == "":
+        return ""
+    pair = _XL_LABELS.get(cat, {}).get(str(value))
+    if not pair:
+        return str(value)
+    return pair[1] if ru else pair[0]
+
+
+def _xl_fill_sheet(ws, report_title, headers, data_rows, money_cols=(), ru=False):
+    """Berilgan worksheet'ni Pro ko'rinishdagi hisobotga to'ldiradi: brend sarlavha +
+    meta qator + uslublangan header + zebra + chegaralar + pul formati (#,##0) + JAMI
+    (SUM) qatori + freeze panes + auto-filter + auto-kenglik. -> qatorlar soni n.
+    (Bitta workbook ichida ko'p sahifa yasash uchun ham ishlatiladi.)"""
+    import datetime as _dt
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    BRAND, BRAND_DARK, ZEBRA, META = "0E7C3A", "0A5A2A", "EAF6EE", "5A6B5E"
+    # Excel varaq nomida ruxsat etilmaydigan belgilar (: \ / ? * [ ]) — tozalanadi
+    _safe = report_title
+    for _ch in ":\\/?*[]":
+        _safe = _safe.replace(_ch, " ")
+    ws.title = (_safe.strip()[:31] or "Report")
+    ncol = max(1, len(headers))
+    thin = Side(style="thin", color="C8D6CC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    n = len(data_rows)
+    money_fmt = "#,##0"
+    mcols = set(money_cols)
+
+    # 1-qator — brend sarlavha (birlashtirilgan)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
+    tc = ws.cell(row=1, column=1, value=f"TezBozor  ·  {report_title}")
+    tc.font = Font(bold=True, size=15, color="FFFFFF")
+    tc.fill = PatternFill("solid", fgColor=BRAND)
+    tc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[1].height = 30
+    # 2-qator — meta (yaratilgan sana + qatorlar soni)
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncol)
+    gen = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    meta = (f"Сформирован: {gen}   ·   {n} записей" if ru
+            else f"Yaratilgan: {gen}   ·   {n} qator")
+    mc = ws.cell(row=2, column=1, value=meta)
+    mc.font = Font(size=10, italic=True, color=META)
+    mc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+    ws.row_dimensions[2].height = 18
+
+    # 3-qator — header
+    hrow = 3
+    for j, h in enumerate(headers, start=1):
+        c = ws.cell(row=hrow, column=j, value=h)
+        c.font = Font(bold=True, color="FFFFFF", size=11)
+        c.fill = PatternFill("solid", fgColor=BRAND_DARK)
+        c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        c.border = border
+    ws.row_dimensions[hrow].height = 26
+
+    # Ma'lumot qatorlari (zebra + pul formati)
+    r = hrow
+    for data in data_rows:
+        r += 1
+        zebra = (r - hrow) % 2 == 0
+        for j, val in enumerate(data, start=1):
+            c = ws.cell(row=r, column=j, value=val)
+            c.border = border
+            if zebra:
+                c.fill = PatternFill("solid", fgColor=ZEBRA)
+            if (j - 1) in mcols:
+                if isinstance(val, (int, float)):
+                    c.number_format = money_fmt
+                c.alignment = Alignment(horizontal="right", vertical="center")
+            else:
+                c.alignment = Alignment(horizontal="left", vertical="center")
+    last = r
+
+    # JAMI qatori (faqat pul ustunlari yig'iladi)
+    if data_rows and mcols:
+        r += 1
+        lc = ws.cell(row=r, column=1, value=("ИТОГО" if ru else "JAMI"))
+        lc.font = Font(bold=True)
+        lc.alignment = Alignment(horizontal="left", indent=1)
+        top = Side(style="medium", color=BRAND)
+        for j in range(1, ncol + 1):
+            cell = ws.cell(row=r, column=j)
+            cell.border = Border(top=top)
+            if (j - 1) in mcols:
+                col = get_column_letter(j)
+                cell.value = f"=SUM({col}{hrow+1}:{col}{last})"
+                cell.number_format = money_fmt
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="right")
+
+    ws.freeze_panes = ws.cell(row=hrow + 1, column=1)
+    ws.auto_filter.ref = f"A{hrow}:{get_column_letter(ncol)}{last}"
+    for j in range(1, ncol + 1):
+        ml = len(str(headers[j - 1]))
+        for data in data_rows:
+            v = data[j - 1] if j - 1 < len(data) else ""
+            ml = max(ml, len(str(v if v is not None else "")))
+        ws.column_dimensions[get_column_letter(j)].width = min(max(ml + 3, 10), 42)
+
+    return n
+
+
+def _xlsx_report(report_title, headers, data_rows, money_cols=(), lang="uz"):
+    """Bitta sahifali Excel hisobot -> (bytes, n). _xl_fill_sheet uslubidan foydalanadi."""
+    import io as _io
+    import openpyxl
+    wb = openpyxl.Workbook()
+    n = _xl_fill_sheet(wb.active, report_title, headers, data_rows,
+                       money_cols=money_cols, ru=(lang == "ru"))
+    buf = _io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue(), n
+
+
 def _build_seller_excel(seller_id, kind, lang):
-    """Sotuvchining buyurtmalari yoki mahsulotlarini Excel'ga yig'adi -> (bytes, fname, n)."""
+    """Sotuvchining buyurtmalari yoki mahsulotlarini Pro-Excel'ga yig'adi -> (bytes, fname, n)."""
+    import datetime as _dt
+    ru = (lang == "ru")
+    if kind == "products":
+        title = "Отчёт: Товары" if ru else "Mahsulotlar hisoboti"
+        headers = (["ID", "Товар", "Цена", "Старая цена", "Статус", "Остаток", "В продаже", "Дата"]
+                   if ru else
+                   ["ID", "Nom", "Narx", "Eski narx", "Holat", "Zahira", "Sotuvda", "Sana"])
+        data = []
+        for p in db.get_products_by_seller(seller_id):
+            p = dict(p)
+            data.append([p.get("id"), p.get("name") or "", p.get("price") or 0,
+                         p.get("old_price") or "", _xl_loc("status", p.get("status"), ru),
+                         p.get("stock_count") if p.get("stock_count") is not None else "∞",
+                         "✓" if p.get("in_stock") else "—", str(p.get("created_at") or "")[:10]])
+        content, n = _xlsx_report(title, headers, data, money_cols=(2,), lang=lang)
+        fn = "mahsulotlar"
+    else:  # orders
+        title = "Отчёт: Заказы" if ru else "Buyurtmalar hisoboti"
+        headers = (["ID", "Покупатель", "Товар", "Итого", "Статус", "Доставка",
+                    "Оплата", "Оплачено", "Долг", "Дата"]
+                   if ru else
+                   ["ID", "Xaridor", "Mahsulot", "Jami", "Holat", "Yetkazish",
+                    "To'lov holati", "To'langan", "Qarz", "Sana"])
+        data = []
+        for o in db.get_seller_orders_list(seller_id):
+            o = dict(o)
+            data.append([o.get("id"), o.get("buyer_name") or "", o.get("product_name") or "",
+                         o.get("total_price") or o.get("price") or 0, _xl_loc("status", o.get("status"), ru),
+                         _xl_loc("delivery", o.get("delivery_type"), ru),
+                         _xl_loc("settlement", o.get("settlement_type"), ru),
+                         o.get("amount_paid") or 0, o.get("amount_due") or 0,
+                         str(o.get("created_at") or "")[:16]])
+        content, n = _xlsx_report(title, headers, data, money_cols=(3, 7, 8), lang=lang)
+        fn = "buyurtmalar"
+    fname = f"tezbozor_{fn}_{_dt.datetime.now().strftime('%Y%m%d')}.xlsx"
+    return content, fname, n
+
+
+def _build_seller_excel_full(seller_id, lang):
+    """TO'LIQ sotuvchi hisoboti — bot seller_export_excel bilan to'la parite: bitta
+    faylda 4 sahifa (Buyurtmalar to'liq ustunlar, Mahsulotlar sotilgan+daromad,
+    Reytinglar, Umumiy). -> (bytes, fname, buyurtmalar_soni)."""
     import io as _io
     import datetime as _dt
     import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.utils import get_column_letter
+    ru = (lang == "ru")
+    orders = [dict(o) for o in db.get_seller_orders_list(seller_id)]
+    products = [dict(p) for p in db.get_products_by_seller(seller_id)]
+    reviews = [dict(r) for r in db.get_seller_reviews(seller_id)]
+    stats = db.get_seller_stats(seller_id) or {}
+    avg_rating = db.get_seller_avg_rating(seller_id) or 0
+    owner = dict(db.get_user_by_id(seller_id) or {})
+
     wb = openpyxl.Workbook()
-    ws = wb.active
-    hf = Font(bold=True, color="FFFFFF")
-    fill = PatternFill("solid", fgColor="1a8a2e")
-    al = Alignment(horizontal="center", vertical="center")
 
-    def header(row):
-        for c in row:
-            c.font = hf; c.fill = fill; c.alignment = al
+    # ---- 1) Buyurtmalar (to'liq: telefon, dona narxi, miqdor, to'lov usuli, manzil) ----
+    o_headers = (["ID", "Дата", "Покупатель", "Телефон", "Товар", "Цена за шт",
+                  "Кол-во", "Сумма", "Статус", "Доставка", "Оплата", "Адрес",
+                  "Статус оплаты", "Оплачено", "Долг"]
+                 if ru else
+                 ["ID", "Sana", "Xaridor", "Telefon", "Mahsulot", "Dona narxi",
+                  "Miqdor", "Jami", "Holat", "Yetkazish", "To'lov usuli", "Manzil",
+                  "To'lov holati", "To'langan", "Qarz"])
+    o_data = []
+    for o in orders:
+        o_data.append([
+            o.get("id"), str(o.get("created_at") or "")[:16],
+            o.get("buyer_name") or "", o.get("buyer_phone") or "",
+            o.get("product_name") or "", o.get("product_price") or 0,
+            o.get("quantity") or 0, o.get("total_price") or 0,
+            _xl_loc("status", o.get("status"), ru),
+            _xl_loc("delivery", o.get("delivery_type"), ru),
+            _xl_loc("payment", o.get("payment_method"), ru),
+            o.get("delivery_address") or "",
+            _xl_loc("settlement", o.get("settlement_type"), ru),
+            o.get("amount_paid") or 0, o.get("amount_due") or 0,
+        ])
+    _xl_fill_sheet(wb.active, "Заказы" if ru else "Buyurtmalar",
+                   o_headers, o_data, money_cols=(5, 7, 13, 14), ru=ru)
 
-    n = 0
-    if kind == "products":
-        ws.title = "Mahsulotlar"
-        ws.append(["ID", "Nom", "Narx", "Eski narx", "Holat", "Zahira", "Sotuvda", "Sana"])
-        header(ws[1])
-        for p in db.get_products_by_seller(seller_id):
-            p = dict(p)
-            ws.append([p.get("id"), p.get("name") or "", p.get("price") or 0,
-                       p.get("old_price") or "", p.get("status") or "",
-                       p.get("stock_count") if p.get("stock_count") is not None else "∞",
-                       "✓" if p.get("in_stock") else "—", str(p.get("created_at") or "")[:10]])
-            n += 1
-        fn = "mahsulotlar"
-    else:  # orders
-        ws.title = "Buyurtmalar"
-        ws.append(["ID", "Xaridor", "Mahsulot", "Jami", "Holat", "Yetkazish",
-                   "To'lov holati", "To'langan", "Qarz", "Sana"])
-        header(ws[1])
-        for o in db.get_seller_orders_list(seller_id):
-            o = dict(o)
-            ws.append([o.get("id"), o.get("buyer_name") or "", o.get("product_name") or "",
-                       o.get("total_price") or o.get("price") or 0, o.get("status") or "",
-                       o.get("delivery_type") or "", o.get("settlement_type") or "",
-                       o.get("paid_amount") or 0, o.get("debt_amount") or 0,
-                       str(o.get("created_at") or "")[:16]])
-            n += 1
-        fn = "buyurtmalar"
-    for col in ws.columns:
-        ml = max((len(str(c.value or "")) for c in col), default=0)
-        ws.column_dimensions[get_column_letter(col[0].column)].width = min(ml + 4, 40)
+    # ---- 2) Mahsulotlar (yetkazilgan buyurtmalardan sotilgan soni + daromad) ----
+    sold_count, sold_revenue = {}, {}
+    for o in orders:
+        if (o.get("status") or "") == "delivered":
+            pid = o.get("product_id")
+            sold_count[pid] = sold_count.get(pid, 0) + (o.get("quantity") or 0)
+            sold_revenue[pid] = sold_revenue.get(pid, 0) + (o.get("total_price") or 0)
+    p_headers = (["ID", "Название", "Категория", "Цена", "Статус", "Остаток",
+                  "Продано (шт)", "Доход (сум)", "Дата"]
+                 if ru else
+                 ["ID", "Nom", "Kategoriya", "Narx", "Holat", "Zahira",
+                  "Sotilgan (dona)", "Daromad (so'm)", "Sana"])
+    p_data = []
+    for p in products:
+        p_data.append([
+            p.get("id"), p.get("name") or "", p.get("category_name") or "",
+            p.get("price") or 0, _xl_loc("status", p.get("status"), ru),
+            p.get("stock_count") if p.get("stock_count") is not None else "∞",
+            sold_count.get(p.get("id"), 0), sold_revenue.get(p.get("id"), 0),
+            str(p.get("created_at") or "")[:10],
+        ])
+    _xl_fill_sheet(wb.create_sheet("Товары" if ru else "Mahsulotlar"),
+                   "Товары" if ru else "Mahsulotlar", p_headers, p_data,
+                   money_cols=(3, 7), ru=ru)
+
+    # ---- 3) Reytinglar ----
+    r_headers = (["Дата", "Покупатель", "Оценка", "Комментарий"] if ru
+                 else ["Sana", "Xaridor", "Baho", "Izoh"])
+    r_data = []
+    for r in reviews:
+        r_data.append([str(r.get("created_at") or "")[:16],
+                       r.get("buyer_name") or ("Аноним" if ru else "Anonim"),
+                       r.get("rating") or 0, r.get("comment") or ""])
+    _xl_fill_sheet(wb.create_sheet("Отзывы" if ru else "Reytinglar"),
+                   "Отзывы" if ru else "Reytinglar", r_headers, r_data, ru=ru)
+
+    # ---- 4) Umumiy hisobot ----
+    total_debt = sum((o.get("amount_due") or 0) for o in orders)
+    total_paid = sum((o.get("amount_paid") or 0) for o in orders)
+    s_headers = (["Показатель", "Значение"] if ru else ["Ko'rsatkich", "Qiymat"])
+    pairs = ([
+        ("Магазин", owner.get("shop_name") or "—"),
+        ("Кол-во товаров", stats.get("products_count", 0)),
+        ("Средний рейтинг", round(avg_rating, 2)),
+        ("Кол-во отзывов", len(reviews)),
+        ("Всего заказов", stats.get("total_orders", 0)),
+        ("Новые", stats.get("pending", 0)),
+        ("Подтверждённые", stats.get("confirmed", 0)),
+        ("Доставленные", stats.get("delivered", 0)),
+        ("Отменённые", stats.get("cancelled", 0)),
+        ("7 дней — заказы", stats.get("week_orders", 0)),
+        ("7 дней — доход", stats.get("week_revenue", 0)),
+        ("30 дней — заказы", stats.get("month_orders", 0)),
+        ("30 дней — доход", stats.get("month_revenue", 0)),
+        ("Общий доход (доставлено)", stats.get("total_revenue", 0)),
+        ("Всего оплачено (при выдаче)", total_paid),
+        ("Остаток долга", total_debt),
+    ] if ru else [
+        ("Do'kon", owner.get("shop_name") or "—"),
+        ("Mahsulotlar soni", stats.get("products_count", 0)),
+        ("O'rtacha reyting", round(avg_rating, 2)),
+        ("Reytinglar soni", len(reviews)),
+        ("Jami buyurtmalar", stats.get("total_orders", 0)),
+        ("Yangi", stats.get("pending", 0)),
+        ("Tasdiqlangan", stats.get("confirmed", 0)),
+        ("Yetkazilgan", stats.get("delivered", 0)),
+        ("Bekor qilingan", stats.get("cancelled", 0)),
+        ("7 kun — buyurtma", stats.get("week_orders", 0)),
+        ("7 kun — daromad", stats.get("week_revenue", 0)),
+        ("30 kun — buyurtma", stats.get("month_orders", 0)),
+        ("30 kun — daromad", stats.get("month_revenue", 0)),
+        ("Jami daromad (yetkazilgan)", stats.get("total_revenue", 0)),
+        ("Jami to'langan (berishda)", total_paid),
+        ("Qolgan qarz", total_debt),
+    ])
+    _xl_fill_sheet(wb.create_sheet("Сводка" if ru else "Umumiy"),
+                   "Сводка" if ru else "Umumiy", s_headers,
+                   [list(p) for p in pairs], ru=ru)
+
     buf = _io.BytesIO()
     wb.save(buf)
-    fname = f"tezbozor_{fn}_{_dt.datetime.now().strftime('%Y%m%d')}.xlsx"
-    return buf.getvalue(), fname, n
+    fname = f"tezbozor_toliq_hisobot_{_dt.datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    return buf.getvalue(), fname, len(orders)
 
 
 @app.post("/api/seller/export/{kind}")
 async def api_seller_export(kind: str, authorization: str = Header(None)):
-    """orders|products -> Excel yasaydi va sotuvchining Telegram chatiga yuboradi."""
+    """orders|products|full -> Excel yasaydi va sotuvchining Telegram chatiga yuboradi.
+    full = bot bilan to'la parite (4 sahifa: buyurtma/mahsulot/reyting/umumiy)."""
     user = dict(_buyer_from_auth(authorization))
     if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
         raise HTTPException(status_code=403, detail="not_seller")
-    if kind not in ("orders", "products"):
+    if kind not in ("orders", "products", "full"):
         raise HTTPException(status_code=400, detail="bad_kind")
+    # #18 Pro — Excel hisobot Pro-obuna imkoniyati (obuna yoqilgan & Pro emas → qulf).
+    if _pro_locked(_owner_id(user)):
+        raise HTTPException(status_code=403, detail="pro_required")
     _rate_limit("seller_export", user["id"], 10, 600)
     lang = get_user_lang(user) or DEFAULT_LANG
-    content, fname, n = await asyncio.to_thread(_build_seller_excel, user["id"], kind, lang)
+    if kind == "full":
+        content, fname, n = await asyncio.to_thread(_build_seller_excel_full, user["id"], lang)
+    else:
+        content, fname, n = await asyncio.to_thread(_build_seller_excel, user["id"], kind, lang)
     if not user.get("telegram_id"):
         raise HTTPException(status_code=400, detail="no_telegram")
     res = await _tg_send_document(user["telegram_id"], fname, content,
@@ -1899,6 +2457,23 @@ def _is_pro(owner_id):
     u = db.get_user_by_id(owner_id)
     dt = _pro_until_dt(dict(u).get("pro_until")) if u else None
     return bool(dt and dt > datetime.now(timezone.utc))
+
+
+def _pro_until_active(pu):
+    """pro_until qiymati (DB satri) hozir faolmi — qatorlarga seller_is_pro yopishtirish uchun."""
+    dt = _pro_until_dt(pu)
+    return bool(dt and dt > datetime.now(timezone.utc))
+
+
+def _pro_locked(owner_id):
+    """Pro-imkoniyat qulflanganmi: obuna monetizatsiyasi YOQILGAN va ega Pro EMAS.
+    Obuna o'chiq bo'lsa hech narsa qulflanmaydi — hammasi bepul (eski xulq)."""
+    return bool(monetization_public().get("subscription")) and not _is_pro(owner_id)
+
+
+def _month_key():
+    """Joriy oy kaliti (UTC, 'YYYY-MM') — kvota hisoblagichi uchun."""
+    return datetime.now(timezone.utc).strftime("%Y-%m")
 
 
 def _pro_status(user):
@@ -2109,6 +2684,12 @@ def api_schedule_product(product_id: int, body: ScheduleIn, authorization: str =
     prod = _own_product_or_403(user, product_id)
     if prod.get("status") in ("deleted", "purged"):
         raise HTTPException(status_code=409, detail="product_unavailable")
+    # #18 Pro — Pro = cheksiz rejalashtirish; bepul sotuvchiga bir vaqtda faol limit (limit>0)
+    oid = _owner_id(user)
+    if _pro_locked(oid):
+        limit = int(monetization_public().get("free_scheduled_limit") or 0)
+        if db.count_pending_scheduled_posts(oid) >= limit:
+            raise HTTPException(status_code=403, detail="pro_required")
     dt = _parse_dt(body.scheduled_at)
     if not dt:
         raise HTTPException(status_code=400, detail="bad_time")
@@ -2345,6 +2926,14 @@ async def api_seller_reels(product_id: int, authorization: str = Header(None)):
     prod = _own_product_or_403(user, product_id)
     if not ai_assistant.is_enabled():
         raise HTTPException(status_code=503, detail="ai_disabled")
+    # #18 Pro — Pro = cheksiz reels; bepul sotuvchiga oylik kvota (limit>0). Obuna o'chiq
+    # bo'lsa _pro_locked False — cheklov yo'q (eski xulq).
+    oid = _owner_id(user)
+    free_capped = _pro_locked(oid)
+    if free_capped:
+        limit = int(monetization_public().get("free_reels_limit") or 0)
+        if db.get_feature_usage(oid, "reels", _month_key()) >= limit:
+            raise HTTPException(status_code=403, detail="pro_required")
     _rate_limit("reels", user.get("id"), 20, 3600)
     lang = get_user_lang(user) or DEFAULT_LANG
     cat = prod.get("category_name") or ""
@@ -2353,6 +2942,8 @@ async def api_seller_reels(product_id: int, authorization: str = Header(None)):
         category=cat, description=prod.get("description") or "", lang=lang)
     if not script:
         raise HTTPException(status_code=502, detail="ai_error")
+    if free_capped:   # faqat bepul sotuvchining kvotasini sarflaymiz
+        db.incr_feature_usage(oid, "reels", _month_key())
     return {"script": script}
 
 
@@ -2453,9 +3044,12 @@ def api_seller_stats(authorization: str = Header(None)):
 
 @app.get("/api/seller/product/{product_id}/price-insight")
 def api_price_insight(product_id: int, authorization: str = Header(None)):
-    """AI #2 — raqobatchi narx maslahati: kategoriya o'rtachasiga nisbatan baho."""
+    """AI #2 — raqobatchi narx maslahati: kategoriya o'rtachasiga nisbatan baho.
+    #18 Pro — kengaytirilgan analitika (raqobat narxi) faqat Pro-obunada."""
     user = dict(_buyer_from_auth(authorization))
     prod = _own_product_or_403(user, product_id)
+    if _pro_locked(_owner_id(user)):
+        raise HTTPException(status_code=403, detail="pro_required")
     cat_id = prod.get("category_id")
     price = float(prod.get("price") or 0)
     stats = db.get_category_price_stats(cat_id, exclude_seller_id=prod.get("seller_id"))
@@ -2475,9 +3069,12 @@ def api_price_insight(product_id: int, authorization: str = Header(None)):
 
 @app.get("/api/seller/product/{product_id}/dynamic-price")
 async def api_dynamic_price(product_id: int, authorization: str = Header(None)):
-    """#11 — dinamik narx: talab + raqobat signallaridan AI narx tavsiyasi (ko'tar/tushir/qoldir)."""
+    """#11 — dinamik narx: talab + raqobat signallaridan AI narx tavsiyasi (ko'tar/tushir/qoldir).
+    #18 Pro — AI dinamik narx faqat Pro-obunada (kengaytirilgan analitika)."""
     user = dict(_buyer_from_auth(authorization))
     prod = _own_product_or_403(user, product_id)
+    if _pro_locked(_owner_id(user)):
+        raise HTTPException(status_code=403, detail="pro_required")
     if not ai_assistant.is_enabled():
         raise HTTPException(status_code=503, detail="ai_disabled")
     _rate_limit("dyn_price", user.get("id"), 30, 3600)
@@ -2497,13 +3094,24 @@ async def api_dynamic_price(product_id: int, authorization: str = Header(None)):
 
 @app.get("/api/seller/analytics")
 def api_seller_analytics(authorization: str = Header(None)):
-    """#17 — sotuvchi dashboard: top mahsulotlar (nima) + hafta kuni/kunlik (qachon)."""
+    """#17 — sotuvchi dashboard: top mahsulotlar (nima) + hafta kuni/kunlik (qachon).
+    #18 Pro — chuqur tahlil (hafta kuni + 7 kunlik daromad) faqat Pro-obunada ko'rinadi.
+    Obuna monetizatsiyasi yoqilmagan bo'lsa hammasi ochiq qoladi (eski xulq)."""
     user = dict(_buyer_from_auth(authorization))
     oid = _owner_id(user)
     perf = [dict(p) for p in db.get_seller_product_performance(oid)]
     top = [p for p in perf if (p.get("sold") or 0) > 0][:5]
+    # "Top mahsulotlar" har doim bepul (teaser). Chuqur tahlil — obuna yoqilgan va
+    # sotuvchi Pro bo'lmaganda qulflanadi.
+    sub_on = bool(monetization_public().get("subscription"))
+    is_pro = _is_pro(oid)
+    if sub_on and not is_pro:
+        # Pro qulfi: BUTUN tahlil (🏆 Eng ko'p sotilgan ham) yopiq — bepul teaser yo'q.
+        return {"top_products": [], "by_weekday": None, "daily_7": None,
+                "pro_locked": True, "is_pro": False}
     t = db.get_seller_time_analytics(oid)
-    return {"top_products": top, "by_weekday": t["by_weekday"], "daily_7": t["daily_7"]}
+    return {"top_products": top, "by_weekday": t["by_weekday"], "daily_7": t["daily_7"],
+            "pro_locked": False, "is_pro": is_pro}
 
 
 _SHOP_FIELDS = ("shop_name", "shop_address", "shop_landmark", "working_days",
@@ -2719,6 +3327,14 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
         if order.get("buyer_tg") and txt:
             await _tg_call("sendMessage", {
                 "chat_id": order["buyer_tg"], "text": txt, "parse_mode": "HTML"})
+        # App-banner: xaridorga buyurtma holati
+        pn = order.get("product_name") or ""
+        if new_status == "confirmed":
+            _notify_db(order["buyer_id"], "order", ("✅ Buyurtma tasdiqlandi", "✅ Заказ подтверждён"),
+                       (pn, pn), ref_id=order_id)
+        else:
+            _notify_db(order["buyer_id"], "order", ("❌ Buyurtma bekor qilindi", "❌ Заказ отменён"),
+                       (pn, pn), ref_id=order_id)
     except Exception as e:
         logging.error(f"xaridorga xabar xato (order {order_id}): {e}")
 
@@ -2808,6 +3424,9 @@ async def api_seller_cancel_respond(order_id: int, body: CancelRespondIn, author
         return {"ok": True, "cancelled": True}
     # rad — admin hakamligiga
     db.dispute_order_cancel(order_id)
+    _pn = order.get("product_name") or ""
+    _notify_admins_db("dispute", ("⚖️ Yangi nizo — hal kutyapti", "⚖️ Новый спор — ждёт решения"),
+                      (_pn, _pn), ref_id=order_id)
     if order.get("buyer_tg"):
         await _tg_call("sendMessage", {"chat_id": order["buyer_tg"],
                        "text": t(blang, "cancel_denied_notify", oid=oid, pname=pname),
@@ -2907,6 +3526,12 @@ async def api_deliver(order_id: int, body: DeliverIn, authorization: str = Heade
                 "chat_id": order["buyer_tg"], "text": txt, "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": [[
                     {"text": t(blang, "btn_leave_rating"), "callback_data": f"order_rate_{order_id}"}]]}})
+        # App-banner: xaridorga "yetkazildi" (+ qarz bo'lsa eslatma)
+        pn = order.get("product_name") or ""
+        dbody_uz = pn + (f" · Qarz: {fmt_price(due)}" if due > 0 else "")
+        dbody_ru = pn + (f" · Долг: {fmt_price(due)}" if due > 0 else "")
+        _notify_db(order["buyer_id"], "order", ("🚚 Buyurtma yetkazildi", "🚚 Заказ доставлен"),
+                   (dbody_uz, dbody_ru), ref_id=order_id)
     except Exception as e:
         logging.warning(f"deliver buyer notify xato (order {order_id}): {e}")
     return {"ok": True, "total": total, "paid": paid, "due": due}
@@ -3382,6 +4007,9 @@ MONETIZATION_SPEC = [
     ("mon_subscription_price",   "num",  "0"),
     ("mon_subscription_days",    "num",  "30"),  # obuna necha kunga
     ("mon_free_product_limit",   "num",  "0"),   # 0 = limitsiz; >0 = bepul sotuvchiga shu sondan ortiq faol mahsulot mumkin emas (Pro = cheksiz)
+    ("mon_pro_free_boosts",      "num",  "4"),   # Pro: oyiga shuncha bepul boost (0 = bepul boost yo'q)
+    ("mon_free_reels_limit",     "num",  "2"),   # bepul sotuvchi: oyiga AI reels soni (Pro = cheksiz; 0 = reels Pro-only)
+    ("mon_free_scheduled_limit", "num",  "2"),   # bepul sotuvchi: bir vaqtda faol rejalashtirilgan post (Pro = cheksiz; 0 = Pro-only)
     ("mon_pay_click_enabled",    "bool", "0"),  # Click to'lov provayderi
     ("mon_pay_payme_enabled",    "bool", "0"),  # Payme to'lov provayderi
     ("mon_pay_paynet_enabled",   "bool", "0"),  # Paynet to'lov provayderi
@@ -3420,6 +4048,9 @@ def monetization_public():
         "subscription_price": c["mon_subscription_price"] if (on and c["mon_subscription_enabled"]) else 0,
         "subscription_days": int(c["mon_subscription_days"]),
         "free_product_limit": int(c["mon_free_product_limit"]) if (on and c["mon_subscription_enabled"]) else 0,
+        "pro_free_boosts": int(c["mon_pro_free_boosts"]) if (on and c["mon_subscription_enabled"]) else 0,
+        "free_reels_limit": int(c["mon_free_reels_limit"]) if (on and c["mon_subscription_enabled"]) else 0,
+        "free_scheduled_limit": int(c["mon_free_scheduled_limit"]) if (on and c["mon_subscription_enabled"]) else 0,
         "pay_click": on and c["mon_pay_click_enabled"],
         "pay_payme": on and c["mon_pay_payme_enabled"],
         "pay_paynet": on and c["mon_pay_paynet_enabled"],
@@ -3563,6 +4194,16 @@ async def _notify_payment_done(payment):
         txt = msg.get(lang) or msg.get("uz")
         if txt:
             await _tg_call("sendMessage", {"chat_id": dict(u)["telegram_id"], "text": txt})
+            # To'lovchiга app ichida ham banner ko'rinsin (push allaqachon yuborildi)
+            try:
+                db.create_notification(payment["user_id"], "payment", txt, "", payment.get("id"))
+            except Exception:
+                pass
+        # ⭐ Pro obuna — adminларни xabardor qilamiz (kim Pro oldi: bilinmay qolmasin)
+        if payment.get("purpose") == "subscription":
+            pname = dict(u).get("name") or ""
+            await _notify_admins("⭐ Yangi Pro obuna",
+                                 f"{pname} Pro obuna sotib oldi.", kind="pro", ref_id=payment.get("id"))
     except Exception as e:
         logging.warning(f"to'lov xabar yuborish xato (payment {payment.get('id')}): {e}")
 
@@ -3606,6 +4247,18 @@ def _payment_checkout_urls(payment, pub):
     return urls
 
 
+def _purchase_contact_line(user):
+    """Admin xabarnomasi uchun: sotib olmoqchi bo'lganning ismi + kontakt (username/telefon).
+    Manzil yozilmagan bo'lsa ham — telegram username yoki ro'yxatdagi telefon ko'rsatiladi."""
+    nm = (user.get("name") or "").strip()
+    if user.get("telegram_username"):
+        ct = "@" + str(user["telegram_username"]).lstrip("@")
+    else:
+        ct = (user.get("phone_number") or "").strip()
+    line = " · ".join([x for x in (nm, ct) if x])
+    return line or "Yangi so'rov"
+
+
 def _new_purchase_response(user, payment, pub):
     """Sotuvchiga to'lov boshlash javobi: checkout URL'lar + (kalit yo'q/admin bo'lsa) dev-confirm."""
     urls = _payment_checkout_urls(payment, pub)
@@ -3619,23 +4272,39 @@ def _new_purchase_response(user, payment, pub):
 
 
 @app.post("/api/seller/boost/{product_id}")
-def api_seller_boost(product_id: int, authorization: str = Header(None)):
-    """Mahsulotni boost qilish uchun to'lov boshlaydi. Bayroq yoqilmagan bo'lsa 403."""
+async def api_seller_boost(product_id: int, authorization: str = Header(None)):
+    """Mahsulotni boost qilish uchun to'lov boshlaydi. Bayroq yoqilmagan bo'lsa 403.
+    #18 Pro — Pro do'kon oyiga `pro_free_boosts` martagacha BEPUL boost qiladi (to'lovsiz)."""
     user = dict(_buyer_from_auth(authorization))
     pub = monetization_public()
     if not pub.get("boost"):
         raise HTTPException(status_code=403, detail="boost_disabled")
     prod = _own_product_or_403(user, product_id)
+    oid = _owner_id(user)
+    # Pro bepul boost kvotasi — bor bo'lsa to'lovsiz darhol qo'llanadi.
+    if _is_pro(oid):
+        quota = int(pub.get("pro_free_boosts") or 0)
+        used = db.get_feature_usage(oid, "boost_free", _month_key())
+        if quota > 0 and used < quota:
+            db.set_product_boost(prod["id"], int(pub.get("boost_days") or 7))
+            db.incr_feature_usage(oid, "boost_free", _month_key())
+            return {"ok": True, "free": True, "boosted": True,
+                    "remaining": quota - used - 1}
     price = float(pub.get("boost_price") or 0)
     if price <= 0:
         raise HTTPException(status_code=400, detail="boost_price_unset")
-    pid = db.create_payment(_owner_id(user), "boost", price, ref_id=prod["id"])
+    pid = db.create_payment(oid, "boost", price, ref_id=prod["id"])
     payment = db.get_payment(pid)
+    # Adminларга: kimdir Boost sotib olmoqchi (kontakt bilan) — kutilayotgan to'lovni
+    # tasdiqlash/bog'lanish uchun. To'lovlar ekranида Telegram/telefon tugmalari bor.
+    await _notify_admins("🚀 Boost so'rovi", _purchase_contact_line(user),
+                         kind="boost", ref_id=pid)
+    await _notify_purchaser_pending(user, "boost", ref_id=pid)   # sotuvchiga tasdiq
     return _new_purchase_response(user, payment, pub)
 
 
 @app.post("/api/seller/subscribe")
-def api_seller_subscribe(authorization: str = Header(None)):
+async def api_seller_subscribe(authorization: str = Header(None)):
     """Pro-obuna uchun to'lov boshlaydi. Bayroq yoqilmagan bo'lsa 403."""
     user = dict(_buyer_from_auth(authorization))
     pub = monetization_public()
@@ -3646,6 +4315,9 @@ def api_seller_subscribe(authorization: str = Header(None)):
         raise HTTPException(status_code=400, detail="subscription_price_unset")
     pid = db.create_payment(_owner_id(user), "subscription", price)
     payment = db.get_payment(pid)
+    await _notify_admins("⭐ Pro obuna so'rovi", _purchase_contact_line(user),
+                         kind="pro", ref_id=pid)
+    await _notify_purchaser_pending(user, "subscription", ref_id=pid)   # sotuvchiga tasdiq
     return _new_purchase_response(user, payment, pub)
 
 
@@ -3671,10 +4343,13 @@ def api_pay_status(payment_id: int, authorization: str = Header(None)):
 
 
 @app.post("/api/pay/dev-confirm/{payment_id}")
-def api_pay_dev_confirm(payment_id: int, authorization: str = Header(None)):
+async def api_pay_dev_confirm(payment_id: int, authorization: str = Header(None)):
     """SINOV: to'lovni qo'lda 'paid' qiladi (provider='manual'). FAQAT ADMIN — aks holda
     provayder ulanmagan paytda har kim bepul boost/obuna olishi mumkin edi (teshik).
-    Real provayder pulini ko'chirmaydi; faqat oqimni sinash uchun."""
+    Real provayder pulini ko'chirmaydi; faqat oqimni sinash uchun.
+    DIQQAT: `async def` bo'lishi SHART — `_mark_paid_and_fulfill` xabarni running loop'da
+    `create_task` bilan yuboradi; sync endpoint threadpool'da ishlab loop'siz qolar, natijada
+    sotuvchiga Pro/boost faollashgani haqida xabar JIM yutilardi."""
     user = dict(_buyer_from_auth(authorization))
     payment = db.get_payment(payment_id)
     if not payment:
@@ -3684,6 +4359,8 @@ def api_pay_dev_confirm(payment_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=403, detail="not_allowed")
     if payment["state"] == "cancelled":
         raise HTTPException(status_code=409, detail="cancelled")
+    # Endpoint async bo'lgani uchun _mark_paid_and_fulfill ichidagi create_task running
+    # loop'ga tushadi va sotuvchiga xabar (Pro/boost faollashdi) ishonchli yetadi.
     _mark_paid_and_fulfill(payment, "manual")
     return {"ok": True, "payment": db.get_payment(payment_id)}
 
@@ -4361,80 +5038,63 @@ async def _tg_send_document(chat_id, filename, content, caption=""):
 
 
 def _build_excel(kind, lang):
-    """users|products|orders|seller_orders -> (bytes, filename, rows). openpyxl bilan."""
-    import io as _io
+    """users|products|orders|seller_orders -> Pro-Excel (bytes, filename, rows)."""
     import datetime as _dt
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.utils import get_column_letter
     ru = (lang == "ru")
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    hf = Font(bold=True, color="FFFFFF")
-    fill = PatternFill("solid", fgColor="1a8a2e")
-    al = Alignment(horizontal="center", vertical="center")
-
-    def header(row):
-        for c in row:
-            c.font = hf; c.fill = fill; c.alignment = al
-
-    def autow():
-        for col in ws.columns:
-            ml = max((len(str(c.value or "")) for c in col), default=0)
-            ws.column_dimensions[get_column_letter(col[0].column)].width = min(ml + 4, 40)
-
-    n = 0
     if kind == "users":
-        ws.title = "Пользователи" if ru else "Foydalanuvchilar"
-        ws.append(["ID", "Telegram ID", "Ism/Имя", "Telefon", "Rol", "Do'kon", "Hudud",
-                   "Buyurtmalar", "Sana"])
-        header(ws[1])
+        title = "Отчёт: Пользователи" if ru else "Foydalanuvchilar hisoboti"
+        headers = (["ID", "Telegram ID", "Имя", "Телефон", "Роль", "Магазин", "Регион",
+                    "Заказы", "Дата"] if ru else
+                   ["ID", "Telegram ID", "Ism", "Telefon", "Rol", "Do'kon", "Hudud",
+                    "Buyurtmalar", "Sana"])
+        data = []
         for u in db.get_all_users():
             u = dict(u)
             try:
                 oc = len(db.get_orders_by_buyer(u["id"]) or [])
             except Exception:
                 oc = 0
-            ws.append([u.get("id"), u.get("telegram_id"), u.get("name") or "",
-                       u.get("phone_number") or "", u.get("role") or "",
-                       u.get("shop_name") or "", db.get_region_label(u.get("region_id")) or "",
-                       oc, str(u.get("created_at") or "")[:10]])
-            n += 1
+            data.append([u.get("id"), u.get("telegram_id"), u.get("name") or "",
+                         u.get("phone_number") or "", _xl_loc("role", u.get("role"), ru),
+                         u.get("shop_name") or "", db.get_region_label(u.get("region_id")) or "",
+                         oc, str(u.get("created_at") or "")[:10]])
+        content, n = _xlsx_report(title, headers, data, money_cols=(), lang=lang)
         fn = "users"
     elif kind == "products":
-        ws.title = "Товары" if ru else "Mahsulotlar"
-        ws.append(["ID", "Sotuvchi", "Kategoriya", "Nom", "Narx", "Holat", "Zahira", "Sana"])
-        header(ws[1])
+        title = "Отчёт: Товары" if ru else "Mahsulotlar hisoboti"
+        headers = (["ID", "Продавец", "Категория", "Товар", "Цена", "Статус", "Остаток", "Дата"]
+                   if ru else
+                   ["ID", "Sotuvchi", "Kategoriya", "Nom", "Narx", "Holat", "Zahira", "Sana"])
+        data = []
         for p in db.get_all_products():
             p = dict(p)
-            ws.append([p.get("id"), p.get("seller_name") or p.get("seller_id") or "",
-                       p.get("category_name") or "", p.get("name") or "", p.get("price") or 0,
-                       p.get("status") or "", p.get("stock_count") if p.get("stock_count") is not None else "∞",
-                       str(p.get("created_at") or "")[:10]])
-            n += 1
+            data.append([p.get("id"), p.get("seller_name") or p.get("seller_id") or "",
+                         p.get("category_name") or "", p.get("name") or "", p.get("price") or 0,
+                         _xl_loc("status", p.get("status"), ru), p.get("stock_count") if p.get("stock_count") is not None else "∞",
+                         str(p.get("created_at") or "")[:10]])
+        content, n = _xlsx_report(title, headers, data, money_cols=(4,), lang=lang)
         fn = "products"
     elif kind in ("orders", "seller_orders"):
-        ws.title = "Заказы" if ru else "Buyurtmalar"
-        ws.append(["ID", "Xaridor", "Sotuvchi", "Mahsulot", "Jami", "Holat", "To'lov",
-                   "Yetkazish", "Sana", "To'lov holati", "To'langan", "Qarz"])
-        header(ws[1])
+        title = "Отчёт: Заказы" if ru else "Buyurtmalar hisoboti"
+        headers = (["ID", "Покупатель", "Продавец", "Товар", "Итого", "Статус", "Оплата",
+                    "Доставка", "Дата", "Расчёт", "Оплачено", "Долг"] if ru else
+                   ["ID", "Xaridor", "Sotuvchi", "Mahsulot", "Jami", "Holat", "To'lov",
+                    "Yetkazish", "Sana", "To'lov holati", "To'langan", "Qarz"])
+        data = []
         for o in db.get_all_orders():
             o = dict(o)
-            ws.append([o.get("id"), o.get("buyer_name") or "", o.get("seller_name") or "",
-                       o.get("product_name") or "", o.get("total_price") or o.get("price") or 0,
-                       o.get("status") or "", o.get("payment_method") or "",
-                       o.get("delivery_type") or "", str(o.get("created_at") or "")[:16],
-                       o.get("settlement_type") or "", o.get("paid_amount") or 0,
-                       o.get("debt_amount") or 0])
-            n += 1
+            data.append([o.get("id"), o.get("buyer_name") or "", o.get("seller_name") or "",
+                         o.get("product_name") or "", o.get("total_price") or o.get("price") or 0,
+                         _xl_loc("status", o.get("status"), ru), _xl_loc("payment", o.get("payment_method"), ru),
+                         _xl_loc("delivery", o.get("delivery_type"), ru), str(o.get("created_at") or "")[:16],
+                         _xl_loc("settlement", o.get("settlement_type"), ru), o.get("paid_amount") or 0,
+                         o.get("debt_amount") or 0])
+        content, n = _xlsx_report(title, headers, data, money_cols=(4, 10, 11), lang=lang)
         fn = "orders"
     else:
         raise HTTPException(status_code=400, detail="bad_kind")
-    autow()
-    buf = _io.BytesIO()
-    wb.save(buf)
     fname = f"tezbozor_{fn}_{_dt.datetime.now().strftime('%Y%m%d')}.xlsx"
-    return buf.getvalue(), fname, n
+    return content, fname, n
 
 
 @app.post("/api/admin/export/{kind}")
@@ -4538,6 +5198,9 @@ async def api_admin_dispute_message(order_id: int, body: DisputeMsgIn,
             await _tg_call("sendMessage", {"chat_id": tg,
                            "text": t(ulang, "dispute_admin_message", oid=oid, msg=html.escape(text)),
                            "parse_mode": "HTML"})
+        # App-banner: nizo bo'yicha admin xabari (tomonga)
+        _notify_db(uid, "dispute", ("⚖️ Nizo bo'yicha admin xabari", "⚖️ Сообщение админа по спору"),
+                   (text[:120], text[:120]), ref_id=order_id)
     except Exception as e:
         logging.warning(f"dispute admin msg notify xato (order {order_id}): {e}")
     return {"ok": True}

@@ -2074,3 +2074,60 @@ def test_cart_delivery_requires_location(client):
                           "items": [{"product_id": client.pid, "quantity": 1}],
                           "delivery_type": "delivery", "payment_method": "cash"})
     assert r.status_code == 400 and r.json()["detail"] == "location_required"
+
+
+# ===== PRO/BOOST XABARLARI: (1) sotib olish boshlanganda tasdiq, (2) admin tasdiqlagach yakuniy =====
+def test_subscribe_notifies_seller_pending(client, monkeypatch):
+    """Sotuvchi 'Pro sotib olish' tugmasini bosganda — unga DARHOL 'so'rovingiz qabul
+    qilindi, admin to'lov bo'yicha bog'lanadi' tasdig'i (app banner + Telegram push).
+    Endpoint await bilan yuboradi → TestClient'da deterministik."""
+    calls = []
+    async def _fake(method, payload):
+        calls.append((method, payload)); return {"ok": True}
+    monkeypatch.setattr(webapp_server, "_tg_call", _fake)
+    _enable_mon(client, mon_subscription_enabled=True, mon_subscription_price=20000)
+    r = client.post("/api/seller/subscribe", headers=hdr(5002))
+    assert r.status_code == 200, r.text
+    sid = webapp_server.db.get_user_by_telegram_id(5002)["id"]
+    notifs = webapp_server.db.get_user_notifications(sid)
+    assert any("qabul qilindi" in (n["title"] or "") for n in notifs), notifs
+    # Sotuvchining o'ziga (chat_id=5002) Telegram push ketdi
+    assert any(c[0] == "sendMessage" and c[1].get("chat_id") == 5002 for c in calls), calls
+
+
+def test_boost_notifies_seller_pending(client, monkeypatch):
+    """Boost 'sotib olish' bosilganda ham sotuvchiga tasdiq xabari yetadi."""
+    calls = []
+    async def _fake(method, payload):
+        calls.append((method, payload)); return {"ok": True}
+    monkeypatch.setattr(webapp_server, "_tg_call", _fake)
+    _enable_mon(client, mon_boost_enabled=True, mon_boost_price=5000, mon_boost_days=7)
+    r = client.post(f"/api/seller/boost/{client.pid}", headers=hdr(5002))
+    assert r.status_code == 200, r.text
+    sid = webapp_server.db.get_user_by_telegram_id(5002)["id"]
+    notifs = webapp_server.db.get_user_notifications(sid)
+    assert any("qabul qilindi" in (n["title"] or "") for n in notifs), notifs
+    assert any(c[0] == "sendMessage" and c[1].get("chat_id") == 5002 for c in calls), calls
+
+
+@pytest.mark.parametrize("purpose", ["subscription", "boost"])
+def test_payment_done_notifies_seller_final(client, monkeypatch, purpose):
+    """Admin to'lovni tasdiqlagach (paid) sotuvchiga YAKUNIY 'faollashtirildi' xabari
+    (app banner + Telegram push) yetadi. _notify_payment_done bevosita tekshiriladi —
+    jonli (uvicorn) loop'da dev-confirm uni create_task bilan aynan shu funksiyani chaqiradi."""
+    import asyncio
+    db = webapp_server.db
+    sid = db.get_user_by_telegram_id(5002)["id"]
+    ref = client.pid if purpose == "boost" else None
+    pid = db.create_payment(sid, purpose, 30000, ref_id=ref)
+    db.set_payment_state(pid, "paid", provider="manual")
+    payment = db.get_payment(pid)
+    calls = []
+    async def _fake(method, payload):
+        calls.append((method, payload)); return {"ok": True}
+    monkeypatch.setattr(webapp_server, "_tg_call", _fake)
+    asyncio.run(webapp_server._notify_payment_done(payment))
+    # App banner (DB) sotuvchiga yozildi
+    assert any(n["kind"] == "payment" for n in db.get_user_notifications(sid)), purpose
+    # Telegram push sotuvchining chat_id'siga ketdi
+    assert any(c[0] == "sendMessage" and c[1].get("chat_id") == 5002 for c in calls), (purpose, calls)

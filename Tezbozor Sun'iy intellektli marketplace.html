@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<script>document.documentElement.className+=' js';</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TezBozor — Aqlli Marketplace · Tez. Oson. Ishonchli.</title>
+<meta name="description" content="TezBozor — sun'iy intellektli marketplace bot va Mini App. Soting, sotib oling, yetkazib bering. AI yordamchi, jonli taymer, qarz daftari, xavfsiz to'lov.">
+<style>
+  :root{
+    --bg:#0a0b1e;
+    --bg2:#11132e;
+    --card:rgba(255,255,255,.04);
+    --card-brd:rgba(255,255,255,.10);
+    --txt:#eef0ff;
+    --muted:#9aa0c4;
+    --violet:#7c5cff;
+    --violet2:#9d7bff;
+    --blue:#2f7bff;
+    --emerald:#23d3a3;
+    --gold:#ffcf5c;
+    --pink:#ff5c93;
+    --grad:linear-gradient(135deg,#7c5cff 0%,#2f7bff 100%);
+    --grad-soft:linear-gradient(135deg,rgba(124,92,255,.18),rgba(47,123,255,.10));
+    --radius:22px;
+    --shadow:0 30px 60px -20px rgba(0,0,0,.7);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;
+    background:var(--bg);
+    color:var(--txt);
+    line-height:1.6;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  /* background glow */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-2;
+    background:
+      radial-gradient(800px 500px at 80% -5%,rgba(124,92,255,.35),transparent 60%),
+      radial-gradient(700px 500px at 0% 20%,rgba(47,123,255,.25),transparent 55%),
+      radial-gradient(900px 600px at 100% 100%,rgba(35,211,163,.14),transparent 60%),
+      var(--bg);
+  }
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;opacity:.5;
+    background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1px);
+    background-size:42px 42px;
+    mask-image:linear-gradient(to bottom,#000,transparent 70%);
+  }
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1160px;margin:0 auto;padding:0 22px}
+  .grad-txt{background:linear-gradient(120deg,#9d7bff,#5fa8ff 50%,#23d3a3);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* NAV */
+  nav{
+    position:sticky;top:0;z-index:50;
+    backdrop-filter:blur(18px);
+    background:rgba(10,11,30,.55);
+    border-bottom:1px solid var(--card-brd);
+  }
+  .nav-in{display:flex;align-items:center;justify-content:space-between;height:68px}
+  .logo{display:flex;align-items:center;gap:11px;font-weight:800;font-size:21px;letter-spacing:-.3px}
+  .logo .mark{
+    width:38px;height:38px;border-radius:12px;background:var(--grad);
+    display:grid;place-items:center;font-size:20px;box-shadow:0 8px 22px rgba(124,92,255,.5);
+  }
+  .nav-links{display:flex;gap:30px;font-size:15px;color:var(--muted);font-weight:500}
+  .nav-links a:hover{color:#fff}
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;cursor:pointer;border:none;
+    font-weight:700;font-size:15px;padding:13px 24px;border-radius:14px;
+    transition:transform .15s ease,box-shadow .25s ease,background .2s;
+    font-family:inherit;
+  }
+  .btn-primary{background:var(--grad);color:#fff;box-shadow:0 12px 30px -8px rgba(124,92,255,.7)}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 18px 40px -8px rgba(124,92,255,.85)}
+  .btn-ghost{background:var(--card);color:#fff;border:1px solid var(--card-brd)}
+  .btn-ghost:hover{background:rgba(255,255,255,.1)}
+  @media(max-width:820px){.nav-links{display:none}}
+
+  /* HERO */
+  header{padding:70px 0 40px;position:relative}
+  .hero{display:grid;grid-template-columns:1.05fr .95fr;gap:48px;align-items:center}
+  .pill{
+    display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;
+    padding:7px 15px;border-radius:100px;border:1px solid var(--card-brd);
+    background:var(--grad-soft);color:#cfd3ff;margin-bottom:22px;
+  }
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--emerald);box-shadow:0 0 0 0 rgba(35,211,163,.7);animation:pulse 2s infinite}
+  @keyframes pulse{70%{box-shadow:0 0 0 9px rgba(35,211,163,0)}100%{box-shadow:0 0 0 0 rgba(35,211,163,0)}}
+  h1{font-size:clamp(38px,6vw,62px);line-height:1.04;letter-spacing:-1.5px;font-weight:800}
+  .hero p.lead{margin:22px 0 30px;font-size:19px;color:var(--muted);max-width:520px}
+  .hero-cta{display:flex;gap:14px;flex-wrap:wrap}
+  .trust{display:flex;gap:26px;margin-top:30px;flex-wrap:wrap}
+  .trust div{font-size:14px;color:var(--muted)}
+  .trust b{display:block;font-size:26px;color:#fff;font-weight:800;letter-spacing:-.5px}
+  .trust b span{background:linear-gradient(120deg,#9d7bff,#23d3a3);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+  /* PHONE MOCKUP */
+  .phone-wrap{display:flex;justify-content:center;position:relative}
+  .glow-blob{position:absolute;width:380px;height:380px;border-radius:50%;background:var(--grad);filter:blur(90px);opacity:.45;z-index:0;animation:float 7s ease-in-out infinite}
+  @keyframes float{50%{transform:translateY(-22px)}}
+  .phone{
+    position:relative;z-index:2;width:288px;height:590px;border-radius:42px;
+    background:linear-gradient(160deg,#1b1d3d,#0d0e22);
+    border:1px solid rgba(255,255,255,.12);padding:13px;
+    box-shadow:var(--shadow),inset 0 0 0 2px rgba(255,255,255,.03);
+  }
+  .notch{position:absolute;top:13px;left:50%;transform:translateX(-50%);width:120px;height:26px;background:#05050f;border-radius:0 0 16px 16px;z-index:5}
+  .screen{width:100%;height:100%;border-radius:32px;overflow:hidden;background:#0c0e22;position:relative}
+  .app-top{padding:26px 16px 14px;background:var(--grad);color:#fff}
+  .app-top .row{display:flex;align-items:center;justify-content:space-between;font-size:12px;opacity:.85}
+  .app-top h3{font-size:19px;margin-top:6px;letter-spacing:-.3px}
+  .search{margin-top:12px;background:rgba(255,255,255,.22);border-radius:12px;padding:9px 12px;font-size:12px;color:#eee;display:flex;gap:8px;align-items:center}
+  .chips{display:flex;gap:7px;padding:12px 14px 4px;overflow:hidden}
+  .chip{font-size:10.5px;padding:6px 11px;border-radius:100px;background:var(--card);border:1px solid var(--card-brd);color:var(--muted);white-space:nowrap}
+  .chip.act{background:var(--grad-soft);color:#cdd2ff;border-color:rgba(124,92,255,.5)}
+  .cards{padding:8px 14px;display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .pcard{background:var(--card);border:1px solid var(--card-brd);border-radius:14px;overflow:hidden}
+  .pcard .img{height:62px;display:grid;place-items:center;font-size:26px}
+  .pcard .b{padding:8px 9px}
+  .pcard .nm{font-size:11px;font-weight:600}
+  .pcard .pr{font-size:12px;font-weight:800;color:#fff;margin-top:3px}
+  .pcard .pr small{color:var(--emerald);font-weight:700}
+  .badge-ai{position:absolute;z-index:6;right:-14px;top:118px;background:#0d0e22;border:1px solid rgba(124,92,255,.5);border-radius:14px;padding:10px 13px;font-size:12px;box-shadow:var(--shadow);display:flex;align-items:center;gap:8px;animation:float 5s ease-in-out infinite}
+  .badge-ord{position:absolute;z-index:6;left:-22px;bottom:90px;background:#0d0e22;border:1px solid rgba(35,211,163,.45);border-radius:14px;padding:10px 13px;font-size:12px;box-shadow:var(--shadow);display:flex;align-items:center;gap:8px;animation:float 6s ease-in-out infinite .5s}
+  @media(max-width:900px){.hero{grid-template-columns:1fr;text-align:center}.hero p.lead{margin-inline:auto}.hero-cta,.trust{justify-content:center}.badge-ai,.badge-ord{display:none}}
+
+  /* MARQUEE */
+  .marq{margin:50px 0;border-block:1px solid var(--card-brd);padding:18px 0;overflow:hidden;mask-image:linear-gradient(90deg,transparent,#000 12%,#000 88%,transparent)}
+  .marq-in{display:flex;gap:46px;width:max-content;animation:scroll 26s linear infinite;font-size:15px;color:var(--muted);font-weight:600}
+  .marq-in span{display:flex;align-items:center;gap:46px;white-space:nowrap}
+  .marq-in b{color:#fff}
+  @keyframes scroll{to{transform:translateX(-50%)}}
+
+  /* SECTIONS */
+  section{padding:64px 0}
+  .sec-head{text-align:center;max-width:680px;margin:0 auto 46px}
+  .tag{font-size:13px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--violet2)}
+  h2{font-size:clamp(28px,4.4vw,44px);letter-spacing:-1px;margin:12px 0 14px;font-weight:800}
+  .sec-head p{color:var(--muted);font-size:17px}
+
+  .grid{display:grid;gap:18px}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  @media(max-width:900px){.g3,.g4{grid-template-columns:1fr 1fr}}
+  @media(max-width:600px){.g3,.g4,.g2{grid-template-columns:1fr}}
+
+  .feat{
+    background:var(--card);border:1px solid var(--card-brd);border-radius:var(--radius);
+    padding:26px;transition:transform .2s,border-color .2s,background .2s;position:relative;overflow:hidden;
+  }
+  .feat:hover{transform:translateY(-5px);border-color:rgba(124,92,255,.5);background:rgba(124,92,255,.06)}
+  .feat .ic{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;font-size:25px;margin-bottom:16px;background:var(--grad-soft);border:1px solid var(--card-brd)}
+  .feat h3{font-size:18.5px;margin-bottom:8px;letter-spacing:-.3px}
+  .feat p{color:var(--muted);font-size:14.5px}
+
+  /* split audience */
+  .audience{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @media(max-width:820px){.audience{grid-template-columns:1fr}}
+  .aud{border-radius:var(--radius);padding:34px;border:1px solid var(--card-brd);position:relative;overflow:hidden}
+  .aud.buyer{background:linear-gradient(160deg,rgba(47,123,255,.16),rgba(35,211,163,.06))}
+  .aud.seller{background:linear-gradient(160deg,rgba(124,92,255,.18),rgba(255,92,147,.07))}
+  .aud h3{font-size:24px;display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .aud .sub{color:var(--muted);margin-bottom:20px;font-size:15px}
+  .aud ul{list-style:none;display:grid;gap:12px}
+  .aud li{display:flex;gap:12px;font-size:15px;align-items:flex-start}
+  .aud li .ck{flex:none;width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:13px;background:var(--grad-soft);border:1px solid var(--card-brd);margin-top:2px}
+  .aud li b{display:block}
+  .aud li span{color:var(--muted);font-size:13.5px}
+
+  /* AI highlight */
+  .ai-box{border-radius:28px;border:1px solid rgba(124,92,255,.4);padding:46px;background:
+     radial-gradient(600px 300px at 100% 0%,rgba(124,92,255,.25),transparent),
+     radial-gradient(500px 300px at 0% 100%,rgba(35,211,163,.14),transparent),
+     rgba(255,255,255,.03)}
+
+  /* steps */
+  .steps{counter-reset:s;display:grid;gap:16px;grid-template-columns:repeat(4,1fr)}
+  @media(max-width:900px){.steps{grid-template-columns:1fr 1fr}}
+  @media(max-width:560px){.steps{grid-template-columns:1fr}}
+  .step{background:var(--card);border:1px solid var(--card-brd);border-radius:18px;padding:24px;position:relative}
+  .step::before{counter-increment:s;content:"0" counter(s);font-size:42px;font-weight:800;letter-spacing:-2px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;opacity:.85}
+  .step h4{margin:8px 0 6px;font-size:17px}
+  .step p{color:var(--muted);font-size:14px}
+
+  /* pricing */
+  .price{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:stretch}
+  @media(max-width:820px){.price{grid-template-columns:1fr}}
+  .plan{background:var(--card);border:1px solid var(--card-brd);border-radius:var(--radius);padding:30px;display:flex;flex-direction:column}
+  .plan.pop{border-color:rgba(124,92,255,.6);background:linear-gradient(170deg,rgba(124,92,255,.14),rgba(255,255,255,.03));box-shadow:0 24px 50px -22px rgba(124,92,255,.6)}
+  .plan .pop-b{align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:var(--grad);padding:5px 11px;border-radius:100px;margin-bottom:14px}
+  .plan h3{font-size:21px}
+  .plan .amt{font-size:34px;font-weight:800;letter-spacing:-1px;margin:10px 0 4px}
+  .plan .amt small{font-size:15px;color:var(--muted);font-weight:500}
+  .plan ul{list-style:none;margin:18px 0 24px;display:grid;gap:11px}
+  .plan li{font-size:14.5px;color:var(--muted);display:flex;gap:10px}
+  .plan li::before{content:"✓";color:var(--emerald);font-weight:800}
+  .plan .btn{justify-content:center;margin-top:auto}
+
+  /* faq */
+  details{background:var(--card);border:1px solid var(--card-brd);border-radius:16px;padding:4px 22px;margin-bottom:12px}
+  summary{cursor:pointer;list-style:none;padding:18px 0;font-weight:600;font-size:16.5px;display:flex;justify-content:space-between;align-items:center}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";font-size:24px;color:var(--violet2);transition:transform .2s}
+  details[open] summary::after{transform:rotate(45deg)}
+  details p{color:var(--muted);padding:0 0 18px;font-size:15px}
+
+  /* CTA */
+  .cta-final{border-radius:30px;padding:60px 40px;text-align:center;position:relative;overflow:hidden;
+    background:radial-gradient(700px 360px at 50% -20%,rgba(124,92,255,.5),transparent),linear-gradient(160deg,#15173a,#0c0d22);
+    border:1px solid rgba(124,92,255,.4)}
+  .cta-final h2{font-size:clamp(30px,5vw,48px)}
+  .cta-final p{color:#c7cbf0;max-width:520px;margin:14px auto 28px;font-size:18px}
+  .cta-final .hero-cta{justify-content:center}
+
+  footer{border-top:1px solid var(--card-brd);padding:40px 0;margin-top:30px;color:var(--muted);font-size:14px}
+  .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:18px}
+  .foot a:hover{color:#fff}
+
+  /* Animatsiya FAQAT JS ishlaganda yashiradi — aks holda hamma narsa ko'rinadi */
+  .reveal{opacity:1;transform:none;transition:opacity .7s ease,transform .7s ease}
+  .js .reveal{opacity:0;transform:translateY(26px)}
+  .js .reveal.in{opacity:1;transform:none}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <div class="wrap nav-in">
+    <a class="logo" href="#"><span class="mark">🛒</span> TezBozor</a>
+    <div class="nav-links">
+      <a href="#imkoniyat">Imkoniyatlar</a>
+      <a href="#ilova">Mini App</a>
+      <a href="#ai">AI yordamchi</a>
+      <a href="#qadam">Qanday ishlaydi</a>
+      <a href="#narx">Tariflar</a>
+    </div>
+    <a class="btn btn-primary" href="https://t.me/TezBozor24_bot" target="_blank">Bepul boshlash ↗</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<header>
+  <div class="wrap hero">
+    <div class="reveal in">
+      <span class="pill"><span class="pulse"></span> Sun'iy intellektli marketplace · O'zbekiston</span>
+      <h1>Soting, sotib oling va <span class="grad-txt">yetkazib bering</span> — bitta ilovada.</h1>
+      <p class="lead">TezBozor — Telegram bot va Mini App. AI yordamchi mahsulotingizni o'zi reklama qiladi, savdolashadi va xaridor topadi. <b style="color:#fff">Tez. Oson. Ishonchli.</b></p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="https://t.me/TezBozor24_bot" target="_blank">🚀 Hoziroq qo'shilish</a>
+        <a class="btn btn-ghost" href="#imkoniyat">Imkoniyatlarni ko'rish</a>
+      </div>
+      <div style="margin-top:16px;font-size:14px;color:var(--muted)">📲 Telegram'da qidiring: <a href="https://t.me/TezBozor24_bot" target="_blank" style="color:#fff;font-weight:700">@TezBozor24_bot</a> · 📢 Kanal: <a href="https://t.me/TezBozorUz24" target="_blank" style="color:#fff;font-weight:700">@TezBozorUz24</a></div>
+      <div class="trust">
+        <div><b><span>24/7</span></b> Aqlli AI yordamchi</div>
+        <div><b><span>0 so'm</span></b> Ro'yxatdan o'tish</div>
+        <div><b><span>100%</span></b> Xavfsiz savdo</div>
+      </div>
+    </div>
+
+    <!-- PHONE -->
+    <div class="phone-wrap reveal in">
+      <div class="glow-blob"></div>
+      <div class="badge-ai">🤖 <div><b style="color:#fff">AI savdolashmoqda…</b><br><span style="color:var(--muted)">"1 200 000 so'mga kelishdik ✅"</span></div></div>
+      <div class="badge-ord">⏱️ <div><b style="color:#fff">Buyurtma #1042</b><br><span style="color:var(--emerald)">Kuryer 8 daqiqada</span></div></div>
+      <div class="phone">
+        <div class="notch"></div>
+        <div class="screen">
+          <div class="app-top">
+            <div class="row"><span>9:41</span><span>📶 🔋</span></div>
+            <h3>🛒 TezBozor</h3>
+            <div class="search">🔎 "arzon telefon ekran almashtirish"…</div>
+          </div>
+          <div class="chips">
+            <span class="chip act">✨ Tavsiya</span>
+            <span class="chip">📱 Texnika</span>
+            <span class="chip">👗 Kiyim</span>
+            <span class="chip">🏠 Uy</span>
+          </div>
+          <div class="cards">
+            <div class="pcard"><div class="img" style="background:linear-gradient(135deg,#2f7bff33,#7c5cff22)">📱</div><div class="b"><div class="nm">iPhone 13 · Toshkent</div><div class="pr">8 900 000 <small>so'm</small></div></div></div>
+            <div class="pcard"><div class="img" style="background:linear-gradient(135deg,#23d3a333,#2f7bff22)">🎧</div><div class="b"><div class="nm">AirPods Pro 2</div><div class="pr">1 450 000 <small>so'm</small></div></div></div>
+            <div class="pcard"><div class="img" style="background:linear-gradient(135deg,#ff5c9333,#7c5cff22)">👟</div><div class="b"><div class="nm">Krossovka · 42</div><div class="pr">320 000 <small>so'm</small></div></div></div>
+            <div class="pcard"><div class="img" style="background:linear-gradient(135deg,#ffcf5c33,#ff5c9322)">⌚</div><div class="b"><div class="nm">Smart soat</div><div class="pr">540 000 <small>so'm</small></div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- MARQUEE -->
+<div class="marq">
+  <div class="marq-in">
+    <span>
+      <b>🤖 AI yordamchi</b> · <b>⏱️ Jonli taymer</b> · <b>🚚 Yetkazib berish kuzatuvi</b> · <b>📒 Qarz daftari</b> · <b>💳 Click & Payme</b> · <b>👥 Ko'p sotuvchi</b> · <b>📅 Rejalashtirilgan post</b> · <b>🛡️ Avto-moderatsiya</b> ·
+    </span>
+    <span aria-hidden="true">
+      <b>🤖 AI yordamchi</b> · <b>⏱️ Jonli taymer</b> · <b>🚚 Yetkazib berish kuzatuvi</b> · <b>📒 Qarz daftari</b> · <b>💳 Click & Payme</b> · <b>👥 Ko'p sotuvchi</b> · <b>📅 Rejalashtirilgan post</b> · <b>🛡️ Avto-moderatsiya</b> ·
+    </span>
+  </div>
+</div>
+
+<!-- IMKONIYATLAR -->
+<section id="imkoniyat">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Barcha imkoniyatlar</span>
+      <h2>Oddiy savdo emas — <span class="grad-txt">to'liq biznes tizimi</span></h2>
+      <p>TezBozor ichida sizga kerak bo'lgan hamma narsa bor: e'lon, to'lov, yetkazish, hisobot va aqlli yordamchi.</p>
+    </div>
+    <div class="grid g3">
+      <div class="feat reveal"><div class="ic">🤖</div><h3>AI ish bajaruvchi yordamchi</h3><p>Oddiy chatbot emas. Bazaga ulangan AI: mahsulot qo'shadi, reklama matnini yozadi, savol-javob beradi va savdolashadi.</p></div>
+      <div class="feat reveal"><div class="ic">📝</div><h3>1 daqiqada e'lon</h3><p>Rasm tashlang — AI sarlavha, tavsif va hududni (viloyat → tuman) o'zi yozib beradi. Kanalga avtomatik joylanadi.</p></div>
+      <div class="feat reveal"><div class="ic">⏱️</div><h3>Jonli buyurtma taymeri</h3><p>Har bir buyurtmada teskari sanoq. Sotuvchi ulgurmasa avtomatik bekor — xaridor kutib qolmaydi.</p></div>
+      <div class="feat reveal"><div class="ic">🚚</div><h3>Yetkazib berishni kuzatish</h3><p>Kuryer joylashuvini ulashadi, xaridor masofa va yetib kelish vaqtini (ETA) real vaqtda ko'radi.</p></div>
+      <div class="feat reveal"><div class="ic">📒</div><h3>Qarz daftari va hisob-kitob</h3><p>To'liq, qarz yoki bo'lib to'lov — hammasi yoziladi. "Qarzlar" ekrani sotuvchida ham, xaridorda ham ko'rinadi.</p></div>
+      <div class="feat reveal"><div class="ic">👥</div><h3>Ko'p sotuvchili do'kon</h3><p>Bitta do'kon — ko'p xodim. Har bir sotuvni kim qilgani yoziladi, daromad esa egasiga to'planadi.</p></div>
+      <div class="feat reveal"><div class="ic">📅</div><h3>Rejalashtirilgan e'lonlar</h3><p>Mahsulotni belgilangan sana va soatda avtomatik sotuvga qo'ying — eng faol vaqtda chiqsin.</p></div>
+      <div class="feat reveal"><div class="ic">🛡️</div><h3>Avto-moderatsiya</h3><p>AI taqiqlangan tovarlarni e'lon bosqichida bloklaydi. Bozor toza, xaridor ishonchi baland.</p></div>
+      <div class="feat reveal"><div class="ic">📊</div><h3>Hisobot va Excel</h3><p>Sotuvlar, mijozlar va buyurtmalar bo'yicha statistika. Bir tugma bilan Excel hisobotini yuklab oling.</p></div>
+      <div class="feat reveal"><div class="ic">⭐</div><h3>Reyting va sharhlar</h3><p>Xaridorlar baho va fikr qoldiradi. Ishonchli sotuvchilar yulduzlar bilan ajralib turadi.</p></div>
+      <div class="feat reveal"><div class="ic">🤝</div><h3>Nizolarni hal qilish</h3><p>Kelishmovchilik bo'lsa — admin aralashuvi bilan adolatli yechim. Har bir tomon himoyalangan.</p></div>
+      <div class="feat reveal"><div class="ic">🎁</div><h3>Referal — taklif qiling, pul ishlang</h3><p>Do'stingizni shaxsiy havolangiz bilan taklif qiling va bonuslar oling. Bir tugmada ulashish.</p></div>
+      <div class="feat reveal"><div class="ic">📢</div><h3>Kanalga avtomatik e'lon</h3><p>Mahsulotingiz @TezBozorUz24 kanaliga avtomatik chiqadi. "Sotib olish" tugmasi to'g'ridan Mini App'ni ochadi.</p></div>
+      <div class="feat reveal"><div class="ic">💳</div><h3>Click & Payme to'lovlari</h3><p>To'lovni onlayn qabul qiling. Har bir tushum va qarz to'lov daftariga yoziladi — shaffof.</p></div>
+      <div class="feat reveal"><div class="ic">🔔</div><h3>Bildirishnomalar</h3><p>Yangi buyurtma, to'lov yoki xabar — hammasi darhol Telegram orqali sizga yetib boradi.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- KIM UCHUN -->
+<section id="kim-uchun">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Ikki tomon · bitta foyda</span>
+      <h2>Xaridorga — qulaylik, <span class="grad-txt">sotuvchiga — daromad</span></h2>
+    </div>
+    <div class="audience">
+      <div class="aud buyer reveal">
+        <h3>🛍️ Xaridorlar uchun</h3>
+        <div class="sub">Arzon, ishonchli va tez xarid — uydan chiqmasdan.</div>
+        <ul>
+          <li><span class="ck">✓</span><div><b>Aqlli qidiruv</b><span>Sheva tilida yozsangiz ham tushunadi: "arzonrog'i bormi?"</span></div></li>
+          <li><span class="ck">✓</span><div><b>Shaxsiy tavsiyalar</b><span>AI sizning didingizga mos mahsulotlarni o'zi taklif qiladi.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Savdolashish imkoni</b><span>Narx ustida AI bilan kelishing — eng yaxshi narxni oling.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Buyurtmani kuzatish</b><span>Kuryer qayerda, qachon yetib keladi — hammasi ko'rinadi.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Xavfsiz to'lov</b><span>Click va Payme orqali, yoki qarz daftari bilan ishonchli savdo.</span></div></li>
+        </ul>
+      </div>
+      <div class="aud seller reveal">
+        <h3>💼 Sotuvchilar uchun</h3>
+        <div class="sub">Do'koningizni cho'ntakda olib yuring va ko'proq soting.</div>
+        <ul>
+          <li><span class="ck">✓</span><div><b>Bepul do'kon</b><span>Bir necha daqiqada o'z do'koningizni oching, hech qanday to'lovsiz.</span></div></li>
+          <li><span class="ck">✓</span><div><b>AI marketolog</b><span>Reklama matni, reels ssenariysi va dinamik narx tavsiyasi — avtomatik.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Boost bilan tepada</b><span>Mahsulotingizni ko'tarib, minglab xaridor oldiga chiqaring.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Xodimlar bilan boshqaruv</b><span>Jamoangizni qo'shing, har kimning savdosini nazorat qiling.</span></div></li>
+          <li><span class="ck">✓</span><div><b>Mijoz fikri tahlili</b><span>AI sharhlarni o'qib, kayfiyatni (ijobiy/salbiy) jamlaydi.</span></div></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MINI APP -->
+<section id="ilova">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">TezBozor Mini App</span>
+      <h2>Telegram ichida — <span class="grad-txt">to'liq ilova</span></h2>
+      <p>Hech narsa o'rnatmasdan oching. Xohlasangiz — bir tugma bilan telefon ekraniga qo'shing va xuddi oddiy ilovadek ishlating.</p>
+    </div>
+
+    <div class="audience" style="align-items:center">
+      <!-- home screen visual -->
+      <div class="reveal" style="display:flex;justify-content:center">
+        <div class="phone" style="width:262px;height:540px">
+          <div class="notch"></div>
+          <div class="screen" style="background:linear-gradient(160deg,#13152f,#0a0b1e);padding:46px 18px 18px">
+            <div style="text-align:center;color:var(--muted);font-size:13px;margin-bottom:26px">📲 Telefon bosh ekrani</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px 12px">
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:var(--grad);display:grid;place-items:center;font-size:26px;box-shadow:0 10px 24px -6px rgba(124,92,255,.8)">🛒</div><div style="font-size:10px;margin-top:6px;color:#fff;font-weight:600">TezBozor</div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+              <div style="text-align:center"><div style="height:52px;border-radius:15px;background:#ffffff14"></div></div>
+            </div>
+            <div style="margin-top:34px;background:var(--card);border:1px solid var(--card-brd);border-radius:16px;padding:14px;display:flex;align-items:center;gap:12px">
+              <div style="width:44px;height:44px;border-radius:13px;background:var(--grad);display:grid;place-items:center;font-size:22px">🛒</div>
+              <div><div style="font-size:13px;font-weight:700">TezBozor o'rnatildi ✅</div><div style="font-size:11px;color:var(--muted)">Bosh ekrandan bir bosishda oching</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- app features list -->
+      <div class="reveal">
+        <h3 style="font-size:25px;letter-spacing:-.5px;margin-bottom:8px">Botdagi hamma narsa — <span class="grad-txt">qulayroq ko'rinishda</span></h3>
+        <p style="color:var(--muted);margin-bottom:22px;font-size:15px">Mini App botning barcha funksiyasini chiroyli, tezkor interfeysda jamlaydi. Rasm va ma'lumot birga, professional katalog ko'rinishida.</p>
+        <ul style="list-style:none;display:grid;gap:14px">
+          <li style="display:flex;gap:13px;align-items:flex-start"><span class="ck" style="flex:none;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;background:var(--grad-soft);border:1px solid var(--card-brd)">📲</span><div><b>Telefon ekraniga o'rnatish</b><div style="color:var(--muted);font-size:13.5px">Bir tugma — ilova bosh ekranda paydo bo'ladi, native ilovadek ochiladi.</div></div></li>
+          <li style="display:flex;gap:13px;align-items:flex-start"><span class="ck" style="flex:none;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;background:var(--grad-soft);border:1px solid var(--card-brd)">🖼️</span><div><b>Pro katalog (grid)</b><div style="color:var(--muted);font-size:13.5px">Rasm + narx + ma'lumot birga, tezkor varaqlanadigan do'kon vitrina.</div></div></li>
+          <li style="display:flex;gap:13px;align-items:flex-start"><span class="ck" style="flex:none;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;background:var(--grad-soft);border:1px solid var(--card-brd)">💼</span><div><b>Sotuvchi paneli</b><div style="color:var(--muted);font-size:13.5px">Mahsulot, buyurtma, to'lovlar tarixi, daromad va qarzlar — bitta joyda.</div></div></li>
+          <li style="display:flex;gap:13px;align-items:flex-start"><span class="ck" style="flex:none;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;background:var(--grad-soft);border:1px solid var(--card-brd)">🛠️</span><div><b>Admin paneli</b><div style="color:var(--muted);font-size:13.5px">Kutilayotgan to'lovlarni tasdiqlash/rad etish, adminlar va moderatsiya navbati.</div></div></li>
+          <li style="display:flex;gap:13px;align-items:flex-start"><span class="ck" style="flex:none;width:26px;height:26px;border-radius:9px;display:grid;place-items:center;background:var(--grad-soft);border:1px solid var(--card-brd)">⚡</span><div><b>Tez va silliq</b><div style="color:var(--muted);font-size:13.5px">Indeks va gzip bilan optimallashtirilgan — sahifalar bir zumda ochiladi.</div></div></li>
+        </ul>
+        <a class="btn btn-primary" style="margin-top:24px" href="https://t.me/TezBozor24_bot" target="_blank">📱 Mini App'ni ochish</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AI HIGHLIGHT -->
+<section id="ai">
+  <div class="wrap">
+    <div class="ai-box reveal">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center" class="ai-inner">
+        <div>
+          <span class="tag">Sun'iy intellekt</span>
+          <h2 style="margin-top:10px">Sizning o'rningizga <span class="grad-txt">ishlaydigan</span> aqlli yordamchi</h2>
+          <p style="color:var(--muted);font-size:16px;margin-bottom:22px">TezBozor AI'si shunchaki javob bermaydi — u haqiqiy ishlarni bajaradi: bazaga yozadi, narx qo'yadi, xaridor bilan savdolashadi.</p>
+          <div class="grid g2" style="gap:14px">
+            <div class="feat" style="padding:18px"><div class="ic" style="width:42px;height:42px;font-size:20px;margin-bottom:10px">💬</div><h3 style="font-size:16px">Savdolashish AI'si</h3><p style="font-size:13.5px">Maxfiy minimal narxgacha pasayadi, undan oshmaydi.</p></div>
+            <div class="feat" style="padding:18px"><div class="ic" style="width:42px;height:42px;font-size:20px;margin-bottom:10px">🔍</div><h3 style="font-size:16px">Sheva qidiruv</h3><p style="font-size:13.5px">Jonli til va shevani ham tushunadi.</p></div>
+            <div class="feat" style="padding:18px"><div class="ic" style="width:42px;height:42px;font-size:20px;margin-bottom:10px">🎬</div><h3 style="font-size:16px">Reels ssenariy</h3><p style="font-size:13.5px">Mahsulotga tayyor video ssenariy yozadi.</p></div>
+            <div class="feat" style="padding:18px"><div class="ic" style="width:42px;height:42px;font-size:20px;margin-bottom:10px">📈</div><h3 style="font-size:16px">Dinamik narx</h3><p style="font-size:13.5px">Talab signallariga qarab narx tavsiya qiladi.</p></div>
+          </div>
+        </div>
+        <div style="background:#0a0b1e;border:1px solid var(--card-brd);border-radius:20px;padding:20px;box-shadow:var(--shadow)">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">🤖 TezBozor AI · jonli suhbat</div>
+          <div style="display:grid;gap:12px;font-size:14px">
+            <div style="background:var(--card);border-radius:14px 14px 14px 4px;padding:11px 14px;max-width:85%">Salom! Bu telefonni 7 mln so'mga berasizmi? 🙂</div>
+            <div style="background:var(--grad);border-radius:14px 14px 4px 14px;padding:11px 14px;max-width:85%;margin-left:auto;color:#fff">7 mln biroz past. Sizga 7.6 mln eng yaxshi narx — ekran himoyachi sovg'a 🎁</div>
+            <div style="background:var(--card);border-radius:14px 14px 14px 4px;padding:11px 14px;max-width:85%">Kelishdik! 🤝</div>
+            <div style="background:rgba(35,211,163,.14);border:1px solid rgba(35,211,163,.4);border-radius:14px;padding:11px 14px;font-size:13px;color:var(--emerald)">✅ Buyurtma rasmiylashtirildi · #1042 · taymer boshlandi</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- QADAMLAR -->
+<section id="qadam">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Boshlash juda oson</span>
+      <h2>4 ta qadamda <span class="grad-txt">birinchi savdo</span></h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal"><h4>Botni oching</h4><p>Telegram'da TezBozor'ni oching va "Boshlash"ni bosing — ro'yxatdan o'tish bepul.</p></div>
+      <div class="step reveal"><h4>Rasm tashlang</h4><p>Mahsulot rasmini yuboring — AI tavsif, narx va hududni o'zi tayyorlaydi.</p></div>
+      <div class="step reveal"><h4>Sotuvga qo'ying</h4><p>E'lon kanalga va Mini App'ga chiqadi. Boost bilan tepaga ko'taring.</p></div>
+      <div class="step reveal"><h4>Pul ishlang</h4><p>Buyurtmalarni qabul qiling, yetkazing va to'lovni Click/Payme orqali oling.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- NARX -->
+<section id="narx">
+  <div class="wrap">
+    <div class="sec-head reveal">
+      <span class="tag">Tariflar</span>
+      <h2>Bepul boshlang, <span class="grad-txt">o'sganda to'lang</span></h2>
+      <p>Asosiy imkoniyatlar har doim bepul. Ko'proq sotmoqchi bo'lsangiz — qo'shimcha kuch oling.</p>
+    </div>
+    <div class="price">
+      <div class="plan reveal">
+        <h3>Bepul</h3>
+        <div class="amt">0 <small>so'm</small></div>
+        <p style="color:var(--muted);font-size:14px">Yangi sotuvchilar va xaridorlar uchun</p>
+        <ul>
+          <li>Cheksiz xarid va qidiruv</li>
+          <li>O'z do'koningizni ochish</li>
+          <li>AI e'lon yordamchisi</li>
+          <li>Buyurtma va taymer tizimi</li>
+          <li>Qarz daftari</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://t.me/TezBozor24_bot" target="_blank">Boshlash</a>
+      </div>
+      <div class="plan pop reveal">
+        <span class="pop-b">Eng ommabop</span>
+        <h3>Pro Sotuvchi</h3>
+        <div class="amt">obuna <small>/ oylik</small></div>
+        <p style="color:var(--muted);font-size:14px">Faol do'konlar uchun to'liq kuch</p>
+        <ul>
+          <li>Bepul tarifdagi hamma narsa</li>
+          <li>Boost — tepada ko'rinish</li>
+          <li>Xodimlar bilan boshqaruv</li>
+          <li>Dinamik narx va reels AI</li>
+          <li>Kengaytirilgan hisobot (Excel)</li>
+          <li>Mijoz fikri tahlili</li>
+        </ul>
+        <a class="btn btn-primary" href="https://t.me/TezBozor24_bot" target="_blank">Pro'ga o'tish</a>
+      </div>
+      <div class="plan reveal">
+        <h3>Boost</h3>
+        <div class="amt">talabga <small>qarab</small></div>
+        <p style="color:var(--muted);font-size:14px">Bitta e'lonni tez ko'tarish</p>
+        <ul>
+          <li>Mahsulot kanal tepasida</li>
+          <li>Ko'proq ko'rish va xaridor</li>
+          <li>Faol vaqtda chiqarish</li>
+          <li>Komissiya asosida shaffof</li>
+          <li>Click / Payme orqali to'lov</li>
+        </ul>
+        <a class="btn btn-ghost" href="https://t.me/TezBozor24_bot" target="_blank">Boost olish</a>
+      </div>
+    </div>
+
+    <!-- komissiya -->
+    <div class="reveal" style="margin-top:22px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;justify-content:space-between;background:linear-gradient(135deg,rgba(35,211,163,.12),rgba(124,92,255,.08));border:1px solid var(--card-brd);border-radius:var(--radius);padding:24px 28px">
+      <div style="display:flex;gap:16px;align-items:flex-start;max-width:680px">
+        <div style="font-size:30px">💰</div>
+        <div>
+          <h3 style="font-size:19px;margin-bottom:6px">Shaffof sotuv komissiyasi</h3>
+          <p style="color:var(--muted);font-size:14.5px">Hech qanday yashirin to'lov yo'q. Komissiya <b style="color:#fff">faqat muvaffaqiyatli yakunlangan sotuvdan</b> olinadi — e'lon qo'yish, qidiruv va xarid har doim bepul. Har bir komissiya to'lov daftarida ko'rinib turadi, siz uni istalgan vaqt nazorat qilasiz.</p>
+        </div>
+      </div>
+      <a class="btn btn-primary" href="https://t.me/TezBozor24_bot" target="_blank">Batafsil →</a>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section>
+  <div class="wrap" style="max-width:780px">
+    <div class="sec-head reveal">
+      <span class="tag">Savol-javob</span>
+      <h2>Tez-tez <span class="grad-txt">so'raladigan savollar</span></h2>
+    </div>
+    <div class="reveal">
+      <details open><summary>TezBozor'dan foydalanish pullikmi?</summary><p>Yo'q. Ro'yxatdan o'tish, do'kon ochish, xarid qilish va asosiy AI yordamchi — barchasi bepul. Faqat Boost va Pro kabi qo'shimcha imkoniyatlar pullik.</p></details>
+      <details><summary>AI yordamchi nima qila oladi?</summary><p>U bazaga ulangan ish bajaruvchi yordamchi: e'lon yozadi, narx tavsiya qiladi, xaridor bilan savdolashadi, savollarga javob beradi va taqiqlangan tovarni bloklaydi.</p></details>
+      <details><summary>Sotuv komissiyasi qanday hisoblanadi?</summary><p>Komissiya faqat muvaffaqiyatli yakunlangan sotuvdan olinadi — e'lon qo'yish, qidiruv va xarid bepul. Miqdor shaffof bo'lib, har bir to'lov daftarda aks etadi, hech qanday yashirin to'lov yo'q.</p></details>
+      <details><summary>Botni qayerdan topaman?</summary><p>Telegram'da <b style="color:#fff">@TezBozor24_bot</b> ni qidiring yoki sahifadagi tugmani bosing. Yangiliklar uchun <b style="color:#fff">@TezBozorUz24</b> kanaliga obuna bo'ling. Mini App'ni telefon ekraniga o'rnatib, native ilovadek ham ishlatishingiz mumkin.</p></details>
+      <details><summary>Pulim yo'qolib qolmaydimi?</summary><p>To'lovlar Click va Payme orqali xavfsiz amalga oshiriladi. Har bir buyurtma, qarz va to'lov daftarga yoziladi — sotuvchi ham, xaridor ham ko'radi.</p></details>
+      <details><summary>Bir nechta xodim bilan ishlasam bo'ladimi?</summary><p>Ha. Bitta do'konga bir nechta xodim qo'shiladi. Har bir savdoni kim qilgani yoziladi, daromad esa do'kon egasiga to'planadi.</p></details>
+      <details><summary>Yetkazib berishni qanday kuzataman?</summary><p>Kuryer o'z joylashuvini ulashadi, xaridor esa masofa va taxminiy yetib kelish vaqtini (ETA) real vaqtda ko'rib turadi.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section>
+  <div class="wrap">
+    <div class="cta-final reveal">
+      <h2>Bugun qo'shiling — <span class="grad-txt">ertaga soting</span></h2>
+      <p>Minglab xaridor va sotuvchi allaqachon TezBozor'da. Sizning o'rningiz tayyor.</p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="https://t.me/TezBozor24_bot" target="_blank">🚀 Bepul qo'shilish</a>
+        <a class="btn btn-ghost" href="https://t.me/TezBozorUz24" target="_blank">📢 Kanalga obuna</a>
+      </div>
+      <div style="margin-top:22px;color:var(--muted);font-size:14px">⭐ Tez · Oson · Ishonchli — TezBozor bilan</div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap foot">
+    <div class="logo" style="font-size:18px"><span class="mark" style="width:32px;height:32px;font-size:17px">🛒</span> TezBozor</div>
+    <div style="display:flex;gap:24px">
+      <a href="#imkoniyat">Imkoniyatlar</a>
+      <a href="#ilova">Mini App</a>
+      <a href="#narx">Tariflar</a>
+      <a href="https://t.me/TezBozor24_bot" target="_blank">@TezBozor24_bot</a>
+      <a href="https://t.me/TezBozorUz24" target="_blank">Kanal</a>
+    </div>
+    <div>© 2026 TezBozor · Tez. Oson. Ishonchli.</div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var els = document.querySelectorAll('.reveal');
+    function showAll(){ for(var i=0;i<els.length;i++) els[i].classList.add('in'); }
+    // IntersectionObserver bo'lmasa — hammasini darhol ko'rsatamiz
+    if(!('IntersectionObserver' in window)){ showAll(); return; }
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold:0, rootMargin:'0px 0px -40px 0px' });
+    els.forEach(function(el){ io.observe(el); });
+    // Zaxira: nimadir noto'g'ri ketsa, 1.5s dan keyin baribir ko'rsatamiz
+    setTimeout(showAll, 1500);
+  })();
+</script>
+</body>
+</html>

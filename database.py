@@ -921,6 +921,62 @@ class Database:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
+
+        # #18 Pro — kvota hisoblagichi: oylik bepul boost va bepul AI reels sonini
+        # davr (YYYY-MM) kesimida sanaydi. Pro = cheksiz; bepul sotuvchi = limitli.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS feature_usage (
+                user_id INTEGER NOT NULL,
+                feature TEXT NOT NULL,            -- 'boost_free' | 'reels'
+                period  TEXT NOT NULL,            -- 'YYYY-MM' (UTC)
+                count   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, feature, period)
+            )
+        """)
+
+        # Universal XABARNOMA — foydalanuvchiga kelgan HAR qanday xabar (murojaat javobi,
+        # Pro, to'lov, nizo, e'lon...) shu yerga yoziladi → app top'da banner + Telegram push.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'info',  -- 'support' | 'pro' | 'payment' | 'dispute' | 'info'
+                title TEXT,
+                body TEXT,
+                ref_id INTEGER,                     -- bog'liq obyekt (support_thread.id, order.id...)
+                is_read INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_notif_user ON notifications(user_id, is_read)")
+
+        # MUROJAAT (support) — foydalanuvchi↔admin 2 tomonlama suhbat. Thread = bitta murojaat
+        # (sabab + holat), messages = yozishmalar. Admin app ichida ko'radi va javob beradi.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS support_threads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,           -- murojaat egasi (foydalanuvchi)
+                reason TEXT,                        -- tanlangan sabab kaliti
+                status TEXT NOT NULL DEFAULT 'open' -- 'open' | 'closed'
+                    CHECK(status IN ('open','closed')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS support_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id INTEGER NOT NULL,
+                sender_role TEXT NOT NULL,          -- 'user' | 'admin'
+                sender_id INTEGER,
+                text TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (thread_id) REFERENCES support_threads(id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_msg_thread ON support_messages(thread_id)")
         conn.commit()
 
         # ===== INDEKSLAR (tezlik #3) =====
@@ -1550,6 +1606,7 @@ class Database:
                    u.shop_name, u.shop_address, u.shop_landmark,
                    u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
                    u.telegram_username, u.phone_number, u.is_verified, u.region_id as seller_region_id,
+                   u.pro_until as seller_pro_until,
                    (SELECT AVG(r.rating) FROM reviews r WHERE r.seller_id=p.seller_id) as avg_rating,
                    (SELECT AVG(r2.product_rating) FROM reviews r2 WHERE r2.product_id=p.id AND r2.product_rating IS NOT NULL) as prod_avg_rating,
                    (SELECT COUNT(*) FROM reviews r3 WHERE r3.product_id=p.id AND r3.product_rating IS NOT NULL) as prod_review_count
@@ -1590,7 +1647,9 @@ class Database:
             params.append(seller_id)
 
         # #18 Boost — yoqilgan boost mahsulotlar har qanday saralashda eng tepada (gegemon).
-        boost = "(p.boosted_until IS NOT NULL AND p.boosted_until>datetime('now')) DESC, "
+        # Boostdan keyin — Pro do'konlar yengil ustunlikka ega (boostsiz ham biroz tepada).
+        boost = ("(p.boosted_until IS NOT NULL AND p.boosted_until>datetime('now')) DESC, "
+                 "(u.pro_until IS NOT NULL AND u.pro_until>datetime('now')) DESC, ")
         order_map = {
             'rating':     ' ORDER BY ' + boost + 'avg_rating DESC, p.created_at DESC',
             'price_asc':  ' ORDER BY ' + boost + 'p.price ASC',
@@ -3174,6 +3233,145 @@ class Database:
             (key, "" if value is None else str(value)))
         conn.commit()
 
+    # ===== KVOTA HISOBLAGICHI (Pro bepul boost / reels #18) =====
+    def get_feature_usage(self, user_id, feature, period):
+        """Berilgan davr (YYYY-MM) ichida 'feature' necha marta ishlatilgan (0 agar yo'q)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT count FROM feature_usage WHERE user_id=? AND feature=? AND period=?",
+            (user_id, feature, period))
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    def incr_feature_usage(self, user_id, feature, period):
+        """Hisoblagichni +1 qiladi (upsert) va yangi qiymatni qaytaradi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO feature_usage (user_id, feature, period, count) VALUES (?,?,?,1) "
+            "ON CONFLICT(user_id, feature, period) DO UPDATE SET count=count+1",
+            (user_id, feature, period))
+        conn.commit()
+        return self.get_feature_usage(user_id, feature, period)
+
+    def count_pending_scheduled_posts(self, seller_id):
+        """Do'kon (ega) bo'yicha hozir kutilayotgan (pending) rejalashtirilgan postlar soni."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM scheduled_posts WHERE seller_id=? AND status='pending'",
+            (seller_id,))
+        return int(cursor.fetchone()[0])
+
+    # ===== XABARNOMALAR (universal inbox) =====
+    def create_notification(self, user_id, kind, title, body, ref_id=None):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO notifications (user_id, kind, title, body, ref_id) VALUES (?,?,?,?,?)",
+            (user_id, kind, title, body, ref_id))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_user_notifications(self, user_id, limit=30):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM notifications WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
+                       (user_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def count_unread_notifications(self, user_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0", (user_id,))
+        return int(cursor.fetchone()[0])
+
+    def mark_notification_read(self, notif_id, user_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?", (notif_id, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def mark_all_notifications_read(self, user_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE notifications SET is_read=1 WHERE user_id=? AND is_read=0", (user_id,))
+        conn.commit()
+        return cursor.rowcount
+
+    # ===== MUROJAAT (support thread + messages) =====
+    def create_support_thread(self, user_id, reason, text):
+        """Yangi murojaat ochadi (thread + birinchi xabar). thread_id qaytaradi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO support_threads (user_id, reason) VALUES (?,?)", (user_id, reason))
+        tid = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO support_messages (thread_id, sender_role, sender_id, text) VALUES (?,?,?,?)",
+            (tid, "user", user_id, text))
+        conn.commit()
+        return tid
+
+    def get_support_thread(self, thread_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM support_threads WHERE id=?", (thread_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def add_support_message(self, thread_id, sender_role, sender_id, text):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO support_messages (thread_id, sender_role, sender_id, text) VALUES (?,?,?,?)",
+            (thread_id, sender_role, sender_id, text))
+        cursor.execute("UPDATE support_threads SET updated_at=CURRENT_TIMESTAMP, status='open' WHERE id=?",
+                       (thread_id,))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_support_messages(self, thread_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM support_messages WHERE thread_id=? ORDER BY created_at ASC, id ASC",
+                       (thread_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def list_support_threads(self, user_id=None, limit=50):
+        """user_id berilsa — o'sha foydalanuvchi murojaatlari; aks holda HAMMASI (admin).
+        Har thread' да oxirgi xabar va sana qaytadi (ro'yxat uchun)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        base = """
+            SELECT t.*, u.name as user_name, u.telegram_id as user_tg,
+                   (SELECT text FROM support_messages m WHERE m.thread_id=t.id
+                    ORDER BY m.created_at DESC, m.id DESC LIMIT 1) as last_text,
+                   (SELECT created_at FROM support_messages m WHERE m.thread_id=t.id
+                    ORDER BY m.created_at DESC, m.id DESC LIMIT 1) as last_at
+            FROM support_threads t JOIN users u ON t.user_id=u.id
+        """
+        if user_id is not None:
+            cursor.execute(base + " WHERE t.user_id=? ORDER BY t.updated_at DESC LIMIT ?", (user_id, limit))
+        else:
+            cursor.execute(base + " ORDER BY t.status='open' DESC, t.updated_at DESC LIMIT ?", (limit,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def set_support_status(self, thread_id, status):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE support_threads SET status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                       (status, thread_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def count_open_support(self):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM support_threads WHERE status='open'")
+        return int(cursor.fetchone()[0])
+
     # ===== TO'LOVLAR (monetizatsiya #18) =====
     def create_payment(self, user_id, purpose, amount, ref_id=None, provider=None):
         """Yangi 'pending' to'lov yozuvi yaratadi; id qaytaradi."""
@@ -3243,7 +3441,7 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         sql = ("SELECT p.*, u.name AS user_name, u.telegram_username, u.telegram_id, "
-               "u.shop_name FROM payments p LEFT JOIN users u ON p.user_id=u.id")
+               "u.phone_number, u.shop_name FROM payments p LEFT JOIN users u ON p.user_id=u.id")
         params = []
         if state:
             sql += " WHERE p.state=?"
@@ -3310,6 +3508,36 @@ class Database:
         cursor.execute("UPDATE users SET pro_until=NULL WHERE id=?", (user_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+    def is_pro(self, owner_id):
+        """Do'kon egasining Pro-obunasi faolmi (pro_until > hozir, UTC). BOT+APP uchun
+        YAGONA manba — pro_until SQLite'да UTC saqlanadi, datetime('now') ham UTC."""
+        if not owner_id:
+            return False
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM users WHERE id=? AND pro_until IS NOT NULL "
+                       "AND pro_until>datetime('now') LIMIT 1", (owner_id,))
+        return cursor.fetchone() is not None
+
+    def pro_locked(self, owner_id):
+        """Pro-imkoniyat qulflanganmi: obuna monetizatsiyasi YOQILGAN (master+subscription)
+        va ega Pro EMAS. Obuna o'chiq bo'lsa hech narsa qulflanmaydi (bot+app bir xil qoida)."""
+        s = self.get_all_settings()
+        on = (s.get("mon_enabled") == "1") and (s.get("mon_subscription_enabled") == "1")
+        return on and not self.is_pro(owner_id)
+
+    def mon_limit(self, key):
+        """Monetizatsiya son-limiti (mon_free_product_limit/mon_free_scheduled_limit) —
+        faqat obuna monetizatsiyasi yoqilganda; aks holda 0 (limitsiz). App'dagi
+        monetization_public bilan bir xil semantika."""
+        s = self.get_all_settings()
+        if not (s.get("mon_enabled") == "1" and s.get("mon_subscription_enabled") == "1"):
+            return 0
+        try:
+            return int(float(s.get(key, "0")))
+        except (TypeError, ValueError):
+            return 0
 
     def count_active_products(self, seller_id):
         """Sotuvchining faol (ko'rinadigan) mahsulotlari soni — Pro limit tekshiruvi uchun."""
@@ -3419,7 +3647,8 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.*, p.name as product_name, p.price as product_price,
-                   u.shop_name, u.phone_number as seller_phone, u.telegram_id as seller_tg
+                   u.shop_name, u.phone_number as seller_phone, u.telegram_id as seller_tg,
+                   (SELECT 1 FROM reviews rv WHERE rv.order_id=o.id AND rv.buyer_id=o.buyer_id LIMIT 1) as has_review
             FROM orders o
             JOIN products p ON o.product_id=p.id
             JOIN users u ON o.seller_id=u.id
@@ -3883,7 +4112,7 @@ class Database:
         sql = """
             SELECT u.id, u.name, u.shop_name, u.shop_address, u.shop_landmark,
                    u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
-                   u.telegram_username, u.phone_number, u.region_id, u.is_verified,
+                   u.telegram_username, u.phone_number, u.region_id, u.is_verified, u.pro_until,
                    (SELECT AVG(r.rating) FROM reviews r WHERE r.seller_id=u.id) as avg_rating,
                    (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id
                     AND p.in_stock=1 AND COALESCE(p.status,'active')='active') as product_count
@@ -3961,7 +4190,7 @@ class Database:
         cursor.execute("""
             SELECT u.id, u.name, u.shop_name, u.shop_address, u.shop_landmark,
                    u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
-                   u.telegram_username, u.phone_number, u.region_id, u.is_verified,
+                   u.telegram_username, u.phone_number, u.region_id, u.is_verified, u.pro_until,
                    (SELECT AVG(r.rating) FROM reviews r WHERE r.seller_id=u.id) as avg_rating,
                    (SELECT COUNT(*) FROM products p WHERE p.seller_id=u.id
                     AND p.in_stock=1 AND COALESCE(p.status,'active')='active') as product_count,
