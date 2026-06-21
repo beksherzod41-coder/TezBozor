@@ -104,13 +104,15 @@ class Database:
             else:
                 conn = sqlite3.connect(self.db_path, check_same_thread=False)
                 conn.row_factory = sqlite3.Row
+                # busy_timeout ENG BIRINCHI o'rnatiladi — keyingi PRAGMA'lar (ayniqsa
+                # journal_mode=WAL'ga o'tish) ham qulf talab qiladi; timeout undan oldin
+                # qo'yilmasa, WAL'ga o'tishning o'zi "database is locked" berishi mumkin
+                # (bir nechta Database() bir faylda yonma-yon init bo'lganda). Audit #2.
+                conn.execute("PRAGMA busy_timeout=5000")
                 # Yozish unumdorligini oshirish uchun
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 conn.execute("PRAGMA foreign_keys=ON")
-                # Ikki jarayon (bot + webapp) bir faylga yozadi — qulf bo'lsa darhol
-                # xato bermay 5s kutadi ("database is locked" oldini oladi). Audit #2.
-                conn.execute("PRAGMA busy_timeout=5000")
             self._local.conn = conn
         return conn
 
@@ -759,6 +761,13 @@ class Database:
             cursor.execute("UPDATE products SET created_by=seller_id WHERE created_by IS NULL")
             conn.commit()
         except Exception as e:
+            # MUHIM: rollback qilmasak, ochiq tranzaksiya yozish-qulfini ushlab qoladi
+            # va shu ulanish boshqa hech narsa yoza olmaydi (init_db keyingi qadamlari
+            # ham, bir faylga ulangan boshqa Database() ham qulflanadi). Audit #2.
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             logging.error(f"shops backfill xatosi: {e}")
 
         self.insert_default_categories()
@@ -4071,8 +4080,12 @@ class Database:
                 GROUP BY parent_id, name
             ) AND parent_id IS NOT NULL
         """)
-        if cursor.rowcount > 0:
-            conn.commit()
+        # DOIMO commit qilamiz: DELETE statement'i hech qator o'chmasa ham Python
+        # sqlite3'da implicit tranzaksiyani ochadi. Avval `if rowcount > 0` shartida
+        # commit qilingani uchun toza bazada (rowcount=0) ulanish OCHIQ tranzaksiya bilan
+        # qolar, yozish-qulfini ushlab, shu faylga ulangan boshqa Database() ni
+        # "database is locked" bilan to'sib qo'yardi (CI dagi collection xatosi). Audit #2.
+        conn.commit()
 
     def get_regions(self, parent_id=None):
         """Viloyatlar (parent_id=None) yoki tumanlar (parent_id=viloyat_id)."""
