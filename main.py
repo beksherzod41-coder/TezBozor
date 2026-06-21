@@ -207,12 +207,9 @@ def all_bottom_menu_texts():
 
 def buyer_bottom_kb(lang):
     """Xaridor rejimidagi pastki Reply klaviatura (tanlangan tilda).
-    MINIAPP_URL bo'lsa — eng tepada to'g'ridan-to'g'ri Mini App'ni ochuvchi tugma."""
-    rows = []
-    if MINIAPP_URL:
-        rows.append([KeyboardButton(t(lang, 'btn_open_app'),
-                                    web_app=WebAppInfo(url=MINIAPP_URL))])
-    rows += [
+    Eng tepada /start tugmasi (xaridor/sotuvchi/admin uchun bir xil)."""
+    rows = [
+        [KeyboardButton("/start")],
         [KeyboardButton(t(lang, 'btn_search_menu'))],
         [KeyboardButton(t(lang, 'btn_my_orders')), KeyboardButton(t(lang, 'btn_profile'))],
         [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],
@@ -221,12 +218,10 @@ def buyer_bottom_kb(lang):
 
 
 def seller_bottom_kb(lang):
-    """Sotuvchi rejimidagi pastki Reply klaviatura (tanlangan tilda)."""
-    rows = []
-    if MINIAPP_URL:
-        rows.append([KeyboardButton(t(lang, 'btn_open_app'),
-                                    web_app=WebAppInfo(url=MINIAPP_URL))])
-    rows += [
+    """Sotuvchi rejimidagi pastki Reply klaviatura (tanlangan tilda).
+    Eng tepada /start tugmasi (xaridor/sotuvchi/admin uchun bir xil)."""
+    rows = [
+        [KeyboardButton("/start")],
         [KeyboardButton(t(lang, 'btn_add_product')), KeyboardButton(t(lang, 'btn_my_products'))],
         [KeyboardButton(t(lang, 'btn_orders')), KeyboardButton(t(lang, 'btn_profile'))],
         [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],

@@ -1297,6 +1297,21 @@ function skeleton(){
   return `<div class="grid">${s}</div>`;
 }
 
+// Desktop'da gorizontal lentani surish: sichqoncha g'ildiragi (vertikal→gorizontal) +
+// bosib-surish (drag). Mobil/trackpad'ga tegmaydi. Bir element uchun bir marta ulanadi.
+function enableHScroll(el){
+  if(!el || el._hs) return; el._hs=true;
+  el.addEventListener('wheel', e=>{
+    if(e.deltaY && Math.abs(e.deltaY)>=Math.abs(e.deltaX)){ el.scrollLeft += e.deltaY; e.preventDefault(); }
+  }, {passive:false});
+  let down=false, moved=false, sx=0, sl=0;
+  el.addEventListener('mousedown', e=>{ down=true; moved=false; sx=e.pageX; sl=el.scrollLeft; });
+  window.addEventListener('mousemove', e=>{ if(!down) return; const dx=e.pageX-sx; if(Math.abs(dx)>4) moved=true; el.scrollLeft=sl-dx; });
+  window.addEventListener('mouseup', ()=>{ down=false; });
+  // Surilgan bo'lsa keyingi click'ni bekor qilamiz (kategoriya tasodifan tanlanmasin).
+  el.addEventListener('click', e=>{ if(moved){ e.stopPropagation(); e.preventDefault(); moved=false; } }, true);
+}
+
 async function loadCategories(){
   try{
     const cats = await api('/api/categories');
@@ -1304,6 +1319,7 @@ async function loadCategories(){
     const chips = document.getElementById('chips');
     chips.innerHTML = `<div class="chip active" data-cat="">${L('all')}</div>` +
       cats.map(c=>`<div class="chip" data-cat="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('');
+    enableHScroll(chips);
     chips.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
       chips.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
       ch.classList.add('active');
@@ -2852,8 +2868,8 @@ async function loadMe(){
   }catch(e){ ME=null; }
   try{ if(!BOT_USERNAME){ BOT_USERNAME = (await api('/api/config')).bot_username; } }catch(e){}
   if(needReg){ showRegistration(); return; }            // app ichida ro'yxatdan o'tish
-  // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz
-  if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); if(catMode==='products') loadProducts(); }
+  // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz (kategoriya "Hammasi" ham!)
+  if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); loadCategories(); if(catMode==='products') loadProducts(); }
   applyMode();
   applyStaticI18n();
 }
