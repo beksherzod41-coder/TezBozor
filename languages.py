@@ -398,7 +398,7 @@ _TEXTS = {
                "и нажмите эту кнопку ещё раз."),
     },
     'btn_official_channel': {
-        'uz': "🛍 Ko'proq mahsulot — kanalimiz",
+        'uz': "🛍 Ko'proq mahsulot — kanalimizda",
         'ru': "🛍 Больше товаров — наш канал",
     },
     'channels_menu_connected': {
