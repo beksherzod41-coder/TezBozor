@@ -83,6 +83,8 @@
   .stars{display:inline-flex; align-items:center; gap:3px; color:var(--fg2,#5a5a60); font-weight:600;}
   .stars b{color:var(--star);}
   .shopname{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .dist{flex:0 0 auto; display:inline-flex; align-items:center; gap:2px; color:var(--accent); font-weight:700; background:var(--accent-soft); border-radius:7px; padding:1px 6px; font-size:11px; white-space:nowrap;}
+  #distBtn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;}
   .buy{margin-top:9px; padding:9px; border:none; border-radius:11px; font-size:13px;
        font-weight:700; background:var(--accent-soft); color:var(--accent); cursor:pointer;
        display:flex; align-items:center; justify-content:center; gap:5px; transition:.15s;}
@@ -343,6 +345,7 @@
         <div class="opt" data-mode="shops">🏪 Do'konlar</div>
       </div>
       <button id="regionBtn" style="margin-top:8px;width:100%;background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;text-align:left;cursor:pointer">🌍 <span id="regionLbl">Barcha hududlar</span></button>
+      <button id="distBtn" style="margin-top:8px;width:100%;background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;text-align:left;cursor:pointer">📍 Masofani ko'rsatish</button>
       <button id="giftBtn" style="margin-top:8px;width:100%;background:linear-gradient(135deg,#db2777,#ec4899);color:#fff;border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:700;text-align:left;cursor:pointer">🎁 <span id="giftBtnLbl">Sovg'a yordamchisi</span></button>
     </div>
     <div class="chips" id="chips"></div>
@@ -949,6 +952,10 @@ const I18N = {
   sp_work_hours:{uz:"Ish soatlari",ru:"Рабочие часы"}, sp_phone:{uz:"Telefon",ru:"Телефон"},
   sp_shop_location:{uz:"Do'kon joylashuvi",ru:"Геолокация магазина"},
   bp_on_map:{uz:"🗺 Xaritada ko'rish",ru:"🗺 Показать на карте"}, bp_shop_info:{uz:"🏪 Do'kon ma'lumoti",ru:"🏪 О магазине"},
+  dist_to_shop:{uz:"Do'kongacha masofa",ru:"Расстояние до магазина"},
+  dist_near_btn:{uz:"📍 Masofani ko'rsatish",ru:"📍 Показать расстояние"},
+  dist_near_on:{uz:"📍 Yaqinlik bo'yicha · ✕",ru:"📍 По близости · ✕"},
+  dist_getting:{uz:"📍 Aniqlanmoqda…",ru:"📍 Определяем…"},
   ask_title:{uz:"Do'konga savol bering",ru:"Спросите магазин"}, ask_hint:{uz:"AI-yordamchi do'kon ma'lumotidan javob beradi (ish vaqti, manzil, narx...).",ru:"AI-помощник ответит из данных магазина (часы, адрес, цена...)."},
   ask_ph:{uz:"Masalan: Yetkazib berasizmi? Qachongacha ochiq?",ru:"Например: Доставляете? До скольки открыто?"},
   ask_btn:{uz:"🤖 So'rash",ru:"🤖 Спросить"}, ask_thinking:{uz:"O'ylayapti...",ru:"Думает..."},
@@ -1361,6 +1368,69 @@ function starHtml(p){
   return `<span class="stars"><b>★</b> ${r.toFixed(1)}</span>`;
 }
 
+// ============================================================
+// MASOFA (xaridor ↔ do'kon) — botdagi mantiq pariteti
+// ------------------------------------------------------------
+// Xaridor lokatsiyani BIR MARTA beradi -> eslab qolinadi (localStorage) ->
+// mahsulot/do'kon kartalarida, batafsil sahifada masofa ko'rsatiladi va
+// ro'yxat eng yaqindan saralanadi. Bot bilan bir xil: haversine × 1.35.
+// ============================================================
+let BUYER_GEO=null;
+try{ const _bg=localStorage.getItem('buyer_geo'); if(_bg){ const o=JSON.parse(_bg); if(o&&o.lat!=null&&o.lon!=null) BUYER_GEO={lat:+o.lat,lon:+o.lon}; } }catch(e){}
+function setBuyerGeo(loc){
+  BUYER_GEO = (loc && loc.lat!=null && loc.lon!=null) ? {lat:+loc.lat, lon:+loc.lon} : null;
+  try{ BUYER_GEO ? localStorage.setItem('buyer_geo', JSON.stringify(BUYER_GEO)) : localStorage.removeItem('buyer_geo'); }catch(e){}
+  updateDistBtn();
+}
+// Bot bilan bir xil: qush uchishi (haversine) × 1.35 = yo'l masofasi taxmini (km, 1 kasr)
+function roadKm(lat, lon){
+  if(!BUYER_GEO || lat==null || lon==null) return null;
+  lat=+lat; lon=+lon; if(isNaN(lat)||isNaN(lon)) return null;
+  const R=6371, rad=x=>x*Math.PI/180;
+  const dLat=rad(lat-BUYER_GEO.lat), dLon=rad(lon-BUYER_GEO.lon);
+  const a=Math.sin(dLat/2)**2 + Math.cos(rad(BUYER_GEO.lat))*Math.cos(rad(lat))*Math.sin(dLon/2)**2;
+  return Math.round(2*R*Math.asin(Math.min(1,Math.sqrt(a)))*1.35*10)/10;
+}
+function fmtKm(km){ if(km==null) return ''; return km<1 ? Math.round(km*1000)+' m' : km.toFixed(1)+' km'; }
+function distBadge(p){
+  const km=roadKm(p.shop_lat, p.shop_lon);
+  return km==null ? '' : `<span class="dist">📍 ~${fmtKm(km)}</span>`;
+}
+// Lokatsiya bo'lsa — masofa bo'yicha barqaror saralash (koordinatasizlar oxirida).
+function byDistance(items){
+  if(!BUYER_GEO || !Array.isArray(items)) return items;
+  return items
+    .map((p,i)=>({p, i, d:roadKm(p.shop_lat, p.shop_lon)}))
+    .sort((a,b)=> ((a.d==null)-(b.d==null)) || ((a.d||0)-(b.d||0)) || (a.i-b.i))
+    .map(x=>x.p);
+}
+function updateDistBtn(){
+  const btn=document.getElementById('distBtn'); if(!btn) return;
+  if(BUYER_GEO){ btn.textContent=L('dist_near_on'); btn.classList.add('on'); }
+  else { btn.textContent=L('dist_near_btn'); btn.classList.remove('on'); }
+}
+async function toggleDistance(){
+  // Yoqilgan bo'lsa -> o'chiramiz (xaridor o'z lokatsiyasini olib tashlamoqchi).
+  if(BUYER_GEO){
+    setBuyerGeo(null);
+    try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+    (catMode==='shops' ? loadShops() : loadProducts());
+    return;
+  }
+  const btn=document.getElementById('distBtn');
+  if(btn){ btn.disabled=true; btn.textContent=L('dist_getting'); }
+  const loc=await getLocation();
+  if(btn) btn.disabled=false;
+  if(loc){
+    setBuyerGeo(loc);
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    (catMode==='shops' ? loadShops() : loadProducts());
+  }else{
+    try{ tg.showAlert(L('bp_loc_failed')); }catch(e){}
+    updateDistBtn();
+  }
+}
+
 function cardHtml(p){
   const op = oldPrice(p);
   const img = p.image_url
@@ -1374,7 +1444,7 @@ function cardHtml(p){
       <div class="body">
         <div><span class="price">${money(p.price)}</span>${p.unit?`<span style="font-size:11px;color:var(--hint)">/${esc(p.unit)}</span>`:''}${op?`<span class="oldprice">${money(op)}</span>`:''}</div>
         <div class="name">${esc(p.name)}</div>
-        <div class="meta">${starHtml(p)} <span class="shopname">${esc(p.shop_name||'')}</span></div>
+        <div class="meta">${starHtml(p)} <span class="shopname">${esc(p.shop_name||'')}</span>${distBadge(p)}</div>
         <button class="buy" data-cart="${p.id}">${L('add_to_cart')}</button>
       </div>
     </div>`;
@@ -1431,7 +1501,7 @@ async function loadProducts(){
   if(activeCat) url += '&category_id=' + activeCat;
   if(REGION_ID) url += '&region_id=' + REGION_ID;
   try{
-    const items = await api(url);
+    const items = byDistance(await api(url));
     CATALOG_ITEMS = items;
     if(!items.length){
       // #9 — oddiy qidiruv topmadi; so'rov bo'lsa AI sheva/slang qidiruvini sinaymiz
@@ -1462,7 +1532,7 @@ async function aiSearchFallback(q){
     if(activeCat) url += '&category_id=' + activeCat;
     if(REGION_ID) url += '&region_id=' + REGION_ID;
     const d = await api(url);
-    const items = (d && d.items) || [];
+    const items = byDistance((d && d.items) || []);
     if(!items.length) return false;
     CATALOG_ITEMS = items;
     const note = `<div style="background:var(--accent-soft);border-radius:11px;padding:9px 12px;margin:2px 12px 8px;font-size:12.5px;color:var(--accent);font-weight:600">${L('ai_search_found').replace('{q}', esc(d.interpreted||q))}</div>`;
@@ -1526,6 +1596,8 @@ async function loadRelated(id){
 // #19 — do'kon ma'lumoti (manzil, mo'ljal, ish vaqti, xarita) — botdagi kanal e'loni pariteti
 function shopInfoHtml(p){
   const rows=[];
+  const _dkm = roadKm(p.shop_lat, p.shop_lon);
+  if(_dkm!=null) rows.push([L('dist_to_shop'), '📍 ~'+fmtKm(_dkm)]);
   if(p.region_label) rows.push([L('sp_region'), p.region_label]);
   if(p.shop_address) rows.push([L('sp_address'), p.shop_address]);
   if(p.shop_landmark) rows.push([L('sp_landmark'), p.shop_landmark]);
@@ -2312,9 +2384,11 @@ document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
 
 function shopCardHtml(s){
   const r=s.avg_rating? `⭐ ${Number(s.avg_rating).toFixed(1)}`:'';
+  const _dkm=roadKm(s.shop_lat, s.shop_lon);
+  const dist=_dkm!=null?` · 📍 ~${fmtKm(_dkm)}`:'';
   return `<div class="ocard" data-shop="${s.id}" data-name="${esc(s.shop_name||'')}" style="cursor:pointer">
     <div class="oname">🏪 ${esc(s.shop_name||'')}${s.is_pro?` <span class="ostatus" style="background:#e6f4ff;color:#1592e2">${L('pro_badge')}</span>`:''}</div>
-    <div class="ometa">${L('bp_n_products').replace('{n}', s.product_count||0)}${r?' · '+r:''}</div>
+    <div class="ometa">${L('bp_n_products').replace('{n}', s.product_count||0)}${r?' · '+r:''}${dist}</div>
     ${s.shop_address?`<div class="oshop">📍 ${esc(s.shop_address)}</div>`:''}
     <div style="color:var(--accent);font-size:13px;font-weight:600;margin-top:6px">${L('bp_view_products')}</div>
   </div>`;
@@ -2327,7 +2401,7 @@ async function loadShops(){
     const sp=new URLSearchParams();
     if(q) sp.set('q', q);
     if(REGION_ID) sp.set('region_id', REGION_ID);
-    const shops=await api('/api/shops'+(sp.toString()?('?'+sp.toString()):''));
+    const shops=byDistance(await api('/api/shops'+(sp.toString()?('?'+sp.toString()):'')));
     if(!shops.length){ content.innerHTML=`<div class="empty"><span class="big">🏪</span>${L('bp_no_shops')}</div>`; return; }
     content.innerHTML=`<div class="olist" style="padding:10px 12px">${shops.map(shopCardHtml).join('')}</div>`;
     content.querySelectorAll('[data-shop]').forEach(c=>c.onclick=()=>openShop(c.dataset.shop, c.dataset.name));
@@ -2381,6 +2455,8 @@ async function renderRegionPicker(parentId, parentLabel){
 }
 document.getElementById('regionBtn').onclick=()=>openRegionPicker();
 document.getElementById('regionClose').onclick=closeRegion;
+document.getElementById('distBtn').onclick=toggleDistance;
+updateDistBtn();   // localStorage'dan tiklangan holatni tugmaga aks ettiramiz
 document.getElementById('giftBtn').onclick=()=>openGiftView();
 document.getElementById('giftClose').onclick=()=>document.getElementById('giftview').classList.remove('open');
 
