@@ -247,6 +247,74 @@ class HaggleIn(BaseModel):
     history: Optional[List[dict]] = None
 
 
+def _haggle_parse_price(text: str):
+    """Xaridor xabaridan taklif qilingan narxni o'qiydi. '150 ming', '150000',
+    '150k', '1.5 mln', '150 000' kabilarni tushunadi. Topolmasa None."""
+    import re as _re2
+    s = (text or "").lower().replace(" ", " ")
+    # "150 ming" / "150k" / "1.5 mln" — ko'paytma birliklari
+    for pat, mult in ((r"(\d+[.,]?\d*)\s*(?:mln|млн|million|миллион)", 1_000_000),
+                      (r"(\d+[.,]?\d*)\s*(?:ming|тыс|k\b|минг)", 1_000)):
+        m = _re2.search(pat, s)
+        if m:
+            try:
+                return int(float(m.group(1).replace(",", ".")) * mult)
+            except (TypeError, ValueError):
+                pass
+    # oddiy raqamlar — guruh bo'shliqlarini olib tashlab ("150 000" → 150000)
+    nums = _re2.findall(r"\d[\d\s]*\d|\d", s)
+    best = 0
+    for n in nums:
+        try:
+            v = int(n.replace(" ", ""))
+            best = max(best, v)
+        except (TypeError, ValueError):
+            pass
+    return best or None
+
+
+def _haggle_fallback(*, listed: float, floor: float, buyer_message: str,
+                     history=None, lang: str = "uz") -> dict:
+    """AI ishlamasa (timeout/bo'sh javob/balans) — savdolashish to'xtab qolmasligi
+    uchun deterministik zaxira.
+
+    MUHIM (eng himoyalangan qism): narx BIRDANIGA floor'ga TUSHMAYDI. Har raundda
+    bo'shliqning kichik ulushiga (~20%) kamayadi — listed'dan boshlab, xaridor
+    qistagan sayin asta-sekin pasayadi. Floor HECH QACHON buzilmaydi, listed'dan
+    oshmaydi (server clamp'i ham buni qo'shimcha kafolatlaydi)."""
+    ru = (lang == "ru")
+    listed_i, floor_i = int(listed), int(floor)
+    gap = max(0, listed_i - floor_i)
+    # nechta raund o'tgan — tarixda sotuvchining (assistant) oldingi takliflari soni
+    rounds = sum(1 for h in (history or []) if (h or {}).get("role") == "assistant")
+    # har raundda bo'shliqning ~20% chegirma; ~5 raunddan keyingina floor'ga yetadi
+    frac = min(1.0, 0.20 * (rounds + 1))
+    target = max(floor_i, int(round(listed_i - gap * frac)))
+
+    offered = _haggle_parse_price(buyer_message)
+    if offered is None:
+        return {"reply": ("Сколько предложите? Назовите свою цену 🙂" if ru
+                          else "Qancha taklif qilasiz? O'z narxingizni ayting 🙂"),
+                "offer_price": listed_i, "accepted": False}
+    if offered >= listed_i:
+        return {"reply": (f"Хорошо, оформляем за {listed_i} 🤝" if ru
+                          else f"Mayli, {listed_i} so'mga rasmiylashtiramiz 🤝"),
+                "offer_price": listed_i, "accepted": True}
+    # xaridor bizning (asta tushayotgan) so'rovimizga yetdi → kelishamiz
+    if offered >= target:
+        return {"reply": (f"Договорились, пусть будет {target} 🤝" if ru
+                          else f"Kelishdik, {target} so'm bo'la qolsin 🤝"),
+                "offer_price": target, "accepted": True}
+    # hali past — bittada tushmaymiz, ozgina chegirma bilan qarshi-taklif beramiz
+    if target <= floor_i:
+        reply = ("Это уже самая низкая цена, ниже не могу. Берём? 🙂" if ru
+                 else "Bundan past tusholmayman, eng yaxshi narx shu. Olamizmi? 🙂")
+    else:
+        reply = (f"Столько не выйдет, но уступлю — пусть будет {target} 🙂" if ru
+                 else f"Bunga bo'lmaydi-yu, sal yon beraman — {target} so'm bo'lsin 🙂")
+    return {"reply": reply, "offer_price": target, "accepted": False}
+
+
 @app.post("/api/product/{product_id}/haggle")
 async def api_product_haggle(product_id: int, body: HaggleIn, authorization: str = Header(None)):
     """#8 AI savdolashish — sotuvchi nomidan, maxfiy floor bilan. Kelishilsa narx
@@ -258,8 +326,10 @@ async def api_product_haggle(product_id: int, body: HaggleIn, authorization: str
         raise HTTPException(status_code=400, detail="empty")
     if len(msg) > 500:
         raise HTTPException(status_code=400, detail="too_long")
-    if not ai_assistant.is_enabled():
-        raise HTTPException(status_code=503, detail="ai_disabled")
+    # Arzon validatsiya guardlari AI tekshiruvidan OLDIN: mavjud emas / o'z mahsuloti /
+    # savdolashish o'chiq holatlar AI sozlanishidan qat'i nazar bir xil javob berishi
+    # kerak (aks holda AI yo'q muhitda — masalan CI — 503 "ai_disabled" own_product'ni
+    # to'sib qo'yardi). is_enabled() 503'i faqat haqiqiy AI chaqiruvidan oldin tekshiriladi.
     prod = dict(db.get_product_by_id(product_id) or {})
     if not prod:
         raise HTTPException(status_code=404, detail="not_found")
@@ -271,10 +341,16 @@ async def api_product_haggle(product_id: int, body: HaggleIn, authorization: str
         raise HTTPException(status_code=409, detail="haggle_off")
     floor = float(floor)
     lang = get_user_lang(user) or DEFAULT_LANG
-    res = await ai_assistant.haggle(listed_price=listed, floor_price=floor,
-                                    history=body.history, buyer_message=msg, lang=lang)
+    # AI yoqilgan bo'lsa — u bilan savdolashamiz. AI o'chiq YOKI muvaffaqiyatsiz
+    # (timeout/bo'sh javob/balans) bo'lsa — savdolashish to'xtab qolmasligi uchun
+    # deterministik zaxiraga o'tamiz (floor server'da baribir himoyalangan).
+    res = None
+    if ai_assistant.is_enabled():
+        res = await ai_assistant.haggle(listed_price=listed, floor_price=floor,
+                                        history=body.history, buyer_message=msg, lang=lang)
     if not res:
-        raise HTTPException(status_code=502, detail="ai_error")
+        res = _haggle_fallback(listed=listed, floor=floor, buyer_message=msg,
+                               history=body.history, lang=lang)
     # SERVER himoyasi: narx hech qachon floor'dan past / listed'dan baland bo'lmaydi
     price = max(floor, min(float(res["offer_price"]), listed))
     if res["accepted"]:
@@ -1078,6 +1154,7 @@ class RegisterIn(BaseModel):
     name: str
     phone: str
     language: str = "uz"
+    ref: Optional[str] = None   # referral kodi (/start REF... → ?ref=... → App)
 
 
 @app.post("/api/register")
@@ -1107,6 +1184,23 @@ async def api_register(body: RegisterIn, authorization: str = Header(None)):
     if uname:
         fields["telegram_username"] = uname
     db.update_user(uid, **fields)
+
+    # Referral — /start REF... orqali kelgan bo'lsa (bot complete_registration parite)
+    ref_code = (body.ref or "").strip()
+    if ref_code:
+        try:
+            referrer = db.get_user_by_referral_code(ref_code)
+            if referrer and referrer["id"] != uid:
+                db.update_user(uid, referred_by=referrer["id"])
+                db.increment_referral_count(referrer["id"])
+                if referrer.get("telegram_id"):
+                    rlang = get_user_lang(referrer) or DEFAULT_LANG
+                    await _tg_call("sendMessage", {
+                        "chat_id": referrer["telegram_id"],
+                        "text": t(rlang, "new_referral", name=html.escape(name)),
+                        "parse_mode": "HTML"})
+        except Exception as e:
+            logging.warning(f"register referral xato: {e}")
     # Adminga yangi foydalanuvchi haqida xabar (xato yutiladi)
     try:
         if ADMIN_ID:

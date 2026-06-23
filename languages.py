@@ -255,6 +255,14 @@ _TEXTS = {
         'uz': "🛍 <b>TezBozor ilovasi</b> — bozorni to'liq ko'rish, buyurtma berish va boshqarish uchun pastdagi tugmani bosing 👇",
         'ru': "🛍 <b>Приложение TezBozor</b> — нажмите кнопку ниже, чтобы открыть весь маркетплейс, оформлять и управлять заказами 👇",
     },
+    'reg_app_welcome': {
+        'uz': "🚀 <b>TezBozor'ga xush kelibsiz!</b>\n\nRo'yxatdan o'tish, xarid qilish va sotish — hammasi ilovada. Boshlash uchun pastdagi tugmani bosing 👇",
+        'ru': "🚀 <b>Добро пожаловать в TezBozor!</b>\n\nРегистрация, покупки и продажи — всё в приложении. Нажмите кнопку ниже, чтобы начать 👇",
+    },
+    'reg_app_btn': {
+        'uz': "🚀 Ilovada ro'yxatdan o'tish",
+        'ru': "🚀 Регистрация в приложении",
+    },
     'search_menu_title': {
         'uz': "🔍 <b>Qidiruv</b>\n\nNima qidiramiz? Bo'limni tanlang:",
         'ru': "🔍 <b>Поиск</b>\n\nЧто ищем? Выберите раздел:",

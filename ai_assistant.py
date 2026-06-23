@@ -1163,8 +1163,12 @@ _HAGGLE_SYSTEM = (
     "1) NEVER reveal, hint at, or mention that you have a minimum/secret price or what it is.\n"
     "2) NEVER agree to any price BELOW {FLOOR}. If the buyer offers below {FLOOR}, politely refuse "
     "and counter with a price between their offer and the listed price (but >= {FLOOR}).\n"
-    "3) Concede slowly: start near the listed price, lower only a little when the buyer pushes.\n"
-    "4) If the buyer's offer is >= {FLOOR} and reasonable, you MAY accept it (or settle slightly higher).\n"
+    "3) CONCEDE GRADUALLY — this is the most important rule. Start AT the listed price. "
+    "Each time the buyer pushes, lower your offer by only a SMALL step (about 5-15% of the gap "
+    "between listed and your minimum). NEVER drop straight to your minimum, and NEVER make a big "
+    "sudden jump — sellers hate that. It must take several rounds of pushing to approach {FLOOR}.\n"
+    "4) Only accept once the buyer meets your current (slowly lowered) asking price and it is "
+    ">= {FLOOR}. Do not give your best price on the first or second message.\n"
     "Reply in {LANG}, 1-2 short sentences, friendly.\n"
     'Respond ONLY with JSON: {"reply": "<message>", "offer_price": <integer current or agreed price>, '
     '"accepted": true|false}. accepted=true ONLY for a final deal at offer_price (>= your minimum).'
@@ -1185,29 +1189,43 @@ async def haggle(*, listed_price, floor_price, history, buyer_message, lang="uz"
         msgs.append({"role": role, "content": str(h.get("content") or "")[:500]})
     msgs.append({"role": "user", "content": str(buyer_message)[:500]})
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": MODEL, "messages": msgs, "max_tokens": 250,
+    # max_tokens 400 — 250'da DeepSeek ba'zan javobni kesib BO'SH content qaytarardi
+    # ("Expecting value: line 1 column 1") va savdolashish 502 bilan o'lardi.
+    payload = {"model": MODEL, "messages": msgs, "max_tokens": 400,
                "temperature": 0.6, "response_format": {"type": "json_object"}, "stream": False}
-    try:
-        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions", json=payload, headers=headers)
-            if resp.status_code >= 400:
-                log.warning(f"Haggle API xatosi {resp.status_code}")
-                return None
-            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
-            try:
-                offer = int(float(parsed.get("offer_price") or listed_price))
-            except (TypeError, ValueError):
-                offer = int(listed_price)
-            return {
-                "reply": str(parsed.get("reply") or "")[:500],
-                "offer_price": offer,
-                "accepted": bool(parsed.get("accepted")),
-            }
-    except Exception as e:
-        log.warning(f"Haggle xato: {e}")
-        return None
+    # Bo'sh/buzuq javob — vaqtinchalik DeepSeek nuqsoni; bir marta qayta uriniladi.
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+                resp = await client.post(f"{BASE_URL}/chat/completions", json=payload, headers=headers)
+                if resp.status_code >= 400:
+                    log.warning(f"Haggle API xatosi {resp.status_code}: {resp.text[:300]}")
+                    return None
+                data = resp.json()
+                choice = (data.get("choices") or [{}])[0]
+                content = (choice.get("message", {}).get("content") or "").strip()
+                if not content:
+                    log.warning(f"Haggle bo'sh content (urinish {attempt + 1}), "
+                                f"finish_reason={choice.get('finish_reason')}")
+                    continue  # qayta urinib ko'ramiz
+                m = re.search(r"\{.*\}", content, re.DOTALL)
+                parsed = json.loads(m.group(0) if m else content)
+                try:
+                    offer = int(float(parsed.get("offer_price") or listed_price))
+                except (TypeError, ValueError):
+                    offer = int(listed_price)
+                reply = str(parsed.get("reply") or "").strip()[:500]
+                if not reply:
+                    log.warning(f"Haggle reply bo'sh (urinish {attempt + 1})")
+                    continue
+                return {
+                    "reply": reply,
+                    "offer_price": offer,
+                    "accepted": bool(parsed.get("accepted")),
+                }
+        except Exception as e:
+            log.warning(f"Haggle xato (urinish {attempt + 1}): {e}")
+    return None
 
 
 # ============================================================

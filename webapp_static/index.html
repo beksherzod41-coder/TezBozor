@@ -1303,6 +1303,10 @@ const I18N = {
   reg_bad_name:{uz:"Ism familiyangizni to'liq kiriting.",ru:"Введите имя и фамилию полностью."},
   reg_bad_phone:{uz:"Telefon raqami noto'g'ri.",ru:"Неверный номер телефона."},
   reg_success:{uz:"✅ Ro'yxatdan o'tdingiz!",ru:"✅ Вы зарегистрированы!"},
+  reg_role:{uz:"Kim sifatida kirasiz?",ru:"Кем хотите войти?"},
+  reg_role_buyer:{uz:"🛒 Xaridor",ru:"🛒 Покупатель"}, reg_role_seller:{uz:"🏪 Sotuvchi",ru:"🏪 Продавец"},
+  reg_role_hint:{uz:"Keyin ilova ichida rolni o'zgartira olasiz.",ru:"Роль можно сменить позже в приложении."},
+  reg_seller_next:{uz:"Endi do'kon ma'lumotlarini to'ldiring.",ru:"Теперь заполните данные магазина."},
 };
 function L(k){ const e=I18N[k]; return e ? (e[LANG]||e.uz) : k; }
 function activeCatModeShops(){ try{ return document.querySelector('#catMode .opt[data-mode=shops]').classList.contains('on'); }catch(e){ return false; } }
@@ -2170,12 +2174,15 @@ function _hagBubble(text, me){
 async function hagSend(){
   const inp=document.getElementById('hagInput'), send=document.getElementById('hagSend');
   const q=(inp.value||'').trim(); if(!q) return;
+  // joriy xabar server'ga `message` sifatida alohida boradi — history'ga uni
+  // qo'shishdan OLDINGI nusxani yuboramiz (aks holda model xabarni 2 marta ko'radi)
+  const hist=HAG.history.slice();
   inp.value=''; _hagBubble(q, true); HAG.history.push({role:'user',content:q});
   send.disabled=true; const old=send.textContent; send.textContent='...';
   const typing=document.createElement('div'); typing.id='hagTyping'; typing.style.cssText='align-self:flex-start;color:var(--hint);font-size:12px;padding:4px 8px'; typing.textContent=L('hag_thinking');
   document.getElementById('hagMsgs').appendChild(typing);
   try{
-    const r=await apiSend('/api/product/'+HAG.pid+'/haggle','POST',{message:q, history:HAG.history});
+    const r=await apiSend('/api/product/'+HAG.pid+'/haggle','POST',{message:q, history:hist});
     typing.remove();
     _hagBubble(r.reply, false); HAG.history.push({role:'assistant',content:r.reply});
     if(r.accepted && r.agreed_price){ HAG.deal=r.agreed_price; _hagShowDeal(); }
@@ -2974,12 +2981,23 @@ async function loadMe(){
 }
 
 // ---------- RO'YXATDAN O'TISH (app ichida — yangi xaridor) ----------
-let regState={name:'',phone:'',lang:'uz'};
+let regState={name:'',phone:'',lang:'uz',role:'buyer',ref:''};
+// Referral kodi: bot ?ref=... query bilan ochadi; t.me startapp orqali ham kelishi mumkin
+function _regRefCode(){
+  try{
+    const q=new URLSearchParams(location.search||'').get('ref');
+    if(q) return String(q);
+    const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';
+    const m=String(sp).match(/^ref[_-](.+)$/i);
+    if(m) return m[1];
+  }catch(e){}
+  return '';
+}
 function showRegistration(){
   const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
   const rl = String(u.language_code||'').toLowerCase().startsWith('ru') ? 'ru' : 'uz';
   LANG = rl; applyStaticI18n();
-  regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl };
+  regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl, role:'buyer', ref:_regRefCode() };
   renderRegistration();
   document.getElementById('regview').classList.add('open');
 }
@@ -2997,11 +3015,18 @@ function renderRegistration(){
         <div class="opt ${regState.lang==='uz'?'on':''}" data-rl="uz">🇺🇿 O‘zbekcha</div>
         <div class="opt ${regState.lang==='ru'?'on':''}" data-rl="ru">🇷🇺 Русский</div>
       </div></div>
+    <div class="cosec"><div class="lbl">${L('reg_role')}</div>
+      <div class="seg">
+        <div class="opt ${regState.role==='buyer'?'on':''}" data-role="buyer">${L('reg_role_buyer')}</div>
+        <div class="opt ${regState.role==='seller'?'on':''}" data-role="seller">${L('reg_role_seller')}</div>
+      </div>
+      <div style="font-size:12px;color:var(--hint);margin-top:5px">${L('reg_role_hint')}</div></div>
   </div>
-  <div class="cobar"><button id="regSubmit">${L('reg_submit')}</button></div>`;
+  <div class="cobar"><button id="regSubmit">${regState.role==='seller'?L('reg_role_seller'):L('reg_submit')}</button></div>`;
   document.getElementById('regName').oninput=e=>regState.name=e.target.value;
   document.getElementById('regPhone').oninput=e=>regState.phone=e.target.value;
   b.querySelectorAll('[data-rl]').forEach(o=>o.onclick=()=>{ regState.lang=o.dataset.rl; LANG=regState.lang; applyStaticI18n(); renderRegistration(); });
+  b.querySelectorAll('[data-role]').forEach(o=>o.onclick=()=>{ regState.role=o.dataset.role; renderRegistration(); });
   document.getElementById('regSubmit').onclick=submitRegistration;
 }
 async function submitRegistration(){
@@ -3010,11 +3035,20 @@ async function submitRegistration(){
   if(!(regState.phone||'').trim()){ tg.showAlert(L('reg_bad_phone')); return; }
   const btn=document.getElementById('regSubmit'); btn.disabled=true; btn.textContent=L('sending');
   try{
-    await apiSend('/api/register','POST',{name, phone:regState.phone.trim(), language:regState.lang});
+    const payload={name, phone:regState.phone.trim(), language:regState.lang};
+    if(regState.ref) payload.ref=regState.ref;
+    await apiSend('/api/register','POST',payload);
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     document.getElementById('regview').classList.remove('open');
-    tg.showAlert(L('reg_success'));
-    await loadMe(); loadCategories(); loadProducts(); switchTab('catalog');
+    const wantSeller=(regState.role==='seller');
+    await loadMe(); loadCategories(); loadProducts();
+    if(wantSeller){
+      // Sotuvchi sifatida kirdi → do'kon ma'lumotlari formasi (admin tasdig'iga ariza)
+      tg.showAlert(L('reg_success')+' '+L('reg_seller_next'));
+      switchTab('catalog'); becomeSeller();
+    }else{
+      tg.showAlert(L('reg_success')); switchTab('catalog');
+    }
   }catch(e){
     btn.disabled=false; btn.textContent=L('reg_submit');
     const m=e.message;

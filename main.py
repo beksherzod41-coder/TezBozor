@@ -637,6 +637,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             referrer = db.get_user_by_referral_code(ref_code)
             if referrer:
                 context.user_data['referred_by'] = referrer['id']
+                # App ro'yxatiga uzatish uchun xom kodni ham saqlaymiz (?ref=...)
+                context.user_data['ref_code'] = ref_code
                 logging.info(f"New user referred by {referrer['name']} (code={ref_code})")
 
     # Deeplink: /start product_123 — mahsulot sahifasiga o'tish.
@@ -892,7 +894,34 @@ async def _finalize_staff_registration(update, context):
 
 
 async def registration_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Ro'yxatdan o'tishning birinchi qadami — tilni tanlash
+    """Ro'yxatdan o'tishning birinchi qadami.
+
+    APP-FIRST: MINIAPP_URL bo'lsa, yangi foydalanuvchi to'g'ridan-to'g'ri Mini App'ga
+    yo'naltiriladi — ro'yxatdan o'tish, rol tanlash (xaridor/sotuvchi) va xarid
+    hammasi ilovada bo'ladi. Faqat istisnolar bot ichida qoladi:
+      • staff_<kod> taklifi — App hali do'konga bog'lamaydi (keyingi bosqich);
+      • MINIAPP_URL o'rnatilmagan — eski ichki FSM (til→telefon→ism→rol) fallback."""
+    has_staff_invite = bool(context.user_data.get('staff_invite'))
+    if MINIAPP_URL and not has_staff_invite:
+        # Telegram tilidan boshlang'ich til (DB hali yo'q) — ilova ichida o'zgartirsa bo'ladi
+        lc = (update.effective_user.language_code or '').lower()
+        lang = 'ru' if lc.startswith('ru') else DEFAULT_LANG
+        url = MINIAPP_URL
+        ref_code = context.user_data.get('ref_code')
+        if ref_code:
+            from urllib.parse import quote
+            sep = '&' if '?' in url else '?'
+            url = f"{url}{sep}ref={quote(str(ref_code), safe='')}"
+        await update.message.reply_text(
+            t(lang, 'reg_app_welcome'),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(t(lang, 'reg_app_btn'), web_app=WebAppInfo(url=url))
+            ]]),
+            parse_mode='HTML'
+        )
+        return ConversationHandler.END
+
+    # Fallback (staff taklifi yoki MINIAPP_URL yo'q) — eski ichki ro'yxat: tilni tanlash
     keyboard = [
         [InlineKeyboardButton(LANGS['uz'], callback_data="reglang_uz")],
         [InlineKeyboardButton(LANGS['ru'], callback_data="reglang_ru")],

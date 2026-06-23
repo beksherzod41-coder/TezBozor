@@ -542,6 +542,47 @@ def test_haggle_deal_applied_and_floor_protected(client, monkeypatch):
     assert db.get_order_by_id(oid)["total_price"] == 1400   # 2 × 700 (kelishilgan)
 
 
+def test_haggle_fallback_when_ai_fails(client, monkeypatch):
+    """#8 — AI muvaffaqiyatsiz (None) bo'lsa savdolashish 502 bermaydi: deterministik
+    zaxira ishlaydi. Narx BIRDANIGA floor'ga tushmaydi (bosqichma-bosqich), floor
+    hech qachon buzilmaydi, listed'dan oshmaydi."""
+    db = webapp_server.db
+    db.update_product_fields(client.pid, min_price=700)   # listed=1000, floor=700
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: True)
+    async def dead_haggle(*, listed_price, floor_price, history, buyer_message, lang="uz"):
+        return None   # DeepSeek bo'sh/timeout
+    monkeypatch.setattr(webapp_server.ai_assistant, "haggle", dead_haggle)
+
+    # 1-raund past taklif (500) → birdaniga floor (700) ga TUSHMAYDI: listed'ga
+    # yaqin, faqat ozgina chegirma; floor < taklif <= listed oralig'ida
+    r = client.post(f"/api/product/{client.pid}/haggle", headers=hdr(5001),
+                    json={"message": "500 ga ber aka", "history": []})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["accepted"] is False
+    assert 700 < j["offer_price"] <= 1000   # floor'ga sakramadi
+    first = j["offer_price"]
+
+    # ko'p raund qistalsa → narx asta-sekin floor'ga yaqinlashadi (lekin tushmaydi)
+    hist = [{"role": "assistant", "content": "x"}] * 5
+    r2 = client.post(f"/api/product/{client.pid}/haggle", headers=hdr(5003),
+                     json={"message": "500 dan oshmayman", "history": hist})
+    assert r2.status_code == 200
+    later = r2.json()["offer_price"]
+    assert later < first and later >= 700   # pasaydi, ammo floor'dan past emas
+
+    # listed'dan yuqori/teng taklif → darhol kelishuv, lekin listed'dan oshmaydi
+    r3 = client.post(f"/api/product/{client.pid}/haggle", headers=hdr(5001),
+                     json={"message": "1200 ga olaman", "history": []})
+    assert r3.status_code == 200
+    assert r3.json()["accepted"] is True and r3.json()["agreed_price"] == 1000
+
+    # raqamsiz xabar → narx so'raydi, 502 emas
+    r4 = client.post(f"/api/product/{client.pid}/haggle", headers=hdr(5003),
+                     json={"message": "arzonroq qiling", "history": []})
+    assert r4.status_code == 200 and r4.json()["accepted"] is False
+
+
 def test_shop_ai_answer_rag(client, monkeypatch):
     """#3 AI-menejer — savolga do'kon faktlaridan javob (AI mock bilan)."""
     captured = {}
@@ -1483,6 +1524,21 @@ def test_register_idempotent_for_existing(client):
     r = client.post("/api/register", headers=hdr(5001),
                     json={"name": "X", "phone": "998901112233"})
     assert r.status_code == 200 and r.json().get("already") is True
+
+
+def test_register_with_referral_applies(client):
+    """Mini App ro'yxati ?ref=<kod> bilan kelsa — referral bog'lanadi va hisob oshadi
+    (bot /start REF... parite)."""
+    db = webapp_server.db
+    referrer_id = db.get_user_by_telegram_id(5002)["id"]
+    db.update_user(referrer_id, referral_code="TESTREF1", referral_count=0)
+    r = client.post("/api/register", headers=hdr(6010),
+                    json={"name": "Referral Test", "phone": "901112233",
+                          "language": "uz", "ref": "TESTREF1"})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    new_uid = r.json()["id"]
+    assert db.get_user_by_id(new_uid)["referred_by"] == referrer_id
+    assert db.get_user_by_id(referrer_id)["referral_count"] == 1
 
 
 # ===== REKLAMA generatori (preview + hozir e'lon qilish) =====
