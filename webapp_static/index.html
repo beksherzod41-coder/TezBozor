@@ -1275,6 +1275,8 @@ const I18N = {
   bp_join_owner:{uz:"Siz do'kon egasisiz — boshqa do'konga qo'shila olmaysiz.",ru:"Вы владелец магазина — нельзя присоединиться к другому."},
   bp_join_already:{uz:"Siz allaqachon shu do'kondasiz.",ru:"Вы уже в этом магазине."},
   bp_join_admin:{uz:"Admin do'konga xodim bo'lib qo'shila olmaydi.",ru:"Админ не может присоединиться как сотрудник."},
+  staff_invite_confirm:{uz:"«{shop}» do'koniga xodim bo'lib qo'shilasizmi?",ru:"Присоединиться к магазину «{shop}» как сотрудник?"},
+  staff_invite_done:{uz:"✅ «{shop}» do'koniga so'rovingiz yuborildi — ega tasdig'ini kuting.",ru:"✅ Запрос в магазин «{shop}» отправлен — ждите подтверждения владельца."},
   bp_all_regions:{uz:"Barcha hududlar",ru:"Все регионы"}, bp_whole_region:{uz:"butun viloyat",ru:"вся область"},
   bp_region_title:{uz:"🌍 Hudud",ru:"🌍 Регион"},
   adm_role_all:{uz:"Hammasi",ru:"Все"}, adm_role_buyers:{uz:"Xaridorlar",ru:"Покупатели"}, adm_role_sellers:{uz:"Sotuvchilar",ru:"Продавцы"},
@@ -1307,6 +1309,7 @@ const I18N = {
   reg_role_buyer:{uz:"🛒 Xaridor",ru:"🛒 Покупатель"}, reg_role_seller:{uz:"🏪 Sotuvchi",ru:"🏪 Продавец"},
   reg_role_hint:{uz:"Keyin ilova ichida rolni o'zgartira olasiz.",ru:"Роль можно сменить позже в приложении."},
   reg_seller_next:{uz:"Endi do'kon ma'lumotlarini to'ldiring.",ru:"Теперь заполните данные магазина."},
+  reg_staff_hint:{uz:"Siz «{shop}» do'koniga xodim sifatida qo'shilyapsiz. Ro'yxatdan o'tgach, ega tasdig'ini kutasiz.",ru:"Вы присоединяетесь к магазину «{shop}» как сотрудник. После регистрации дождитесь подтверждения владельца."},
 };
 function L(k){ const e=I18N[k]; return e ? (e[LANG]||e.uz) : k; }
 function activeCatModeShops(){ try{ return document.querySelector('#catMode .opt[data-mode=shops]').classList.contains('on'); }catch(e){ return false; } }
@@ -2244,6 +2247,51 @@ async function submitJoinCode(){
 }
 document.getElementById('jcClose').onclick=()=>document.getElementById('joincodeview').classList.remove('open');
 
+// ---------- 2-BOSQICH: staff_<kod> deeplink (App ichida do'konga qo'shilish) ----------
+// Bot web_app tugmasi start_param uzatmaydi → kodni ?staff= query'da beramiz.
+// startapp=staff_<kod> (Main Mini App) bilan kelsa — start_param'dan ham o'qiymiz.
+function _pendingStaffCode(){
+  try{
+    const q=new URLSearchParams(location.search||'').get('staff');
+    if(q) return String(q).trim().toUpperCase();
+    const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';
+    const m=String(sp).match(/^staff[_-](.+)$/i);
+    if(m) return m[1].trim().toUpperCase();
+  }catch(e){}
+  return '';
+}
+let _staffInviteHandled=false;
+// Boot'da chaqiriladi: ro'yxatdan o'tgan bo'lsa — tasdiqlab bog'laymiz; bo'lmasa
+// registratsiya oqimi (showRegistration) kodni saqlab, ro'yxatdan keyin o'zi chaqiradi.
+function maybeHandleStaffInvite(){
+  if(_staffInviteHandled) return;
+  const code=_pendingStaffCode();
+  if(!code || !ME) return;
+  _staffInviteHandled=true;
+  acceptStaffInvite(code);
+}
+async function acceptStaffInvite(code){
+  let info=null;
+  try{ info=await api('/api/staff/invite-info?code='+encodeURIComponent(code)); }catch(e){}
+  if(!info || !info.valid){ tg.showAlert(L('bp_join_invalid')); return; }
+  const shopName=info.shop_name||'';
+  const go=async()=>{
+    try{
+      const r=await apiSend('/api/join-with-code','POST',{code});
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      tg.showAlert(L('staff_invite_done').replace('{shop}', r.shop_name||shopName));
+      ME=null; await loadMe(); switchMode('seller');
+    }catch(e){
+      const map={invite_invalid:L('bp_join_invalid'),owner_cannot_join:L('bp_join_owner'),
+        already_in_this_shop:L('bp_join_already'),admin_cannot_join:L('bp_join_admin')};
+      tg.showAlert(map[e.message]||(L('err')+': '+e.message));
+    }
+  };
+  const ask=L('staff_invite_confirm').replace('{shop}', shopName);
+  if(tg.showConfirm) tg.showConfirm(ask, ok=>{ if(ok) go(); });
+  else if(confirm(ask)) go();
+}
+
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
 tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
@@ -2997,9 +3045,17 @@ function showRegistration(){
   const u = (tg.initDataUnsafe && tg.initDataUnsafe.user) || {};
   const rl = String(u.language_code||'').toLowerCase().startsWith('ru') ? 'ru' : 'uz';
   LANG = rl; applyStaticI18n();
-  regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl, role:'buyer', ref:_regRefCode() };
+  regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl, role:'buyer', ref:_regRefCode(),
+               staffInvite:_pendingStaffCode(), staffShop:'' };
   renderRegistration();
   document.getElementById('regview').classList.add('open');
+  // Staff taklifi bilan kelgan yangi user — do'kon nomini olib, ko'rsatamiz
+  if(regState.staffInvite){
+    api('/api/staff/invite-info?code='+encodeURIComponent(regState.staffInvite))
+      .then(info=>{ if(info&&info.valid){ regState.staffShop=info.shop_name||''; renderRegistration(); }
+                    else { regState.staffInvite=''; renderRegistration(); } })
+      .catch(()=>{});
+  }
 }
 function renderRegistration(){
   const tt=document.getElementById('ttl_regview'); if(tt) tt.textContent=L('reg_title');
@@ -3015,14 +3071,16 @@ function renderRegistration(){
         <div class="opt ${regState.lang==='uz'?'on':''}" data-rl="uz">🇺🇿 O‘zbekcha</div>
         <div class="opt ${regState.lang==='ru'?'on':''}" data-rl="ru">🇷🇺 Русский</div>
       </div></div>
-    <div class="cosec"><div class="lbl">${L('reg_role')}</div>
+    ${regState.staffInvite
+      ? `<div class="cosec"><div style="font-size:12.5px;color:var(--accent);line-height:1.5">👥 ${L('reg_staff_hint').replace('{shop}', esc(regState.staffShop||'…'))}</div></div>`
+      : `<div class="cosec"><div class="lbl">${L('reg_role')}</div>
       <div class="seg">
         <div class="opt ${regState.role==='buyer'?'on':''}" data-role="buyer">${L('reg_role_buyer')}</div>
         <div class="opt ${regState.role==='seller'?'on':''}" data-role="seller">${L('reg_role_seller')}</div>
       </div>
-      <div style="font-size:12px;color:var(--hint);margin-top:5px">${L('reg_role_hint')}</div></div>
+      <div style="font-size:12px;color:var(--hint);margin-top:5px">${L('reg_role_hint')}</div></div>`}
   </div>
-  <div class="cobar"><button id="regSubmit">${regState.role==='seller'?L('reg_role_seller'):L('reg_submit')}</button></div>`;
+  <div class="cobar"><button id="regSubmit">${regState.staffInvite?L('bp_join_submit'):(regState.role==='seller'?L('reg_role_seller'):L('reg_submit'))}</button></div>`;
   document.getElementById('regName').oninput=e=>regState.name=e.target.value;
   document.getElementById('regPhone').oninput=e=>regState.phone=e.target.value;
   b.querySelectorAll('[data-rl]').forEach(o=>o.onclick=()=>{ regState.lang=o.dataset.rl; LANG=regState.lang; applyStaticI18n(); renderRegistration(); });
@@ -3040,6 +3098,13 @@ async function submitRegistration(){
     await apiSend('/api/register','POST',payload);
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     document.getElementById('regview').classList.remove('open');
+    // Staff taklifi bilan kelgan bo'lsa — rol so'ramaymiz, to'g'ridan-to'g'ri do'konga bog'laymiz
+    if(regState.staffInvite){
+      _staffInviteHandled=true;
+      await loadMe(); loadCategories(); loadProducts();
+      acceptStaffInvite(regState.staffInvite);
+      return;
+    }
     const wantSeller=(regState.role==='seller');
     await loadMe(); loadCategories(); loadProducts();
     if(wantSeller){
@@ -5848,7 +5913,7 @@ function admBroadcast(){
 document.getElementById('bcastClose').onclick=()=>document.getElementById('bcastview').classList.remove('open');
 
 applyStaticI18n();
-loadMe().then(restoreModeOnBoot);
+loadMe().then(()=>{ restoreModeOnBoot(); maybeHandleStaffInvite(); });
 loadCategories();
 loadProducts();
 loadPending();   // #23 — kutilayotgan ishlar eslatmasi

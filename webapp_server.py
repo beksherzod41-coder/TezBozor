@@ -909,6 +909,24 @@ async def api_join_with_code(body: JoinCodeIn, authorization: str = Header(None)
     return {"ok": True, "shop_name": shop.get("name")}
 
 
+@app.get("/api/staff/invite-info")
+def api_staff_invite_info(code: str = "", authorization: str = Header(None)):
+    """App start_param=staff_<kod> (yoki ?staff=) bilan kirilganda — tasdiq ekrani uchun
+    do'kon nomi. require_auth: ro'yxatdan o'tmagan yangi user ham ko'ra oladi (initData
+    imzosi yetarli). Bog'lashning o'zi /api/join-with-code orqali bo'ladi."""
+    require_auth(authorization)
+    code = (code or "").strip().upper()
+    invite = db.get_invite_by_code(code) if code else None
+    if not invite or dict(invite).get("is_used"):
+        return {"valid": False}
+    invite = dict(invite)
+    shop = db.get_shop_by_id(invite["shop_id"])
+    if not shop:
+        return {"valid": False}
+    return {"valid": True, "shop_name": dict(shop).get("name"),
+            "department": invite.get("department")}
+
+
 @app.get("/api/products/{product_id}")
 def api_product_detail(product_id: int, authorization: str = Header(None)):
     require_auth(authorization)

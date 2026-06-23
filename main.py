@@ -809,6 +809,20 @@ async def _handle_staff_deeplink(update, context, code, user):
         await update.message.reply_text(t(lang, 'staff_invite_invalid'))
         return True
 
+    # APP-FIRST (2-bosqich): MINIAPP_URL bo'lsa, do'konga bog'lash ilovada bajariladi
+    # (/api/join-with-code). Bot faqat ilovani ?staff=<kod> bilan ochuvchi tugma yuboradi.
+    # web_app tugmasi start_param uzatmaydi — shuning uchun kodni URL query'da beramiz.
+    if MINIAPP_URL:
+        from urllib.parse import quote
+        sep = '&' if '?' in MINIAPP_URL else '?'
+        url = f"{MINIAPP_URL}{sep}staff={quote(code, safe='')}"
+        await update.message.reply_text(
+            t(lang, 'staff_invite_app_prompt', shop=html.escape(shop.get('name') or '—')),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                t(lang, 'staff_invite_app_btn'), web_app=WebAppInfo(url=url))]]),
+            parse_mode='HTML')
+        return True
+
     if user:
         if user.get('role') == 'admin':
             await update.message.reply_text(t(lang, 'staff_admin_cannot_join'))
@@ -899,7 +913,8 @@ async def registration_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
     APP-FIRST: MINIAPP_URL bo'lsa, yangi foydalanuvchi to'g'ridan-to'g'ri Mini App'ga
     yo'naltiriladi — ro'yxatdan o'tish, rol tanlash (xaridor/sotuvchi) va xarid
     hammasi ilovada bo'ladi. Faqat istisnolar bot ichida qoladi:
-      • staff_<kod> taklifi — App hali do'konga bog'lamaydi (keyingi bosqich);
+      • staff_<kod> taklifi — MINIAPP_URL bo'lsa _handle_staff_deeplink allaqachon
+        ilovaga uzatgan; bu yerga faqat MINIAPP_URL yo'q paytda staff_invite bilan keladi;
       • MINIAPP_URL o'rnatilmagan — eski ichki FSM (til→telefon→ism→rol) fallback."""
     has_staff_invite = bool(context.user_data.get('staff_invite'))
     if MINIAPP_URL and not has_staff_invite:

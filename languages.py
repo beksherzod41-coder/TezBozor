@@ -4117,6 +4117,16 @@ _TEXTS = {
                "Ваш аккаунт ещё не подтверждён владельцем магазина. "
                "После подтверждения вы сможете размещать здесь товары."),
     },
+    'staff_invite_app_prompt': {
+        'uz': ("👥 Sizni «{shop}» do'koniga xodim bo'lib qo'shilishga taklif qilishdi.\n\n"
+               "Ilovani ochib, qo'shilishni tasdiqlang 👇"),
+        'ru': ("👥 Вас пригласили присоединиться к магазину «{shop}» как сотрудник.\n\n"
+               "Откройте приложение и подтвердите присоединение 👇"),
+    },
+    'staff_invite_app_btn': {
+        'uz': "✅ Ilovada qo'shilish",
+        'ru': "✅ Присоединиться в приложении",
+    },
 
     # --- admin: do'konlar ---
     'btn_admin_shops': {'uz': "🏪 Do'konlar", 'ru': "🏪 Магазины"},

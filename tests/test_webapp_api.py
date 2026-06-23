@@ -1408,6 +1408,31 @@ def test_join_code_success(client):
     assert r2.status_code == 404
 
 
+def test_staff_invite_info_valid(client):
+    """2-bosqich: App start_param=staff_<kod> tasdiq ekrani uchun do'kon nomini oladi.
+    Ro'yxatdan o'tmagan (DB'da yo'q) user ham ko'ra oladi — require_auth yetarli."""
+    sid = webapp_server.db.create_shop(2, name="Mega Do'kon")
+    code = webapp_server.db.create_invite(sid)
+    r = client.get("/api/staff/invite-info", params={"code": code}, headers=hdr(7001))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["valid"] is True and body["shop_name"] == "Mega Do'kon"
+
+
+def test_staff_invite_info_invalid(client):
+    r = client.get("/api/staff/invite-info", params={"code": "NOPE000000"}, headers=hdr(7002))
+    assert r.status_code == 200 and r.json()["valid"] is False
+
+
+def test_staff_invite_info_used(client):
+    """Ishlatilgan kod -> valid=False (qayta qo'shilib bo'lmaydi)."""
+    sid = webapp_server.db.create_shop(2, name="Do'kon")
+    code = webapp_server.db.create_invite(sid)
+    webapp_server.db.mark_invite_used(code, 999)
+    r = client.get("/api/staff/invite-info", params={"code": code}, headers=hdr(7003))
+    assert r.status_code == 200 and r.json()["valid"] is False
+
+
 # ===== #3 XODIM STATISTIKASI / DETALI =====
 def _shop_with_staff(client):
     """Seller(5002) egasi do'kon + xodim(6002) qo'shadi. (shop_id, staff_id, staff_uid)."""
