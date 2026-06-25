@@ -206,27 +206,76 @@ def all_bottom_menu_texts():
 
 
 def buyer_bottom_kb(lang):
-    """Xaridor rejimidagi pastki Reply klaviatura (tanlangan tilda).
-    Eng tepada /start tugmasi (xaridor/sotuvchi/admin uchun bir xil)."""
-    rows = [
-        [KeyboardButton("/start")],
-        [KeyboardButton(t(lang, 'btn_search_menu'))],
-        [KeyboardButton(t(lang, 'btn_my_orders')), KeyboardButton(t(lang, 'btn_profile'))],
-        [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],
-    ]
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    """Xaridor rejimi: ish App'ga ko'chirilgan — pastki klaviatura faqat launcher
+    ('Ilovani ochish') tugmasini ko'rsatadi."""
+    return app_launcher_kb(lang)
 
 
 def seller_bottom_kb(lang):
-    """Sotuvchi rejimidagi pastki Reply klaviatura (tanlangan tilda).
-    Eng tepada /start tugmasi (xaridor/sotuvchi/admin uchun bir xil)."""
-    rows = [
-        [KeyboardButton("/start")],
-        [KeyboardButton(t(lang, 'btn_add_product')), KeyboardButton(t(lang, 'btn_my_products'))],
-        [KeyboardButton(t(lang, 'btn_orders')), KeyboardButton(t(lang, 'btn_profile'))],
-        [KeyboardButton(t(lang, 'btn_contact_admin')), KeyboardButton(t(lang, 'btn_home'))],
-    ]
-    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
+    """Sotuvchi rejimi: ish App'ga ko'chirilgan — pastki klaviatura faqat launcher
+    ('Ilovani ochish') tugmasini ko'rsatadi."""
+    return app_launcher_kb(lang)
+
+
+def app_launcher_kb(lang):
+    """Launcher rejimi: pastki (reply) klaviatura BUTUNLAY olib tashlanadi.
+    Eski web_app reply tugmasi xato berardi — endi faqat matn ostidagi inline
+    tugma orqali ilovaga kiriladi (app_inline_kb)."""
+    return ReplyKeyboardRemove()
+
+
+def app_inline_kb(lang):
+    """Matn ostida ko'rinadigan INLINE 'Ilovaga kirish' tugmasi (web_app)."""
+    if MINIAPP_URL:
+        return InlineKeyboardMarkup([[InlineKeyboardButton(
+            t(lang, 'btn_open_app'), web_app=WebAppInfo(url=MINIAPP_URL))]])
+    return None
+
+
+async def _go_to_app(update, context):
+    """Launcher ekrani: chiroyli kirish matni + matn ostida inline 'Ilovaga kirish'
+    tugmasi. Xaridor/sotuvchi botda boshqa hech narsa qilmaydi — faqat shu ekran.
+    Callback ham, oddiy xabar ham qo'llanadi. ConversationHandler.END qaytaradi,
+    shuning uchun conversation entry_point sifatida ham ishlatiladi (oqim boshlanmaydi)."""
+    lang = get_lang(update, context)
+    text = t(lang, 'open_app_hint')
+    inline = app_inline_kb(lang)
+    q = update.callback_query
+    if q:
+        try:
+            await q.answer()
+        except Exception:
+            pass
+        try:
+            await q.edit_message_text(text, reply_markup=inline, parse_mode='HTML')
+        except Exception:
+            try:
+                await q.message.reply_text(text, reply_markup=inline, parse_mode='HTML')
+            except Exception:
+                pass
+        return ConversationHandler.END
+    msg = getattr(update, 'message', None) or getattr(update, 'effective_message', None)
+    if msg:
+        # Eski pastki web_app reply tugmasini chatdan bir marta olib tashlaymiz
+        # (u bosilganda xato berardi). chat_data /start clear()'dan omon qoladi.
+        if not context.chat_data.get('kb_cleared'):
+            try:
+                await msg.reply_text("🚀", reply_markup=ReplyKeyboardRemove())
+            except Exception:
+                pass
+            context.chat_data['kb_cleared'] = True
+        sent = await msg.reply_text(text, reply_markup=inline, parse_mode='HTML')
+        # Launcher xabarini chat tepasiga BIR MARTA pin qilamiz — doimiy "Ilovaga
+        # kirish" tugmasi yuqorida turadi. disable_notification: ovozsiz.
+        if inline is not None and not context.chat_data.get('launcher_pinned'):
+            try:
+                await context.bot.pin_chat_message(
+                    chat_id=sent.chat_id, message_id=sent.message_id,
+                    disable_notification=True)
+                context.chat_data['launcher_pinned'] = True
+            except Exception:
+                pass
+    return ConversationHandler.END
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -649,24 +698,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if arg.startswith("product_") or arg.startswith("order_"):
             try:
                 product_id = int(arg.split("_", 1)[1])
-                product = db.get_product_by_id(product_id)
-                if product and product.get('in_stock'):
-                    # Mahsulot sahifasini ko'rsatamiz
-                    context.user_data['active_mode'] = 'buyer'
-                    # Fake callback_query yaratish imkoni yo'q, shuning uchun to'g'ridan-to'g'ri
-                    # mahsulot ma'lumotlarini yuboramiz
-                    await _show_product_deeplink(update, context, product)
-                    return ConversationHandler.END
-                else:
+            except (ValueError, TypeError):
+                product_id = None
+            if product_id:
+                # APP-ONLY: mahsulotni botda emas, to'g'ridan-to'g'ri ilovada ochamiz.
+                # Inline web_app tugma ?product=<id> bilan — ilova o'sha sahifani ochadi.
+                clang = get_user_lang(user)
+                if MINIAPP_URL:
+                    url = MINIAPP_URL
+                    sep = '&' if '?' in url else '?'
+                    url = f"{url}{sep}product={product_id}"
                     await update.message.reply_text(
-                        T(update, context, 'deeplink_product_unavailable'),
-                        reply_markup=InlineKeyboardMarkup([[
-                            InlineKeyboardButton(T(update, context, 'btn_home'), callback_data="buyer_panel")
-                        ]])
+                        t(clang, 'open_app_hint'),
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                            t(clang, 'btn_open_app'), web_app=WebAppInfo(url=url))]]),
+                        parse_mode='HTML'
                     )
                     return ConversationHandler.END
-            except (ValueError, TypeError):
-                pass
+                # MINIAPP_URL yo'q (zaxira) — eski botdagi ko'rinish
+                product = db.get_product_by_id(product_id)
+                if product and product.get('in_stock'):
+                    context.user_data['active_mode'] = 'buyer'
+                    await _show_product_deeplink(update, context, product)
+                else:
+                    await update.message.reply_text(
+                        T(update, context, 'deeplink_product_unavailable'))
+                return ConversationHandler.END
 
     # Deeplink: /start staff_<code> — do'konga sotuvchi-xodim bo'lib qo'shilish
     if context.args and context.args[0].strip().startswith("staff_"):
@@ -729,24 +786,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = get_active_mode(user, context)
         if user['role'] == 'admin':
             await admin_panel(update, context)
-        elif active == 'seller' or user['role'] == 'seller':
-            await update.message.reply_text(
-                t(lang, 'bottom_hint'),
-                reply_markup=seller_bottom_kb(lang)
-            )
-            await seller_panel(update, context)
         else:
-            # App-first: MINIAPP_URL bo'lsa, birinchi xabar to'g'ridan-to'g'ri ilovaga
-            # yo'naltiradi (pastki klaviaturadagi "Ilovani ochish" tugmasi + Menu tugmasi).
-            hint_key = 'open_app_hint' if MINIAPP_URL else 'bottom_hint'
-            await update.message.reply_text(
-                t(lang, hint_key),
-                reply_markup=buyer_bottom_kb(lang),
-                parse_mode='HTML'
-            )
-            await buyer_panel(update, context)
+            # APP-ONLY (Faza 1+2): xaridor va sotuvchi ishi butunlay ilovaga ko'chirilgan.
+            # Bot faqat launcher — chiroyli matn + matn ostida inline 'Ilovaga kirish'
+            # tugmasi (pastki reply klaviatura olib tashlanadi).
+            await _go_to_app(update, context)
         return ConversationHandler.END
     else:
+        # APP-ONLY: ro'yxatdan o'tish botdan olib tashlangan — faqat ilovada.
+        lang = get_lang(update, context)
+        if MINIAPP_URL:
+            url = MINIAPP_URL
+            ref = context.user_data.get('ref_code')
+            if ref:
+                sep = '&' if '?' in url else '?'
+                url = f"{url}{sep}ref={quote(ref, safe='')}"
+            await update.message.reply_text(
+                t(lang, 'reg_app_welcome'),
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
+                    t(lang, 'reg_app_btn'), web_app=WebAppInfo(url=url))]]),
+                parse_mode='HTML'
+            )
+            return ConversationHandler.END
+        # MINIAPP_URL yo'q (faqat zaxira) — eski ichki ro'yxat
         return await registration_start(update, context)
 
 
@@ -3791,7 +3853,7 @@ async def buyer_cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # ATOMIK: sotuvchi ayni damda tasdiqlab ulgursa, eski bekor 'confirmed'ni bosib
     # o'tkazib zahirani yo'qotmasin — faqat hali 'pending' bo'lsa bekor qilamiz.
-    if not db.transition_order_status(order_id, 'cancelled', 'pending'):
+    if not db.transition_order_status(order_id, 'cancelled', 'pending', cancel_by='buyer'):
         cur = db.get_order_by_id(order_id)
         await query.edit_message_text(
             t(lang, 'cant_cancel_status', status=fmt_status((cur or {}).get('status') or 'confirmed'))
@@ -4441,7 +4503,7 @@ async def _autocancel_order_or_group(context, order, gid, oid, slang):
             # ATOMIK: faqat hali 'pending' bo'lganlarini bekor qilamiz. Sotuvchi aynan shu
             # lahzada tasdiqlab/bekor qilib ulgursa, transition False qaytaradi → taymer
             # chekinadi (xaridorga soxta "avto-bekor" xabari ketmaydi).
-            pend = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
+            pend = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending', cancel_by='system')]
             if not pend:
                 return
             disp = fmt_order_id(int(gid))
@@ -4459,7 +4521,7 @@ async def _autocancel_order_or_group(context, order, gid, oid, slang):
                 return
             # ATOMIK: sotuvchi shu lahzada tasdiqlab/bekor qilib ulgurgan bo'lsa, taymer
             # chekinadi (ikki marta ishlov + soxta "avto-bekor" xabarining oldini olamiz).
-            if not db.transition_order_status(oid, 'cancelled', 'pending'):
+            if not db.transition_order_status(oid, 'cancelled', 'pending', cancel_by='system'):
                 return
             disp = fmt_order_id(oid)
             buyer = db.get_user_by_id(o['buyer_id'])
@@ -5247,7 +5309,9 @@ async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE
     # (haqiqatan o'zgargan) buyurtmalar uchun zahira kamaytiramiz. Bot+Mini App bir vaqtda
     # yoki tugma ikki marta bosilsa, guruh ikki marta ishlanmaydi (ilgari guard yo'q edi →
     # zahira ikki marta kamayardi). Hech biri yutmasa — allaqachon ishlangan, qaytamiz.
-    won_orders = [o for o in orders if db.transition_order_status(o['id'], new_status, 'pending')]
+    won_orders = [o for o in orders if db.transition_order_status(
+        o['id'], new_status, 'pending',
+        cancel_by='seller' if new_status == 'cancelled' else None)]
     if not won_orders:
         return
 
@@ -5551,7 +5615,7 @@ async def buyer_cancel_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
     # ATOMIK: faqat hali 'pending' bo'lgan sub-buyurtmalarni bekor qilamiz — sotuvchi
     # ayni damda tasdiqlab ulgursa, eski bekor 'confirmed'ni bosib o'tkazib zahirani
     # yo'qotmasin.
-    won = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
+    won = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending', cancel_by='buyer')]
     if not won:
         await query.answer(t(lang, 'cant_cancel_now_toast'), show_alert=True)
         await buyer_group_order_detail(update, context, group_id=group_id)
@@ -5632,7 +5696,7 @@ async def auto_cancel_group_job(context: ContextTypes.DEFAULT_TYPE):
         return
     # ATOMIK: faqat hali 'pending' bo'lganlarini bekor qilamiz — sotuvchi shu lahzada
     # tasdiqlab ulgursa, taymer 'confirmed'ni bekor qilmasin.
-    pending = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending')]
+    pending = [o for o in orders if db.transition_order_status(o['id'], 'cancelled', 'pending', cancel_by='system')]
     if not pending:
         return
     try:
@@ -7864,6 +7928,12 @@ async def post_product_to_channel(context, product_id, *,
             caption, caption_parse_mode = caption_override, parse_mode_override
         else:
             caption, caption_parse_mode = await _build_ad_caption(product)
+
+        # App buyer sahifasi kanaldagi AYNAN shu reklama matnini ko'rsatadi (parite)
+        try:
+            db.set_product_ad_caption(product_id, caption, caption_parse_mode)
+        except Exception as e:
+            logging.warning(f"ad_caption saqlanmadi (pid {product_id}): {e}")
 
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("🛒 Sotib olish", url=deep_link)
@@ -11057,7 +11127,8 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
         # `transition_order_status` faqat BITTA chaqiruvga True qaytaradi (rowcount=1).
         # Yutmagan chaqiruv zahirani kamaytirmaydi va xabar yubormaydi, faqat detalni
         # ko'rsatadi (ilgarigi read-then-check atomik emas edi → ikki marta ishlardi).
-        won = db.transition_order_status(order_id, new_status, 'pending')
+        won = db.transition_order_status(order_id, new_status, 'pending',
+                                         cancel_by='seller' if new_status == 'cancelled' else None)
         if not won:
             await seller_order_detail(update, context)
             return
@@ -12578,10 +12649,10 @@ async def admin_force_cancel_order(update: Update, context: ContextTypes.DEFAULT
     if order:
         # ATOMIK bekor: 'confirmed' bo'lsa zahirani QAYTARAMIZ (kamaytirilgan edi),
         # 'pending' bo'lsa shart emas. Avval restock yo'q edi → zahira yo'qolardi (bug).
-        if db.transition_order_status(order_id, 'cancelled', 'confirmed'):
+        if db.transition_order_status(order_id, 'cancelled', 'confirmed', cancel_by='admin'):
             await _maybe_restock_on_cancel(context, order)
         else:
-            db.transition_order_status(order_id, 'cancelled', 'pending')
+            db.transition_order_status(order_id, 'cancelled', 'pending', cancel_by='admin')
         # Ikki tomonga xabar (har biri o'z tilida)
         oid = fmt_order_id(order_id)
         buyer = db.get_user_by_id(order['buyer_id']) if order.get('buyer_id') else None
@@ -12722,6 +12793,7 @@ async def admin_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE):
                    b2='█' * max(1, int(20 * a['confirm_rate'] / 100)),
                    b3='█' * max(1, int(20 * a['deliver_rate'] / 100)),
                    b4='░' * max(1, int(20 * a['cancel_rate'] / 100)),
+                   issued=a.get('total_issued', a['total_orders']),
                    total=a['total_orders'], confirmed=a['confirmed_total'], confirm_rate=a['confirm_rate'],
                    delivered=a['delivered_total'], deliver_rate=a['deliver_rate'],
                    cancelled=a['cancelled_total'], cancel_rate=a['cancel_rate'])
@@ -13587,7 +13659,12 @@ async def ai_photo_collect(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """AI rejimida mahsulot rasmlarini yig'adi (global PHOTO/Document handler).
     Faqat 'ai_awaiting_photos' yoqilgan bo'lsa ishlaydi; aks holda e'tiborsiz."""
     if not context.user_data.get('ai_awaiting_photos'):
-        return  # AI rasm bosqichida emasmiz — boshqa rasmlarga tegmaymiz
+        # AI rasm bosqichida emasmiz. APP-ONLY: xaridor/sotuvchi botda ish qilmaydi —
+        # rasm yuborsa launcher ko'rsatamiz (admin'gacha Faza 3 tegmaymiz).
+        u = db.get_user_by_telegram_id(update.effective_user.id)
+        if not u or u.get('role') != 'admin':
+            await _go_to_app(update, context)
+        return
 
     lang = get_lang(update, context)
     file_id = None
@@ -13702,6 +13779,74 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     await query.answer()
+
+    # === APP-ONLY (Faza 1 — Xaridor): xaridor ishi botdan olib tashlangan ===
+    # Eski xabarlardagi xaridor tugmalari bosilsa — "amal endi ilovada" ekrani.
+    # (Buyurtma/savat/baho/xabar/bekor oqimlari ConversationHandler entry orqali
+    #  allaqachon launcherga yo'naltirilgan; bu yerda non-conversation tugmalar.)
+    BUYER_CB_EXACT = {
+        "buyer_panel", "buyer_search_menu", "buyer_categories", "buyer_search",
+        "buyer_shop_search", "buyer_orders", "buyer_profile", "buyer_reviews",
+        "buyer_messages", "buyer_debts", "my_referral", "ai_assistant", "ai_exit",
+        "cart_view", "cart_clear", "cart_clear_yes", "contact_admin",
+        "join_with_code", "skip_search_location", "reapply_seller",
+    }
+    BUYER_CB_PREFIXES = (
+        "cart_add_", "cart_inc_", "cart_dec_", "cart_reset_add_",
+        "cvinc_", "cvdec_", "cvrm_",
+        "order_detail_", "buyer_cancel_", "buyer_confirm_pickup_",
+        "gbuyer_cancel_", "gbuyer_pickup_", "gorder_detail_",
+        "debtbuyer_", "debtpayfull_", "debtpaypart_",
+        "msgs_", "msg_", "call_", "recommend_", "share_link_",
+        "shop_products_", "shop_ai_", "shop_list_", "cat_",
+        # mahsulot kartochkasi + qidiruv (eski xabarlardagi tugmalar):
+        "prod_", "pcomm_", "pg_", "sreg_", "sdist_", "srt_",
+    )
+    if data and (
+        data in BUYER_CB_EXACT
+        or data.startswith(BUYER_CB_PREFIXES)
+        # shop_<id> detali (sotuvchi shop_paymode/shop_pending bilan to'qnashmasin)
+        or (data.startswith("shop_") and data[5:6].isdigit())
+    ):
+        await _go_to_app(update, context)
+        return
+
+    # === APP-ONLY (Faza 2 — Sotuvchi): sotuvchi ishi botdan olib tashlangan ===
+    # Panel/mahsulot/xodim/kanal/reklama boshqaruvi — hammasi ilovada.
+    # SAQLANADI (bu gate USHLAMAYDI): buyurtma xabarnoma-javoblari va ularning
+    # davomi — confirm_order_/cancel_order_/deliver_order_, g* variantlari,
+    # crfwd_/gcrfwd_, ownappr_/ownrej_, setl_*/setlamt_, cclagree_/ccldeny_,
+    # seller_order_/seller_gorder_ (detal — xabarnomadan ochilishi mumkin).
+    # App buyurtma oqimi shularga tayanadi.
+    SELLER_CB_EXACT = {
+        "seller_panel", "seller_products", "seller_orders", "seller_profile",
+        "seller_stats", "seller_export_excel", "seller_messages", "seller_reviews",
+        "seller_scheduled", "seller_autoreposts", "seller_debts",
+        "sellergrp_products", "sellergrp_sales", "sellergrp_customers", "sellergrp_settings",
+        "staff_panel", "staff_list", "staff_add", "staff_add_nodept",
+        "staff_invites", "staff_stats", "shop_paymode", "shop_pending",
+        "sp_search", "seller_add_product", "edit_card_info", "edit_seller_region",
+        "ai_publish", "ai_addphoto", "ai_photos_done",
+        "adprev_publish", "adprev_regen", "adprev_long", "adprev_short",
+        "adprev_edit", "adprev_skip", "adprev_schedule", "adprev_autorep",
+        "schd_abort", "arep_abort",
+        "switch_to_seller", "switch_to_seller_confirm", "do_switch_seller",
+        "switch_to_buyer", "switch_to_buyer_confirm", "do_switch_buyer",
+    }
+    SELLER_CB_PREFIXES = (
+        "sp_list_", "prod_menu_", "pstatus_", "edit_start_",
+        "delete_prod_", "delete_confirm_",
+        "toggle_stock_", "setstock_", "set_stock_",
+        "arep_start_", "arep_off_", "arep_hour_", "arep_cancel_",
+        "schd_date_", "schd_hour_", "schd_min_", "schd_cancel_",
+        "staff_detail_", "staff_dept_", "staff_role_", "staff_reject_",
+        "inv_cancel_", "staff_toggle_", "staff_pset_", "staff_perm_", "staff_rm_",
+        "rvreply_", "airvpub_", "airvgen_",
+        "sregset_", "sregdist_",
+    )
+    if data and (data in SELLER_CB_EXACT or data.startswith(SELLER_CB_PREFIXES)):
+        await _go_to_app(update, context)
+        return
 
     handlers = {
         "buyer_panel": buyer_panel,
@@ -14039,35 +14184,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # role o'rniga active_mode — bitta foydalanuvchi ikkala rejimda ishlashi mumkin
         active_mode = get_active_mode(user, context)
 
-        # Rol talab qiladigan harakatlar
+        # Rol talab qiladigan harakatlar.
+        # APP-ONLY (Faza 1): xaridor amallari botdan olib tashlangan → _go_to_app.
         role_actions = {
-            'btn_search_menu': (buyer_search_menu, 'buyer'),
-            'btn_search':      (buyer_search, 'buyer'),
-            'btn_categories':  (buyer_categories, 'buyer'),
-            'btn_my_orders':   (buyer_orders, 'buyer'),
-            'btn_add_product': (seller_add_product_start, 'seller'),
-            'btn_my_products': (seller_products, 'seller'),
-            'btn_orders':      (seller_orders, 'seller'),
+            'btn_search_menu': (_go_to_app, 'buyer'),
+            'btn_search':      (_go_to_app, 'buyer'),
+            'btn_categories':  (_go_to_app, 'buyer'),
+            'btn_my_orders':   (_go_to_app, 'buyer'),
+            'btn_add_product': (_go_to_app, 'seller'),
+            'btn_my_products': (_go_to_app, 'seller'),
+            'btn_orders':      (_go_to_app, 'seller'),
         }
 
         if action == 'btn_profile':
-            if active_mode == 'buyer':
-                await buyer_profile(update, context)
-            elif active_mode == 'seller':
-                await seller_profile(update, context)
+            # APP-ONLY (Faza 1+2): profil ilovada (xaridor ham, sotuvchi ham)
+            await _go_to_app(update, context)
         elif action == 'btn_home':
             if user['role'] == 'admin':
                 await admin_panel(update, context)
-            elif active_mode == 'seller':
-                await seller_panel(update, context)
             else:
-                await buyer_panel(update, context)
+                await _go_to_app(update, context)
         elif action == 'btn_contact_admin':
-            await update.message.reply_text(
-                T(update, context, 'contact_admin_prompt'),
-                parse_mode='HTML'
-            )
-            context.user_data['contacting_admin'] = True
+            # APP-ONLY: admin bilan bog'lanish ilovada
+            await _go_to_app(update, context)
         else:
             fn, required_role = role_actions[action]
             if active_mode == required_role:
@@ -14277,7 +14416,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await _show_search_results(update, context, q_text)
         return
 
-    # Noma'lum xabar
+    # Noma'lum xabar — APP-ONLY: xaridor/sotuvchi botda matn yozmaydi.
+    # Har qanday matnga launcher (chiroyli matn + 'Ilovaga kirish' tugma) bilan javob.
+    # Admin (Faza 3 gacha) odatdagi javobni oladi.
+    if not user or user.get('role') != 'admin':
+        await _go_to_app(update, context)
+        return
     await update.message.reply_text(T(update, context, 'unknown_command'))
 
 
@@ -14323,6 +14467,12 @@ async def location_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await _show_search_results(update, context, q_text,
                                    buyer_lat=loc.latitude, buyer_lon=loc.longitude)
+        return
+
+    # APP-ONLY: hech qaysi oqimga tegishli bo'lmagan lokatsiya — launcher (non-admin)
+    u = db.get_user_by_telegram_id(update.effective_user.id)
+    if not u or u.get('role') != 'admin':
+        await _go_to_app(update, context)
         return
 
 
@@ -14793,7 +14943,7 @@ async def _post_init(application):
         if MINIAPP_URL:
             await application.bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(
-                    text="🛍 TezBozor",
+                    text="🛍 Ilovani ochish",
                     web_app=WebAppInfo(url=MINIAPP_URL)))
             logging.info("✅ Menu tugmasi Mini App'ga ulandi (app-first kirish).")
         else:
@@ -14903,8 +15053,8 @@ def main():
     _add_product_btn_re = "^(" + "|".join(_re.escape(s) for s in _lang_labels('btn_add_product')) + ")$"
     product_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(seller_add_product_start, pattern="^seller_add_product$"),
-            MessageHandler(filters.Regex(_add_product_btn_re), seller_add_product_start),
+            CallbackQueryHandler(_go_to_app, pattern="^seller_add_product$"),
+            MessageHandler(filters.Regex(_add_product_btn_re), _go_to_app),
         ],
         states={
             PRODUCT_MODE:     [
@@ -14951,12 +15101,12 @@ def main():
     # Bu conversation faqat aniq bir maydon tanlangach boshlanadi.
     edit_product_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(edit_field_name_start,   pattern=r"^ef_name_\d+$"),
-            CallbackQueryHandler(edit_field_price_start,  pattern=r"^ef_price_\d+$"),
-            CallbackQueryHandler(edit_field_cat_start,    pattern=r"^ef_cat_\d+$"),
-            CallbackQueryHandler(edit_field_desc_start,   pattern=r"^ef_desc_\d+$"),
-            CallbackQueryHandler(edit_field_photos_start, pattern=r"^ef_photos_\d+$"),
-            CallbackQueryHandler(edit_attr_start,         pattern=r"^ea_\d+_"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ef_name_\d+$"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ef_price_\d+$"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ef_cat_\d+$"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ef_desc_\d+$"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ef_photos_\d+$"),
+            CallbackQueryHandler(_go_to_app, pattern=r"^ea_\d+_"),
         ],
         states={
             EDIT_FIELD_NAME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_field_name_save)],
@@ -14976,8 +15126,8 @@ def main():
     # --- Buyer profile edit ---
     buyer_profile_edit_conv = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(edit_buyer_name_start, pattern="^edit_buyer_name$"),
-            CallbackQueryHandler(edit_buyer_phone_start, pattern="^edit_buyer_phone$"),
+            CallbackQueryHandler(_go_to_app, pattern="^edit_buyer_name$"),
+            CallbackQueryHandler(_go_to_app, pattern="^edit_buyer_phone$"),
         ],
         states={
             EDIT_PROFILE_NAME:  [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_buyer_name_submit)],
@@ -14990,7 +15140,7 @@ def main():
     # BUG FIX #6: pattern regex to'g'irlandi — "edit_telegram" ham ushlanadi
     seller_profile_edit_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(
-            edit_seller_field_start,
+            _go_to_app,
             pattern="^(edit_shop_name|edit_shop_address|edit_shop_landmark|edit_working_days|edit_working_hours|edit_telegram)$"
         )],
         states={
@@ -15007,7 +15157,7 @@ def main():
 
     # --- Messaging ---
     message_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(message_start, pattern="^order_msg_")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^order_msg_")],
         states={
             MESSAGE_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, message_send)],
         },
@@ -15016,7 +15166,7 @@ def main():
 
     # --- Rating (3 qadam: mahsulot reytingi -> mahsulot izohi -> do'kon reytingi) ---
     rating_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(rating_start, pattern="^order_rate_")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^order_rate_")],
         states={
             PRODUCT_RATING:  [CallbackQueryHandler(rating_product_select, pattern="^prate_")],
             PRODUCT_COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, rating_product_comment)],
@@ -15027,14 +15177,15 @@ def main():
 
     # /admin va /recommend — conversation boshlamaydigan alohida buyruqlar
     app.add_handler(CommandHandler("admin", admin_command))
-    app.add_handler(CommandHandler("recommend", recommend_command))
-    app.add_handler(CommandHandler("ai", ai_command))
+    # APP-ONLY: /recommend va /ai xaridor/sotuvchi amallari — endi ilovada
+    app.add_handler(CommandHandler("recommend", _go_to_app))
+    app.add_handler(CommandHandler("ai", _go_to_app))
 
     # --- Become seller (mavjud xaridorni sotuvchi qilish) ---
     # Ro'yxatdan o'tish handlerlarini qayta ishlatamiz — ular faqat context.user_data ga yozadi,
     # DB ga yozuv esa oxirgi qadamda (become_seller_finish) bo'ladi.
     become_seller_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(become_seller_start, pattern="^become_seller$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^become_seller$")],
         states={
             SHOP_NAME:         [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_name)],
             SHOP_LANDMARK:     [MessageHandler(filters.TEXT & ~filters.COMMAND, registration_shop_landmark)],
@@ -15049,7 +15200,7 @@ def main():
 
     # --- Buyurtma berish (Order Flow) ---
     order_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(order_start, pattern=r"^order_\d+$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern=r"^order_\d+$")],
         states={
             ORDER_QUANTITY:      [MessageHandler(filters.TEXT & ~filters.COMMAND, order_quantity)],
             ORDER_DELIVERY_TYPE: [CallbackQueryHandler(order_delivery_type, pattern=r"^ord_dlv_|^ord_cancel$")],
@@ -15073,7 +15224,7 @@ def main():
 
     # --- Shartnomani bekor qilish (sabab tanlash oqimi) ---
     cancel_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(cancel_request_start, pattern=r"^ccl_req_\d+$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern=r"^ccl_req_\d+$")],
         states={
             CANCEL_PICK_REASON: [CallbackQueryHandler(cancel_reason_pick, pattern=r"^ccl_rsn_|^ccl_abort$")],
             CANCEL_REASON_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_reason_text)],
@@ -15106,7 +15257,7 @@ def main():
 
     # --- Karta ma'lumotlari tahrirlash ---
     card_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(edit_card_start, pattern="^edit_card_info$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^edit_card_info$")],
         states={
             EDIT_CARD_TYPE:   [CallbackQueryHandler(edit_card_type,   pattern="^card_type_")],
             EDIT_CARD_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, edit_card_number)],
@@ -15118,7 +15269,7 @@ def main():
 
     # --- Admin bilan bog'lanish ---
     contact_admin_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(contact_admin_start, pattern="^contact_admin$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^contact_admin$")],
         states={
             CONTACT_ADMIN_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND, contact_admin_send)],
         },
@@ -15128,7 +15279,7 @@ def main():
 
     # --- Sotuvchi kanalini ulash (forward orqali) ---
     link_channel_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(seller_link_channel_start, pattern="^seller_link_channel$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^seller_link_channel$")],
         states={
             LINK_CHANNEL_WAIT: [
                 MessageHandler(filters.FORWARDED, link_channel_receive),
@@ -15139,15 +15290,15 @@ def main():
     )
     app.add_handler(link_channel_conv)
 
-    # Sotuvchi kanallari menyusi + kanalni o'chirish
-    app.add_handler(CallbackQueryHandler(seller_channels_menu, pattern="^seller_channels_menu$"))
-    app.add_handler(CallbackQueryHandler(seller_channels_recheck, pattern="^seller_channels_recheck$"))
-    app.add_handler(CallbackQueryHandler(seller_channel_remove, pattern="^chremove_"))
+    # Sotuvchi kanallari menyusi + kanalni o'chirish — APP-ONLY (Faza 2): ilovada
+    app.add_handler(CallbackQueryHandler(_go_to_app, pattern="^seller_channels_menu$"))
+    app.add_handler(CallbackQueryHandler(_go_to_app, pattern="^seller_channels_recheck$"))
+    app.add_handler(CallbackQueryHandler(_go_to_app, pattern="^chremove_"))
 
     # --- Sotuvchi guruhini ulash ---
     # Guruh ID si forward orqali ko'rinmaydi, shuning uchun "Guruh qo'shish" faqat
     # ko'rsatma beradi; haqiqiy bog'lanish bot guruhga qo'shilganda (my_chat_member) sodir bo'ladi.
-    app.add_handler(CallbackQueryHandler(seller_link_group_start, pattern="^seller_link_group$"))
+    app.add_handler(CallbackQueryHandler(_go_to_app, pattern="^seller_link_group$"))
     app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
 
     # Admin mahsulot moderatsiyasi (detal, qidiruv, sotuvdan olib tashlash, rasm)
@@ -15166,7 +15317,7 @@ def main():
 
     # --- Sotuvchi mahsulot qidirish ---
     sp_search_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(seller_product_search_start, pattern="^sp_search$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^sp_search$")],
         states={
             SELLER_PRODUCT_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, seller_product_search_result)],
         },
@@ -15176,7 +15327,7 @@ def main():
 
     # --- Savatni rasmiylashtirish (savat buyurtmasi) ---
     cart_checkout_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(cart_checkout_start, pattern="^cart_checkout$")],
+        entry_points=[CallbackQueryHandler(_go_to_app, pattern="^cart_checkout$")],
         states={
             CART_DELIVERY_TYPE: [CallbackQueryHandler(cart_delivery_type, pattern=r"^cart_dlv_|^cart_cancel$")],
             CART_ADDRESS:       [MessageHandler(filters.LOCATION | (filters.TEXT & ~filters.COMMAND), cart_address)],

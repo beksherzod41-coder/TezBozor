@@ -252,8 +252,18 @@ _TEXTS = {
         'ru': "🛍 Открыть приложение",
     },
     'open_app_hint': {
-        'uz': "🛍 <b>TezBozor ilovasi</b> — bozorni to'liq ko'rish, buyurtma berish va boshqarish uchun pastdagi tugmani bosing 👇",
-        'ru': "🛍 <b>Приложение TezBozor</b> — нажмите кнопку ниже, чтобы открыть весь маркетплейс, оформлять и управлять заказами 👇",
+        'uz': (
+            "✨ <b>TezBozor — bozor endi to'liq ilovada!</b>\n\n"
+            "🛍 Xarid qilish, sotish, buyurtmalarni boshqarish va barcha "
+            "imkoniyatlar bir joyda — qulay va tez.\n\n"
+            "👇 Boshlash uchun quyidagi tugmani bosing:"
+        ),
+        'ru': (
+            "✨ <b>TezBozor — маркетплейс теперь полностью в приложении!</b>\n\n"
+            "🛍 Покупки, продажи, управление заказами и все возможности "
+            "в одном месте — удобно и быстро.\n\n"
+            "👇 Нажмите кнопку ниже, чтобы начать:"
+        ),
     },
     'reg_app_welcome': {
         'uz': "🚀 <b>TezBozor'ga xush kelibsiz!</b>\n\nRo'yxatdan o'tish, xarid qilish va sotish — hammasi ilovada. Boshlash uchun pastdagi tugmani bosing 👇",
@@ -3110,12 +3120,14 @@ _TEXTS = {
 
     # --- ADMIN: ANALYTICS ---
     'analytics_funnel_bar': {
-        'uz': ("📊 Buyurtma → Tasdiqlash → Yetkazish\n"
+        'uz': ("🧾 Jami berilgan buyurtma: {issued} ta (hozirgi yozuvlar: {total})\n"
+               "📊 Buyurtma → Tasdiqlash → Yetkazish\n"
                "{b1} {total} ta (100%)\n"
                "{b2} {confirmed} ta ({confirm_rate}%)\n"
                "{b3} {delivered} ta ({deliver_rate}%)\n"
                "{b4} ❌ {cancelled} ta ({cancel_rate}%)"),
-        'ru': ("📊 Заказ → Подтверждение → Доставка\n"
+        'ru': ("🧾 Всего выдано заказов: {issued} (текущих записей: {total})\n"
+               "📊 Заказ → Подтверждение → Доставка\n"
                "{b1} {total} (100%)\n"
                "{b2} {confirmed} ({confirm_rate}%)\n"
                "{b3} {delivered} ({deliver_rate}%)\n"

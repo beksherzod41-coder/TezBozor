@@ -968,6 +968,27 @@ def api_product_detail(product_id: int, authorization: str = Header(None)):
     return product
 
 
+@app.get("/api/products/{product_id}/ad-caption")
+async def api_product_ad_caption(product_id: int, authorization: str = Header(None)):
+    """Buyer mahsulot sahifasi uchun chiroyli AI reklama matni (kanaldagi bilan AYNAN bir xil).
+    Saqlangani bo'lsa o'shani qaytaradi; bo'lmasa 1 marta yozib, bazaga saqlaydi (lazy).
+    is_html=True bo'lsa matn HTML (App innerHTML bilan ko'rsatadi — barcha foydalanuvchi
+    matni builder ichida html.escape qilingan, xavfsiz)."""
+    require_auth(authorization)
+    product = db.get_product_by_id(product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="not found")
+    product = dict(product)
+    cap = (product.get("ad_caption") or "").strip()
+    pm = product.get("ad_caption_pm")
+    if not cap:
+        # Hali e'lon qilinmagan / eski mahsulot — AI ni KUTMASDAN tuzilgan emojili matn
+        # (darhol chiqsin). AI takrorlanmas matn kanalga e'lon qilinganda saqlanadi.
+        product["region_label"] = db.get_region_label(product.get("seller_region_id")) or ""
+        cap, pm = await _build_ad_caption_web(product, "long", DEFAULT_LANG, use_ai=False)
+    return {"caption": cap, "is_html": (pm == "HTML")}
+
+
 # ============================================================
 # BUYURTMA YARATISH (to'liq app ichida — sotuvchiga xabarni bot fon job'i yuboradi)
 # ============================================================
@@ -1253,6 +1274,24 @@ def api_me(authorization: str = Header(None)):
     payment_mode = (dict(shop_for).get("payment_mode") if shop_for else None) or "shop"
     can_manage_staff = bool(is_owner or (staff_d and staff_d.get("staff_role") == "manager"
                                          and staff_d.get("perm_add_staff")))
+    # Do'kon EGAsining to'ldirilmagan muhim maydonlari — frontend "joniga tegadigan"
+    # eslatma bannerini shu ro'yxat asosida ko'rsatadi. To'liq bo'lsa bo'sh ([]).
+    profile_gaps = []
+    if is_owner:
+        def _empty(v):
+            return v is None or (isinstance(v, str) and not v.strip())
+        if _empty(b.get("shop_name")):
+            profile_gaps.append("shop_name")
+        if _empty(b.get("shop_address")):
+            profile_gaps.append("shop_address")
+        if not b.get("region_id"):
+            profile_gaps.append("region")
+        if _empty(b.get("phone_number")):
+            profile_gaps.append("phone")
+        if b.get("shop_lat") is None or b.get("shop_lon") is None:
+            profile_gaps.append("location")
+        if _empty(b.get("telegram_username")):
+            profile_gaps.append("username")
     return {
         "id": b.get("id"), "name": b.get("name"), "phone": b.get("phone_number"),
         "username": b.get("telegram_username"), "role": b.get("role"),
@@ -1269,6 +1308,8 @@ def api_me(authorization: str = Header(None)):
         # bo'lmasa tabiiy ravishda 0 qaytadi)
         "pro": _pro_status(b),
         "commission_owed": db.get_commission_owed_by_seller(_owner_id(b)),
+        "commission_paid": db.get_commission_paid_by_seller(_owner_id(b)),
+        "profile_gaps": profile_gaps,
     }
 
 
@@ -1443,7 +1484,7 @@ async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=409, detail="group_cancel_unsupported")
     # ATOMIK: faqat hali 'pending' bo'lsa bekor qilamiz. Sotuvchi ayni damda tasdiqlab
     # ulgursa, eski bekor 'confirmed'ni bosib o'tkazib zahirani yo'qotmasin.
-    if not db.transition_order_status(order_id, "cancelled", "pending"):
+    if not db.transition_order_status(order_id, "cancelled", "pending", cancel_by="buyer"):
         raise HTTPException(status_code=409, detail="not_pending")
     try:
         seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
@@ -2922,9 +2963,11 @@ def _price_unit(product):
     return f"{s} / {unit}" if unit else s
 
 
-async def _build_ad_caption_web(product, length, lang):
-    """Reklama matnini qaytaradi: (matn, parse_mode). Avval AI takrorlanmas matn yozadi;
-    bo'lmasa — tuzilgan HTML matn. Bot _build_ad_caption bilan bir xil mantiq."""
+async def _build_ad_caption_web(product, length, lang, use_ai=True):
+    """Reklama matnini qaytaradi: (matn, parse_mode). use_ai=True bo'lsa avval AI
+    takrorlanmas matn yozadi; bo'lmasa (yoki use_ai=False) — tuzilgan HTML matn.
+    Bot _build_ad_caption bilan bir xil mantiq. Buyer sahifasi use_ai=False bilan
+    AI ni KUTMAYDI (darhol chiqsin — AI matni kanal e'lonida saqlangan bo'ladi)."""
     cat = product.get("category_name") or product.get("category")
     cat_emoji = product.get("category_emoji") or "📂"
     cat_line = f"\n{cat_emoji} {html.escape(str(cat))}" if cat else ""
@@ -2947,6 +2990,8 @@ async def _build_ad_caption_web(product, length, lang):
         f"\n💵 {_price_unit(product)}"
         f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}")
     parse_mode = "HTML"
+    if not use_ai:
+        return caption, parse_mode  # darhol — AI ni kutmaymiz
     try:
         ad_text = await ai_assistant.generate_ad_caption(
             name=product.get("name") or "",
@@ -3416,7 +3461,8 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
     # buyurtmani bir vaqtda tasdiqlasa/bekor qilsa, faqat BITTA chaqiruv yutadi
     # (rowcount=1) → zahira ikki marta kamaymaydi, takroriy xabar ketmaydi. Yutmagan
     # chaqiruv 409 oladi (ilgari read-then-check atomik emas edi).
-    if not db.transition_order_status(order_id, new_status, "pending"):
+    if not db.transition_order_status(order_id, new_status, "pending",
+                                      cancel_by="seller" if new_status == "cancelled" else None):
         raise HTTPException(status_code=409, detail="already_processed")
     if new_status == "confirmed":
         try:
@@ -4210,6 +4256,45 @@ async def api_admin_monetization_set(request: Request, authorization: str = Head
     return {"ok": True, "config": monetization_config()}
 
 
+@app.get("/api/admin/commissions")
+def api_admin_commissions(authorization: str = Header(None)):
+    """Sotuvchilar kesimida komissiya: admin qaysi sotuvchidan qancha olishi (owed) va
+    allaqachon undirgani (paid). Hozirgi foiz ham qaytadi."""
+    _admin_from_auth(authorization)
+    mc = monetization_config()
+    sellers = db.get_commission_by_sellers()
+    total_owed = round(sum(float(s.get("owed") or 0) for s in sellers), 2)
+    total_paid = round(sum(float(s.get("paid") or 0) for s in sellers), 2)
+    return {
+        "active": bool(mc["mon_enabled"] and mc["mon_commission_enabled"]),
+        "percent": mc["mon_commission_percent"],
+        "sellers": sellers,
+        "total_owed": total_owed,
+        "total_paid": total_paid,
+    }
+
+
+@app.post("/api/admin/commissions/settle")
+async def api_admin_commission_settle(request: Request, authorization: str = Header(None)):
+    """Admin sotuvchidan komissiyani naqd/pul orqali undirgach, uning BARCHA ochiq qarzini
+    'to'landi' deb yopadi va to'lovlar daftariga (purpose='commission') yozadi."""
+    _admin_from_auth(authorization)
+    body = await request.json()
+    try:
+        seller_id = int(body.get("seller_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="bad_seller_id")
+    res = db.settle_seller_commission(seller_id)
+    if res["count"] > 0:
+        try:
+            pid = db.create_payment(seller_id, "commission", res["amount"],
+                                    ref_id=seller_id, provider="manual")
+            db.set_payment_state(pid, "paid")
+        except Exception as e:
+            logging.warning(f"komissiya settlement to'lov yozuvi xato (seller {seller_id}): {e}")
+    return {"ok": True, **res}
+
+
 # ============================================================
 # TO'LOVLAR — Click / Payme (monetizatsiya #18)
 # Boost va Pro-obuna shu rel orqali to'lanadi. Provayder kalitlari .env'dan; yo'q
@@ -4438,6 +4523,23 @@ def api_seller_payments(authorization: str = Header(None)):
     """Sotuvchining to'lovlari tarixi (ega bo'yicha)."""
     user = dict(_buyer_from_auth(authorization))
     return {"payments": db.get_payments_by_user(_owner_id(user), limit=50)}
+
+
+@app.get("/api/seller/commission")
+def api_seller_commission(authorization: str = Header(None)):
+    """Sotuvchining alohida komissiya ekrani: hozirgi foiz, qoldiq (owed), to'langan (paid)
+    va qaysi buyurtmalardan ekani (egasi bo'yicha jamlanadi)."""
+    user = dict(_buyer_from_auth(authorization))
+    owner = _owner_id(user)
+    mc = monetization_config()
+    active = bool(mc["mon_enabled"] and mc["mon_commission_enabled"])
+    return {
+        "active": active,
+        "percent": mc["mon_commission_percent"] if active else 0,
+        "owed": db.get_commission_owed_by_seller(owner),
+        "paid": db.get_commission_paid_by_seller(owner),
+        "orders": db.get_commission_orders_by_seller(owner, limit=100),
+    }
 
 
 @app.get("/api/pay/status/{payment_id}")
@@ -5374,12 +5476,12 @@ async def api_admin_force_cancel(order_id: int, authorization: str = Header(None
         raise HTTPException(status_code=409, detail="already_closed")
     # ATOMIK bekor: 'confirmed' bo'lsa zahirani QAYTARAMIZ (tasdiqда kamaytirilgan edi),
     # 'pending' bo'lsa shart emas. Poyga: shu orada delivered/cancelled bo'lsa — bekor qilmaymiz.
-    if db.transition_order_status(order_id, "cancelled", "confirmed"):
+    if db.transition_order_status(order_id, "cancelled", "confirmed", cancel_by="admin"):
         try:
             db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
         except Exception as e:
             logging.warning(f"force-cancel restock xato (order {order_id}): {e}")
-    elif not db.transition_order_status(order_id, "cancelled", "pending"):
+    elif not db.transition_order_status(order_id, "cancelled", "pending", cancel_by="admin"):
         raise HTTPException(status_code=409, detail="already_closed")
     oid = fmt_order_id(order_id)
     for tg_id, uid in [(order.get("buyer_tg"), order.get("buyer_id")),

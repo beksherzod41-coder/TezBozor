@@ -440,7 +440,10 @@ class Database:
             ("products", "mod_reason",      "TEXT"),                   # #5 avto-moderatsiya bloklash sababi
             ("products", "min_price",       "REAL"),                   # #8 MAXFIY oxirgi narx (savdolashish floor'i; xaridorga ko'rinmaydi)
             ("products", "boosted_until",   "TIMESTAMP"),              # #18 boost (pullik ko'tarish) tugash vaqti (UTC); NULL/o'tgan = boost yo'q
+            ("products", "ad_caption",      "TEXT"),                   # kanalga e'lon qilingan AYNAN reklama matni (App buyer sahifasi shuni ko'rsatadi — kanal pariteti)
+            ("products", "ad_caption_pm",   "TEXT"),                   # ↑ reklama matni parse_mode: 'HTML' (tuzilgan) yoki NULL (AI oddiy matn)
             ("orders",   "commission_amount", "REAL"),                 # #18 platforma komissiyasi (berish paytida hisoblanadi)
+            ("orders",   "commission_settled_at", "TIMESTAMP"),        # #18 komissiya admin tomonidan undirilgan (to'langan) vaqt; NULL = qarz hali ochiq
             ("users",    "pro_until",        "TIMESTAMP"),             # #18 Pro-obuna tugash vaqti (UTC); ega (owner)da saqlanadi
             ("reviews",  "product_id",     "INTEGER"),            # baho qaysi mahsulotga
             ("reviews",  "product_rating", "INTEGER"),            # mahsulot uchun 1-5
@@ -2181,7 +2184,8 @@ class Database:
         )
         conn.commit()
 
-    def transition_order_status(self, order_id, new_status, expected_status='pending'):
+    def transition_order_status(self, order_id, new_status, expected_status='pending',
+                                cancel_by=None, cancel_reason=None):
         """Atomik holat o'tkazish: faqat hozirgi holat `expected_status` ga teng bo'lsagina
         o'zgartiradi va o'zgartirgan (yutgan) chaqiruv uchun True qaytaradi.
 
@@ -2189,14 +2193,29 @@ class Database:
         tugmani ikki marta bosish natijasida zahira ikki marta kamayishi va xaridorga
         takroriy xabar yuborilishining oldini oladi. Bitta `UPDATE ... WHERE status=?`
         — SQLite/PG darajasida atomik; faqat bitta chaqiruv rowcount=1 oladi. Chaqiruvchi
-        zahirani kamaytirish/xabar yuborishni FAQAT True qaytganda bajarishi kerak."""
+        zahirani kamaytirish/xabar yuborishni FAQAT True qaytganda bajarishi kerak.
+
+        Bekor qilishda (new_status='cancelled') `cancel_by` ('buyer'|'seller'|'admin'|
+        'system') va ixtiyoriy `cancel_reason` saqlanadi — xaridor/sotuvchi/admin
+        ekranlarida "kim va nima uchun bekor qildi" ko'rsatish uchun. Mavjud qiymat
+        COALESCE bilan saqlanadi (nizo oqimida allaqachon yozilgan sababni o'chirmaydi)."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
-            "WHERE id=? AND status=?",
-            (new_status, order_id, expected_status)
-        )
+        if new_status == 'cancelled' and (cancel_by is not None or cancel_reason is not None):
+            cursor.execute(
+                "UPDATE orders SET status=?, "
+                "cancel_by=COALESCE(?, cancel_by), "
+                "cancel_reason=COALESCE(?, cancel_reason), "
+                "updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status=?",
+                (new_status, cancel_by, cancel_reason, order_id, expected_status)
+            )
+        else:
+            cursor.execute(
+                "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status=?",
+                (new_status, order_id, expected_status)
+            )
         conn.commit()
         return cursor.rowcount > 0
 
@@ -2743,7 +2762,9 @@ class Database:
         if stale:
             ids = [str(s['id']) for s in stale]
             cursor.execute(
-                f"UPDATE orders SET status='cancelled' WHERE id IN ({','.join('?' for _ in ids)})",
+                f"UPDATE orders SET status='cancelled', cancel_by='system', "
+                f"cancel_reason=COALESCE(cancel_reason,'auto_timeout') "
+                f"WHERE id IN ({','.join('?' for _ in ids)})",
                 ids
             )
             conn.commit()
@@ -2824,6 +2845,17 @@ class Database:
         cursor.execute(
             "UPDATE products SET status=?, in_stock=? WHERE id=?",
             (status, in_stock, product_id)
+        )
+        conn.commit()
+
+    def set_product_ad_caption(self, product_id, caption, parse_mode=None):
+        """Kanalga e'lon qilingan AYNAN reklama matnini saqlaydi (App buyer sahifasi
+        kanal pariteti uchun shuni ko'rsatadi). parse_mode: 'HTML' yoki None."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE products SET ad_caption=?, ad_caption_pm=? WHERE id=?",
+            (caption, parse_mode, product_id)
         )
         conn.commit()
 
@@ -3488,14 +3520,91 @@ class Database:
         conn.commit()
 
     def get_commission_owed_by_seller(self, seller_id):
-        """Sotuvchining platformaga jami komissiya qarzi (yetkazilgan buyurtmalardan)."""
+        """Sotuvchining platformaga TO'LANMAGAN (hali undirilmagan) komissiya qarzi.
+        Admin 'to'landi' deb belgilagan buyurtmalar (commission_settled_at IS NOT NULL) chiqarib tashlanadi."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT COALESCE(SUM(commission_amount),0) FROM orders "
-            "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL",
+            "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL "
+            "AND commission_settled_at IS NULL",
             (seller_id,))
         return float(cursor.fetchone()[0] or 0)
+
+    def get_commission_paid_by_seller(self, seller_id):
+        """Sotuvchidan allaqachon undirilgan (to'langan deb belgilangan) jami komissiya."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(commission_amount),0) FROM orders "
+            "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL "
+            "AND commission_settled_at IS NOT NULL",
+            (seller_id,))
+        return float(cursor.fetchone()[0] or 0)
+
+    def get_commission_orders_by_seller(self, seller_id, limit=100):
+        """Sotuvchining komissiyali buyurtmalari ro'yxati (yangi → eski). Sotuvchining
+        'alohida ekran'i shuni ko'rsatadi: qaysi buyurtmadan qancha, to'langan/qolgan."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.id, o.total_price, o.commission_amount, o.commission_settled_at,
+                   o.created_at,
+                   b.name AS buyer_name, p.name AS product_name
+            FROM orders o
+            LEFT JOIN users b ON o.buyer_id=b.id
+            LEFT JOIN products p ON o.product_id=p.id
+            WHERE o.seller_id=? AND o.status='delivered'
+                  AND o.commission_amount IS NOT NULL AND o.commission_amount>0
+            ORDER BY o.created_at DESC
+            LIMIT ?
+        """, (seller_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_commission_by_sellers(self):
+        """Admin uchun sotuvchilar kesimida komissiya: kim qancha qarzdor (owed) va
+        allaqachon to'lagan (paid). Faqat egasi (seller_id) bo'yicha jamlanadi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT o.seller_id,
+                   s.name AS seller_name, s.shop_name, s.telegram_username,
+                   COALESCE(SUM(CASE WHEN o.commission_settled_at IS NULL
+                                     THEN o.commission_amount ELSE 0 END),0) AS owed,
+                   COALESCE(SUM(CASE WHEN o.commission_settled_at IS NOT NULL
+                                     THEN o.commission_amount ELSE 0 END),0) AS paid,
+                   SUM(CASE WHEN o.commission_settled_at IS NULL THEN 1 ELSE 0 END) AS owed_count,
+                   COUNT(*) AS total_count
+            FROM orders o
+            LEFT JOIN users s ON o.seller_id=s.id
+            WHERE o.status='delivered'
+                  AND o.commission_amount IS NOT NULL AND o.commission_amount>0
+            GROUP BY o.seller_id
+            HAVING owed>0 OR paid>0
+            ORDER BY owed DESC, paid DESC
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+    def settle_seller_commission(self, seller_id):
+        """Sotuvchining BARCHA ochiq komissiya qarzini 'to'landi' deb belgilaydi (admin pulni
+        undirgach). Belgilangan buyurtma soni va summasini qaytaradi (atomik)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COALESCE(SUM(commission_amount),0), COUNT(*) FROM orders "
+            "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL "
+            "AND commission_settled_at IS NULL",
+            (seller_id,))
+        row = cursor.fetchone()
+        amount, count = float(row[0] or 0), int(row[1] or 0)
+        if count:
+            cursor.execute(
+                "UPDATE orders SET commission_settled_at=CURRENT_TIMESTAMP "
+                "WHERE seller_id=? AND status='delivered' AND commission_amount IS NOT NULL "
+                "AND commission_settled_at IS NULL",
+                (seller_id,))
+        conn.commit()
+        return {"count": count, "amount": round(amount, 2)}
 
     # ===== PRO OBUNA (#18) =====
     def set_pro_until(self, user_id, days):
@@ -4299,6 +4408,22 @@ class Database:
         row = cur.fetchone()
         total = row[0] or 1  # 0 ga bo'lishdan himoya
 
+        # JAMI BERILGAN buyurtma (lifetime) — buyurtmaga shartnoma raqami (id)
+        # berilgan bo'lsa, keyin o'chirilsa ham hisobda qolsin. id AUTOINCREMENT —
+        # raqam qayta ishlatilmaydi; sqlite_sequence o'chirishga ham chidamli
+        # (eng yangi buyurtma o'chsa MAX(id) tushadi, lekin seq tushmaydi).
+        # PG/shim'da sqlite_sequence bo'lmasligi mumkin — MAX(id)'ga qaytamiz.
+        total_issued = row[0] or 0
+        try:
+            cur.execute("SELECT seq FROM sqlite_sequence WHERE name='orders'")
+            sr = cur.fetchone()
+            if sr and sr[0]:
+                total_issued = max(total_issued, sr[0])
+        except Exception:
+            pass
+        cur.execute("SELECT COALESCE(MAX(id), 0) FROM orders")
+        total_issued = max(total_issued, cur.fetchone()[0] or 0)
+
         # Haftalik funnel
         cur.execute("""
             SELECT
@@ -4388,6 +4513,7 @@ class Database:
 
         return {
             'total_orders': row[0] or 0,
+            'total_issued': total_issued,
             'confirmed_total': row[1] or 0,
             'delivered_total': row[2] or 0,
             'cancelled_total': row[3] or 0,

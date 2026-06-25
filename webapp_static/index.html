@@ -53,6 +53,46 @@
   .search:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(21,146,226,.14);}
   .search::placeholder{color:var(--hint);}
 
+  /* compact buyer toolbar: mode toggle + filter pills on a single scroll row */
+  .filterwrap{position:relative; margin-top:8px;}
+  /* edge fades hint there is more to scroll; toggled by scroll position */
+  .filterwrap::before,.filterwrap::after{content:""; position:absolute; top:0; bottom:2px;
+        width:30px; pointer-events:none; z-index:3; opacity:0; transition:opacity .2s;}
+  .filterwrap::before{left:0; background:linear-gradient(90deg,var(--bg) 30%,transparent);}
+  .filterwrap::after{right:0; background:linear-gradient(270deg,var(--bg) 30%,transparent);}
+  .filterwrap.canL::before{opacity:1;}
+  .filterwrap.canR::after{opacity:1;}
+  /* bosiladigan strelkalar (asosan kompyuterda surish uchun) */
+  .fnav{position:absolute; top:50%; transform:translateY(-50%); z-index:4; width:28px; height:28px;
+        border-radius:50%; border:1px solid var(--line); background:var(--card); color:var(--text);
+        display:none; align-items:center; justify-content:center; cursor:pointer; padding:0;
+        font-size:18px; font-weight:700; line-height:1; box-shadow:0 2px 8px rgba(0,0,0,.18);}
+  .fnav:hover{background:var(--accent-soft); color:var(--accent); border-color:var(--accent);}
+  .fnav:active{transform:translateY(-50%) scale(.88);}
+  .fnav.l{left:1px;} .fnav.r{right:1px;}
+  .filterwrap.canL .fnav.l{display:flex;}
+  .filterwrap.canR .fnav.r{display:flex;}
+  .filterbar{display:flex; align-items:center; gap:7px; overflow-x:auto;
+             scrollbar-width:none; -webkit-overflow-scrolling:touch; padding-bottom:2px;
+             scroll-behavior:smooth;}
+  .filterbar::-webkit-scrollbar{display:none;}
+  @keyframes fbNudge{0%{transform:translateX(0)}35%{transform:translateX(-26px)}70%{transform:translateX(0)}}
+  .filterbar.nudge{animation:fbNudge .85s ease 1;}
+  .seg2{display:flex; gap:3px; flex:0 0 auto; background:var(--card);
+        border:1px solid var(--line); border-radius:20px; padding:3px;}
+  .seg2 .opt{padding:7px 13px; border-radius:17px; font-size:13px; font-weight:600;
+             color:var(--hint); white-space:nowrap; cursor:pointer; transition:.15s; user-select:none;}
+  .seg2 .opt.on{background:var(--accent); color:#fff; box-shadow:0 2px 8px rgba(21,146,226,.25);}
+  .fdiv{flex:0 0 auto; width:1px; height:22px; background:var(--line);}
+  .fpill{flex:0 0 auto; display:inline-flex; align-items:center; gap:4px; max-width:170px;
+         background:var(--accent-soft); color:var(--accent); border:none; border-radius:20px;
+         padding:8px 13px; font-size:13px; font-weight:600; white-space:nowrap;
+         cursor:pointer; transition:.15s;}
+  .fpill>span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:120px;}
+  .fpill:active{transform:scale(.95);}
+  .fpill.on{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;}
+  .fpill.gift{background:linear-gradient(135deg,#db2777,#ec4899); color:#fff;}
+
   .chips{display:flex; gap:8px; overflow-x:auto; padding:10px 12px 4px; scrollbar-width:none;}
   .chips::-webkit-scrollbar{display:none;}
   .chip{flex:0 0 auto; padding:8px 15px; border-radius:20px; background:var(--card);
@@ -85,6 +125,9 @@
   .shopname{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .dist{flex:0 0 auto; display:inline-flex; align-items:center; gap:2px; color:var(--accent); font-weight:700; background:var(--accent-soft); border-radius:7px; padding:1px 6px; font-size:11px; white-space:nowrap;}
   #distBtn.on{background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;}
+  .locwarn{background:rgba(234,88,12,.12); color:#ea580c; border:1px solid rgba(234,88,12,.32);
+           border-radius:11px; padding:9px 11px; font-size:12.5px; font-weight:600;
+           line-height:1.45; margin:4px 0 2px;}
   .buy{margin-top:9px; padding:9px; border:none; border-radius:11px; font-size:13px;
        font-weight:700; background:var(--accent-soft); color:var(--accent); cursor:pointer;
        display:flex; align-items:center; justify-content:center; gap:5px; transition:.15s;}
@@ -138,6 +181,12 @@
   .dsec{margin-top:14px;}
   .dsec h4{font-size:13px; color:var(--hint); font-weight:600; margin:0 0 6px; text-transform:uppercase; letter-spacing:.4px;}
   .ddesc{font-size:14.5px; line-height:1.55; white-space:pre-wrap; color:var(--text); opacity:.92;}
+  .ddesc.clamp{display:-webkit-box; -webkit-line-clamp:7; -webkit-box-orient:vertical; overflow:hidden; position:relative;}
+  .ddesc.clamp::after{content:""; position:absolute; left:0; right:0; bottom:0; height:34px; background:linear-gradient(transparent,var(--card));}
+  .descmore{margin-top:8px; background:none; border:none; color:var(--accent); font-size:13.5px; font-weight:600; cursor:pointer; padding:2px 0;}
+  .adcard{background:linear-gradient(180deg,var(--accent-soft),var(--card)); border:1px solid var(--line);}
+  .adcard .ddesc{opacity:1;}
+  .adcard .ddesc b{font-weight:700;}
   .buybar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + env(safe-area-inset-bottom));
           background:var(--bar); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
           box-shadow:0 -1px 0 var(--line);}
@@ -331,7 +380,7 @@
 </style>
 </head>
 <body>
-  <div id="notifBanner" onclick="openNotifs()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);align-items:center;justify-content:space-between;gap:8px">
+  <div id="notifBanner" onclick="onNotifBannerClick()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);align-items:center;justify-content:space-between;gap:8px">
     <span id="notifBannerText">📩</span><span style="opacity:.9">Ochish ›</span>
   </div>
   <div id="viewCatalog">
@@ -340,13 +389,20 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input class="search" id="search" placeholder="Mahsulot qidirish...">
       </div>
-      <div class="seg" id="catMode" style="margin-top:8px">
-        <div class="opt on" data-mode="products">🛍 Mahsulotlar</div>
-        <div class="opt" data-mode="shops">🏪 Do'konlar</div>
+      <div class="filterwrap" id="filterwrap">
+        <div class="filterbar" id="filterbar">
+          <div class="seg2" id="catMode">
+            <div class="opt on" data-mode="products">🛍 Mahsulotlar</div>
+            <div class="opt" data-mode="shops">🏪 Do'konlar</div>
+          </div>
+          <span class="fdiv"></span>
+          <button id="regionBtn" class="fpill">🌍 <span id="regionLbl">Barcha hududlar</span></button>
+          <button id="distBtn" class="fpill">📍 Masofa</button>
+          <button id="giftBtn" class="fpill gift">🎁 <span id="giftBtnLbl">Sovg'a</span></button>
+        </div>
+        <button class="fnav l" id="fnavL" type="button" aria-label="chapga">‹</button>
+        <button class="fnav r" id="fnavR" type="button" aria-label="o'ngga">›</button>
       </div>
-      <button id="regionBtn" style="margin-top:8px;width:100%;background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;text-align:left;cursor:pointer">🌍 <span id="regionLbl">Barcha hududlar</span></button>
-      <button id="distBtn" style="margin-top:8px;width:100%;background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;text-align:left;cursor:pointer">📍 Masofani ko'rsatish</button>
-      <button id="giftBtn" style="margin-top:8px;width:100%;background:linear-gradient(135deg,#db2777,#ec4899);color:#fff;border:none;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:700;text-align:left;cursor:pointer">🎁 <span id="giftBtnLbl">Sovg'a yordamchisi</span></button>
     </div>
     <div class="chips" id="chips"></div>
     <div id="content"></div>
@@ -551,6 +607,11 @@
     <div id="paymentsBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="commissionview">
+    <div class="cohead"><span id="ttl_commissionview">🏦 Komissiya</span><span class="x" id="commissionClose">✕</span></div>
+    <div id="commissionBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="staffview">
     <div class="cohead"><span id="ttl_staffview">👥 Xodimlar</span><span class="x" id="staffClose">✕</span></div>
     <div id="staffBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -675,6 +736,7 @@ const I18N = {
   a2hs_help_ios:{uz:"iPhone'da ekranga qo'shish:\n\n1. Bu sahifaning tepa-o'ng burchagidagi \"•••\" (yoki ⋮) menyusini oching\n2. \"Bosh ekranga qo'shish\" / \"Add to Home Screen\" ni bosing\n\nAgar topilmasa: pastdagi ulashish belgisi (□↑) orqali ham qo'shsa bo'ladi.",ru:"Добавить на экран iPhone:\n\n1. Откройте меню \"•••\" (или ⋮) вверху справа этой страницы\n2. Нажмите \"На экран «Домой»\" / \"Add to Home Screen\"\n\nЕсли нет: можно через значок \"Поделиться\" (□↑)."},
   a2hs_help_desktop:{uz:"Bu funksiya telefonda ishlaydi. Telegram'ni telefoningizda oching va Profil → \"📲 Ilovani telefon ekraniga qo'shish\" tugmasini bosing.",ru:"Эта функция работает на телефоне. Откройте Telegram на телефоне → Профиль → \"📲 Добавить приложение на экран\"."},
   gift_btn:{uz:"🎁 Sovg'a yordamchisi",ru:"🎁 Помощник по подаркам"},
+  gift_short:{uz:"🎁 Sovg'a",ru:"🎁 Подарок"},
   gift_title:{uz:"🎁 Sovg'a yordamchisi",ru:"🎁 Помощник по подаркам"},
   gift_intro_hint:{uz:"Kimga sovg'a tanlayapsiz? AI g'oya beradi va mos mahsulotlarni topadi.",ru:"Кому выбираете подарок? ИИ подскажет идеи и найдёт товары."},
   gift_recipient:{uz:"Kimga? (masalan: onam, 25 yoshli do'stim)",ru:"Кому? (например: маме, другу 25 лет)"},
@@ -736,6 +798,16 @@ const I18N = {
   notif_have:{uz:"{n} ta yangi xabar",ru:"{n} новых сообщений"},
   notif_empty:{uz:"Xabarnoma yo'q",ru:"Нет уведомлений"},
   notif_mark_all:{uz:"✓ Hammasini o'qildi deb belgilash",ru:"✓ Отметить все прочитанными"},
+  prof_nag_banner:{uz:"Profil to'liq emas — to'ldiring",ru:"Профиль не заполнен — заполните"},
+  prof_nag_title:{uz:"⚠️ Profilni to'ldiring",ru:"⚠️ Заполните профиль"},
+  prof_nag_body:{uz:"Yetishmayapti: {list}. Bu ma'lumotlarsiz xaridorlar sizni topa olmaydi va ishonmaydi. Bosing va to'g'rilang.",ru:"Не хватает: {list}. Без этих данных покупатели не найдут вас и не доверятся. Нажмите и заполните."},
+  prof_f_shop_name:{uz:"do'kon nomi",ru:"название магазина"},
+  prof_f_shop_address:{uz:"manzil",ru:"адрес"},
+  prof_f_phone:{uz:"telefon raqami",ru:"номер телефона"},
+  prof_f_location:{uz:"do'kon lokatsiyasi",ru:"геолокация магазина"},
+  prof_f_region:{uz:"hudud",ru:"регион"},
+  prof_f_username:{uz:"Telegram username",ru:"Telegram username"},
+  prof_f_card:{uz:"to'lov kartasi",ru:"платёжная карта"},
   support_closed:{uz:"Murojaat yopilgan. Yangi savol bo'lsa — Admin bilan bog'lanishdan qayta yozing.",ru:"Обращение закрыто. Новый вопрос — снова через «Связь с админом»."},
   support_close_btn:{uz:"Murojaatni yopish",ru:"Закрыть обращение"},
   support_none:{uz:"Murojaat yo'q",ru:"Обращений нет"},
@@ -756,6 +828,24 @@ const I18N = {
   agree_cancel:{uz:"✅ Roziman (bekor)",ru:"✅ Согласен (отмена)"}, deny_cancel:{uz:"⚖️ Rozi emasman",ru:"⚖️ Не согласен"},
   dispute_note:{uz:"⚖️ Bekor bo'yicha nizo — admin ko'rib chiqmoqda.",ru:"⚖️ Спор по отмене — рассматривает админ."},
   cancel_sent_ok:{uz:"Bekor so'rovi yuborildi",ru:"Запрос на отмену отправлен"},
+  // bekor qilingan buyurtma tafsiloti (kim/nima uchun)
+  cb_who:{uz:"Kim bekor qildi",ru:"Кто отменил"},
+  cb_reason:{uz:"Sababi",ru:"Причина"},
+  cb_buyer:{uz:"Xaridor",ru:"Покупатель"}, cb_seller:{uz:"Sotuvchi",ru:"Продавец"},
+  cb_admin:{uz:"Administrator",ru:"Администратор"},
+  cb_system:{uz:"Avtomatik — sotuvchi vaqtida qabul qilmadi",ru:"Автоматически — продавец не подтвердил вовремя"},
+  cb_old:{uz:"Eski buyurtma — kim bekor qilgani saqlanmagan",ru:"Старый заказ — кто отменил, не сохранено"},
+  // bekor sabab kodlari (bot crsn_* bilan AYNAN bir xil — kanal/bot pariteti)
+  crsn_bchg:{uz:"🔄 Fikrim o'zgardi, kerak emas",ru:"🔄 Передумал, больше не нужно"},
+  crsn_bprice:{uz:"💸 Narx menga to'g'ri kelmadi",ru:"💸 Цена меня не устроила"},
+  crsn_bfound:{uz:"🏷 Boshqa joydan yaxshiroq topdim",ru:"🏷 Нашёл выгоднее в другом месте"},
+  crsn_blate:{uz:"⏰ Yetkazib berish juda kech",ru:"⏰ Слишком долгая доставка"},
+  crsn_bnoreach:{uz:"📵 Sotuvchi bilan bog'lana olmadim",ru:"📵 Не смог связаться с продавцом"},
+  crsn_sstock:{uz:"📦 Mahsulot omborda qolmadi",ru:"📦 Товара не осталось на складе"},
+  crsn_sprice:{uz:"💰 Narx xato ko'rsatilgan edi",ru:"💰 Цена была указана с ошибкой"},
+  crsn_snoreach:{uz:"📵 Xaridor bilan bog'lana olmadim",ru:"📵 Не смог связаться с покупателем"},
+  crsn_snoaddr:{uz:"🚫 Bu manzilga yetkaza olmayman",ru:"🚫 Не могу доставить по этому адресу"},
+  crsn_snopay:{uz:"⏳ Xaridor to'lovni amalga oshirmadi",ru:"⏳ Покупатель не оплатил"},
   // profile
   prof_buyer:{uz:"Xaridor",ru:"Покупатель"}, prof_seller:{uz:"Sotuvchi",ru:"Продавец"}, prof_admin:{uz:"Administrator",ru:"Администратор"},
   prof_cur_mode:{uz:"Hozirgi rejim",ru:"Текущий режим"},
@@ -805,6 +895,7 @@ const I18N = {
   adm_fraud:{uz:"🚨 Firibgarlik",ru:"🚨 Мошенничество"},
   adm_analytics:{uz:"📊 Voronka",ru:"📊 Воронка"}, adm_financial:{uz:"💵 Moliya",ru:"💵 Финансы"},
   an_funnel:{uz:"Konversiya voronkasi",ru:"Воронка конверсии"}, an_total:{uz:"Jami buyurtma",ru:"Всего заказов"},
+  an_issued:{uz:"Jami berilgan (raqam)",ru:"Всего выдано (номеров)"}, an_current:{uz:"hozirgi yozuvlar",ru:"текущих записей"},
   an_confirmed:{uz:"Tasdiqlangan",ru:"Подтверждено"}, an_delivered:{uz:"Yetkazilgan",ru:"Доставлено"}, an_cancelled:{uz:"Bekor",ru:"Отменено"},
   an_avg_order:{uz:"O'rtacha chek",ru:"Средний чек"}, an_new_users:{uz:"Yangi foydalanuvchilar (hafta/oy)",ru:"Новые (нед/мес)"},
   an_peak_hours:{uz:"Faol soatlar",ru:"Пиковые часы"}, an_peak_days:{uz:"Faol kunlar",ru:"Пиковые дни"},
@@ -952,10 +1043,11 @@ const I18N = {
   sp_work_days:{uz:"Ish kunlari",ru:"Рабочие дни"}, sp_work_days_ph:{uz:"Du-Sha",ru:"Пн-Вс"},
   sp_work_hours:{uz:"Ish soatlari",ru:"Рабочие часы"}, sp_phone:{uz:"Telefon",ru:"Телефон"},
   sp_shop_location:{uz:"Do'kon joylashuvi",ru:"Геолокация магазина"},
+  sp_loc_warn:{uz:"⚠️ Do'kon lokatsiyasi belgilanmagan. Belgilasangiz, xaridorlar sizgacha masofani (km/m) ko'radi va do'koningiz yaqinlardagilarga tavsiya etiladi.",ru:"⚠️ Геолокация магазина не указана. Укажите её — и покупатели увидят расстояние до вас (км/м), а магазин будет рекомендоваться тем, кто рядом."},
   bp_on_map:{uz:"🗺 Xaritada ko'rish",ru:"🗺 Показать на карте"}, bp_shop_info:{uz:"🏪 Do'kon ma'lumoti",ru:"🏪 О магазине"},
   dist_to_shop:{uz:"Do'kongacha masofa",ru:"Расстояние до магазина"},
-  dist_near_btn:{uz:"📍 Masofani ko'rsatish",ru:"📍 Показать расстояние"},
-  dist_near_on:{uz:"📍 Yaqinlik bo'yicha · ✕",ru:"📍 По близости · ✕"},
+  dist_near_btn:{uz:"📍 Masofa",ru:"📍 Расстояние"},
+  dist_near_on:{uz:"📍 Yaqin · ✕",ru:"📍 Рядом · ✕"},
   dist_getting:{uz:"📍 Aniqlanmoqda…",ru:"📍 Определяем…"},
   ask_title:{uz:"Do'konga savol bering",ru:"Спросите магазин"}, ask_hint:{uz:"AI-yordamchi do'kon ma'lumotidan javob beradi (ish vaqti, manzil, narx...).",ru:"AI-помощник ответит из данных магазина (часы, адрес, цена...)."},
   ask_ph:{uz:"Masalan: Yetkazib berasizmi? Qachongacha ochiq?",ru:"Например: Доставляете? До скольки открыто?"},
@@ -1094,6 +1186,8 @@ const I18N = {
   sp_price:{uz:"Narxi (so'm)",ru:"Цена (сум)"}, sp_category:{uz:"Kategoriya",ru:"Категория"},
   sp_stock:{uz:"Zahira (bo'sh = cheksiz)",ru:"Запас (пусто = безлимит)"}, sp_stock_ph:{uz:"Cheksiz",ru:"Безлимит"},
   sp_desc:{uz:"Tavsif",ru:"Описание"}, sp_desc_ph:{uz:"Mahsulot haqida...",ru:"О товаре..."},
+  sp_read_more:{uz:"Ko'proq o'qish",ru:"Читать далее"}, sp_read_less:{uz:"Yopish",ru:"Свернуть"},
+  sp_ad:{uz:"E'lon",ru:"Объявление"},
   sp_hide:{uz:"🙈 Sotuvdan yashirish",ru:"🙈 Скрыть из продажи"}, sp_unhide:{uz:"👁 Sotuvga qaytarish",ru:"👁 Вернуть в продажу"},
   sp_delete:{uz:"🗑 O'chirish",ru:"🗑 Удалить"}, sp_add:{uz:"➕ Qo'shish",ru:"➕ Добавить"},
   sp_add_ad:{uz:"➕ Qo'shish va reklama yasash",ru:"➕ Добавить и создать рекламу"},
@@ -1242,6 +1336,30 @@ const I18N = {
   sp_no_payments:{uz:"Hali to'lovlar yo'q",ru:"Платежей пока нет"},
   pay_purpose_boost:{uz:"🚀 Reklama boost",ru:"🚀 Продвижение (boost)"},
   pay_purpose_subscription:{uz:"⭐ Pro obuna",ru:"⭐ Pro подписка"},
+  pay_purpose_commission:{uz:"🏦 Komissiya to'lovi",ru:"🏦 Оплата комиссии"},
+  // ===== KOMISSIYA (sotuvchi alohida ekran + admin sotuvchilar kesimi) =====
+  sp_ov_commission:{uz:"🏦 Komissiya",ru:"🏦 Комиссия"},
+  comm_title:{uz:"🏦 Platforma komissiyasi",ru:"🏦 Комиссия платформы"},
+  comm_percent:{uz:"Komissiya foizi",ru:"Процент комиссии"},
+  comm_owed_lbl:{uz:"To'lanishi kerak (qoldiq)",ru:"К оплате (остаток)"},
+  comm_paid_lbl:{uz:"Allaqachon to'langan",ru:"Уже оплачено"},
+  comm_how:{uz:"Har yetkazilgan buyurtmadan {p}% platformaga komissiya hisoblanadi. Admin pulni qabul qilgach, qoldiq nolga tushadi.",ru:"С каждого доставленного заказа начисляется {p}% комиссии платформе. После приёма оплаты администратором остаток обнуляется."},
+  comm_inactive:{uz:"Hozir komissiya o'chiq — hech narsa to'lanmaydi.",ru:"Сейчас комиссия выключена — ничего платить не нужно."},
+  comm_orders_lbl:{uz:"Buyurtmalar bo'yicha",ru:"По заказам"},
+  comm_no_orders:{uz:"Hali komissiyali buyurtma yo'q",ru:"Пока нет заказов с комиссией"},
+  comm_row_open:{uz:"qarz",ru:"долг"},
+  comm_row_paid:{uz:"to'langan",ru:"оплачено"},
+  // admin tomoni
+  adm_commissions:{uz:"🏦 Komissiya",ru:"🏦 Комиссия"},
+  comm_adm_hint:{uz:"Sotuvchilardan undiriladigan komissiya. Hozirgi foiz: {p}%",ru:"Комиссия к взысканию с продавцов. Текущий процент: {p}%"},
+  comm_adm_off:{uz:"⚠️ Komissiya hozir o'chiq (Monetizatsiya bo'limidan yoqing).",ru:"⚠️ Комиссия сейчас выключена (включите в разделе Монетизация)."},
+  comm_adm_empty:{uz:"Hali undiriladigan komissiya yo'q",ru:"Пока нет комиссии к взысканию"},
+  comm_adm_total_owed:{uz:"Jami qoldiq (undirilishi kerak)",ru:"Всего к взысканию"},
+  comm_adm_total_paid:{uz:"Jami undirilgan",ru:"Всего взыскано"},
+  comm_settle_btn:{uz:"💰 To'landi deb belgilash",ru:"💰 Отметить оплаченным"},
+  comm_settle_confirm:{uz:"\"{n}\" sotuvchidan {a} undirildi deb belgilansinmi? Qarz yopiladi.",ru:"Отметить, что с продавца \"{n}\" взыскано {a}? Долг будет закрыт."},
+  comm_settle_ok:{uz:"✅ Komissiya yopildi",ru:"✅ Комиссия закрыта"},
+  comm_settle_none:{uz:"Bu sotuvchida ochiq qarz yo'q",ru:"У продавца нет открытого долга"},
   pay_state_paid:{uz:"✅ To'langan",ru:"✅ Оплачено"},
   pay_state_pending:{uz:"⏳ Kutilmoqda",ru:"⏳ Ожидание"},
   pay_state_cancelled:{uz:"❌ Bekor",ru:"❌ Отменён"},
@@ -1331,7 +1449,7 @@ function applyStaticI18n(){
   try{ document.getElementById('chatInp').placeholder = L('chat_ph'); }catch(e){}
   // overlay sarlavhalari (statik HTML) — sotuvchi + xaridor + admin
   const titles={ttl_shopform:'sp_ov_shop',ttl_replyform:'sp_ov_reply',ttl_chanview:'sp_ov_chan',
-    ttl_paymentsview:'sp_ov_payments',
+    ttl_paymentsview:'sp_ov_payments', ttl_commissionview:'sp_ov_commission',
     ttl_staffview:'sp_ov_staff',ttl_schedview:'sp_ov_sched',ttl_deliverform:'sp_ov_deliver',
     ttl_checkout:'bp_ov_checkout',ttl_cartview:'cart_title',
     ttl_reviewform:'bp_ov_review',ttl_debtsview:'my_debts',ttl_contactform:'contact_admin',ttl_proinfoview:'pro_title',ttl_notifview:'notif_title',
@@ -1341,7 +1459,7 @@ function applyStaticI18n(){
     ttl_favview:'fav_title',ttl_trackview:'trk_title',ttl_routeview:'route_title',ttl_haggleview:'hag_title',ttl_mycardview:'mc_title',ttl_becomeview:'bs_ov'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
-  try{ document.getElementById('giftBtnLbl').textContent = L('gift_btn').replace(/^🎁\s*/,''); }catch(e){}
+  try{ document.getElementById('giftBtnLbl').textContent = L('gift_short').replace(/^🎁\s*/,''); }catch(e){}
   if(typeof updateRegionBtn==='function') updateRegionBtn();
 }
 
@@ -1354,6 +1472,20 @@ function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,
 function fmtThousands(v){ return String(v).replace(/\D/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,' '); }
 function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// Uzun matnni 7 qatorga yig'adi; faqat HAQIQATDAN oshib ketsa "Ko'proq o'qish" tugmasi (gradient ham faqat shunda)
+function setupClamp(t, btn){
+  if(!t) return;
+  t.classList.add('clamp');
+  requestAnimationFrame(()=>{
+    if(t.scrollHeight > t.clientHeight + 4){
+      if(btn){ btn.hidden=false; btn.textContent=L('sp_read_more');
+        btn.onclick=()=>{ const open=t.classList.toggle('clamp'); btn.textContent=open?L('sp_read_more'):L('sp_read_less'); }; }
+    } else {
+      t.classList.remove('clamp');
+      if(btn) btn.hidden=true;
+    }
+  });
+}
 function rating(p){ return (p.prod_avg_rating || p.avg_rating || 0); }
 function reviews(p){ return (p.prod_review_count || p.review_count || 0); }
 function oldPrice(p){ const o = p.old_price||p.price_old; return (o && o>p.price) ? o : null; }
@@ -1650,7 +1782,7 @@ async function openDetail(id){
           </div>
         </div>
         ${(p.haggle_on && !p.is_own)?`<div class="dsec"><button class="oact ok full" id="haggleBtn" style="background:linear-gradient(135deg,#f59e0b,#f97316)">${L('hag_btn')}</button></div>`:''}
-        ${p.description?`<div class="dsec"><h4>${L('sp_desc')}</h4><div class="dcard"><div class="ddesc">${esc(p.description)}</div></div></div>`:''}
+        <div class="dsec" id="adSec"><h4>📢 ${L('sp_ad')}</h4><div class="dcard adcard"><div class="ddesc" id="adText">${p.ad_caption?(p.ad_caption_pm==='HTML'?p.ad_caption:esc(p.ad_caption)):(p.description?esc(p.description):'')}</div><button class="descmore" id="adMore" hidden>${L('sp_read_more')}</button></div></div>
         ${(p.attributes&&p.attributes.length)?`<div class="dsec"><h4>${L('sp_q_fields')}</h4><div class="dcard">${p.attributes.map(a=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px"><span style="color:var(--hint)">${esc(a.attr_label||a.attr_key)}</span><b style="text-align:right">${esc(a.attr_value)}</b></div>`).join('')}</div></div>`:''}
         ${shopInfoHtml(p)}
         <div id="relatedWrap"></div>
@@ -1683,6 +1815,19 @@ async function openDetail(id){
         fvt.textContent = makeFav?'❤️':'🤍';
       }
     };
+    // 📢 E'lon — kanaldagi AYNAN reklama matni (chiroyli emojili)
+    (async()=>{
+      const at=document.getElementById('adText'), am=document.getElementById('adMore');
+      if(!at) return;
+      if(p.ad_caption){ setupClamp(at, am); return; }  // saqlangani bor — DARHOL, so'rovsiz
+      try{
+        const r=await api('/api/products/'+p.id+'/ad-caption');  // e'lon qilinmagan — tez tuziladi
+        if(r && r.caption){
+          if(r.is_html) at.innerHTML=r.caption; else at.textContent=r.caption;
+        }
+      }catch(e){ /* fallback: oddiy tavsif allaqachon ko'rinib turibdi */ }
+      setupClamp(at, am);
+    })();
     loadRelated(p.id);   // #10 — "Bular bilan olishadi" (fon'da yuklanadi)
     const hagBtn=document.getElementById('haggleBtn');
     if(hagBtn) hagBtn.onclick=()=>openHaggle(p.id, p.name, p.price);
@@ -2461,6 +2606,44 @@ updateDistBtn();   // localStorage'dan tiklangan holatni tugmaga aks ettiramiz
 document.getElementById('giftBtn').onclick=()=>openGiftView();
 document.getElementById('giftClose').onclick=()=>document.getElementById('giftview').classList.remove('open');
 
+// Filter-panel yon-surilishini bildiruvchi chet soyalar + bir martalik silkitish ishorasi
+function updateFilterFades(){
+  const bar=document.getElementById('filterbar'), wrap=document.getElementById('filterwrap');
+  if(!bar||!wrap) return;
+  const max=bar.scrollWidth-bar.clientWidth-1;
+  wrap.classList.toggle('canL', bar.scrollLeft>4);
+  wrap.classList.toggle('canR', max>4 && bar.scrollLeft<max);
+}
+(function initFilterHint(){
+  const bar=document.getElementById('filterbar'); if(!bar) return;
+  bar.addEventListener('scroll', updateFilterFades, {passive:true});
+  window.addEventListener('resize', updateFilterFades);
+  const fL=document.getElementById('fnavL'), fR=document.getElementById('fnavR');
+  if(fL) fL.onclick=()=>bar.scrollBy({left:-180, behavior:'smooth'});
+  if(fR) fR.onclick=()=>bar.scrollBy({left: 180, behavior:'smooth'});
+  // sichqoncha g'ildiragi (vertikal) -> gorizontal surish (kompyuterda qulay)
+  bar.addEventListener('wheel', (e)=>{
+    const max=bar.scrollWidth-bar.clientWidth; if(max<=0) return;
+    const step=(Math.abs(e.deltaY)>=Math.abs(e.deltaX)?e.deltaY:e.deltaX);
+    if(!step) return;
+    if((step>0 && bar.scrollLeft<max) || (step<0 && bar.scrollLeft>0)){
+      e.preventDefault();
+      bar.scrollLeft=Math.max(0, Math.min(max, bar.scrollLeft+step));
+    }
+  }, {passive:false});
+  setTimeout(()=>{
+    updateFilterFades();
+    // birinchi marta: scroll bo'lsa qisqa silkitib, "yana bor" ekanini ko'rsatamiz
+    try{
+      if(bar.scrollWidth-bar.clientWidth>20 && !localStorage.getItem('fbHintShown')){
+        bar.classList.add('nudge');
+        bar.addEventListener('animationend', ()=>bar.classList.remove('nudge'), {once:true});
+        localStorage.setItem('fbHintShown','1');
+      }
+    }catch(e){}
+  }, 400);
+})();
+
 document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='products'?loadProducts():loadShops(); },350); };
 
 // ---------- TAB NAVIGATSIYA ----------
@@ -2547,6 +2730,7 @@ function orderCardHtml(o){
     <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     <div class="oshop">🏪 ${esc(o.shop_name||'')}</div>
     ${countdownHtml(o)}
+    ${cancelInfoHtml(o)}
     ${(o.amount_due && o.amount_due>0)?`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`:''}
     ${contact}
     <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">${L('write_msg')}</button>
@@ -2559,6 +2743,28 @@ function orderCardHtml(o){
     ${(o.status==='delivered' && o.has_review)?`<div class="odebt" style="background:var(--bg);color:var(--ok);margin-top:8px">${L('bp_reviewed_badge')}</div>`:''}
     ${((o.status==='delivered'||o.status==='cancelled') && o.product_id)?`<button class="oact ok" data-reorder="${o.product_id}" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('reorder_btn')}</button>`:''}
   </div>`;
+}
+
+// Bekor qilingan buyurtma uchun "kim va nima uchun bekor qildi" bloki.
+// cancel_by: 'buyer'|'seller'|'admin'|'system'. cancel_reason — ixtiyoriy matn
+// ('auto_timeout' — system uchun ichki belgi, ko'rsatilmaydi). Barcha (xaridor/
+// sotuvchi/admin) kartalarda bir xil ishlatiladi.
+// Saqlangan sababni o'qiladigan matnga aylantiradi (bot cancel_reason_display pariteti):
+// 'code:<kod>' -> tarjima (crsn_*), 'text:<matn>' -> erkin matn, 'auto_timeout'/'—' -> yashirin.
+function cancelReasonText(r){
+  r=String(r||'').trim();
+  if(!r || r==='—' || r==='auto_timeout') return '';
+  if(r.indexOf('code:')===0){ const k='crsn_'+r.slice(5); return I18N[k]?L(k):r.slice(5); }
+  if(r.indexOf('text:')===0) return r.slice(5);
+  return r;
+}
+function cancelInfoHtml(o){
+  if(o.status!=='cancelled') return '';
+  const who={buyer:L('cb_buyer'),seller:L('cb_seller'),admin:L('cb_admin'),system:L('cb_system')}[o.cancel_by||''];
+  const reason=cancelReasonText(o.cancel_reason);
+  const whoLine = who ? `👤 ${L('cb_who')}: <b>${esc(who)}</b>` : `ℹ️ ${L('cb_old')}`;
+  return `<div class="odebt" style="background:var(--bg);color:var(--sale);margin-top:8px;text-align:left;line-height:1.5">
+    ${whoLine}${reason?`<br>📝 ${L('cb_reason')}: ${esc(reason)}`:''}</div>`;
 }
 
 function cancelFlowHtml(o){
@@ -2821,6 +3027,7 @@ async function loadProfile(){
   v.innerHTML = `<div class="vhead">${L('bp_profile')}</div><div class="loading">${L('bp_loading')}</div>`;
   try{
     const me = await api('/api/me'); ME = me;
+    if(typeof renderNotifBanner==='function') renderNotifBanner();   // profil to'ldirilsa nag o'chsin
     const f = await api('/api/me/full');   // to'liq ma'lumot
     const initial = (f.name||'?').trim().charAt(0).toUpperCase() || '👤';
     const roleLabel = f.role==='seller'?L('prof_seller'):(f.role==='admin'?L('prof_admin'):L('prof_buyer'));
@@ -2852,6 +3059,7 @@ async function loadProfile(){
         _pfRow('🎯 '+L('sp_landmark'), f.shop_landmark, canEditShop?{key:'shop_landmark',type:'text',kind:'shop'}:null) +
         _pfRow('🕐 '+L('sp_work_hours'), f.working_hours, canEditShop?{key:'working_hours',type:'text',kind:'shop'}:null) +
         _pfRow('📆 '+L('sp_work_days'), f.working_days, canEditShop?{key:'working_days',type:'text',kind:'shop'}:null) +
+        (canEditShop && f.shop_lat==null ? `<div class="locwarn">${L('sp_loc_warn')}</div>` : '') +
         _pfRow('📍 '+L('sp_shop_location'), (f.shop_lat!=null?L('sp_loc_saved'):''), canEditShop?{key:'__location__',type:'location',kind:'shop'}:null) +
         `</div>`;
       const chans=(f.channels||[]);
@@ -2892,7 +3100,12 @@ async function loadProfile(){
         else rows.push(`<div class="prow"><span style="color:var(--hint)">${L('pro_teaser')}</span></div>
           <button class="oact ok full" id="proGetBtn" style="margin-top:8px">${L('pro_open_btn')}</button>`);
       }
-      if(mon.commission && (me.commission_owed>0)) rows.push(`<div class="prow"><span>${L('comm_owed')}</span><b style="color:var(--sale)">${money(me.commission_owed)}</b></div>`);
+      if(mon.commission){
+        const pct=mon.commission_percent||0;
+        rows.push(`<div class="prow" id="commCardRow" style="cursor:pointer">
+          <span>${L('comm_owed')}${pct?` <span style="color:var(--hint)">(${pct}%)</span>`:''}</span>
+          <b style="color:var(--sale)">${money(me.commission_owed||0)} ›</b></div>`);
+      }
       if(rows.length) monCard=`<div style="padding:12px 12px 0"><div class="cosec" style="margin:0"><div class="lbl">${L('pro_title')}</div>${rows.join('')}</div></div>`;
     }
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div>
@@ -2947,6 +3160,7 @@ async function loadProfile(){
     setupAddToHome();   // 📲 ilovani bosh ekranga qo'shish (iOS + Android)
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
     const pgb=document.getElementById('proGetBtn'); if(pgb) pgb.onclick=openProInfo;
+    const ccr=document.getElementById('commCardRow'); if(ccr) ccr.onclick=openCommission;
     v.querySelectorAll('#themeSeg [data-theme]').forEach(o=>o.onclick=()=>{
       setThemePref(o.dataset.theme);
       v.querySelectorAll('#themeSeg .opt').forEach(x=>x.classList.toggle('on', x.dataset.theme===THEME_PREF));
@@ -3226,6 +3440,7 @@ function switchMode(m){
   try{ localStorage.setItem('tezbozor_mode', appMode); }catch(e){}
   try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
   applyMode();
+  if(typeof renderNotifBanner==='function') renderNotifBanner();   // rejimga qarab nag ko'rinishi yangilansin
   switchTab(appMode==='seller' ? 'seller' : (appMode==='admin' ? 'admin' : 'catalog'));
 }
 
@@ -3387,10 +3602,48 @@ async function refreshNotifs(){
     NOTIF_UNREAD=d.unread||0; renderNotifBanner();
   }catch(e){}
 }
+const _GAP_LBL={shop_name:'prof_f_shop_name',shop_address:'prof_f_shop_address',region:'prof_f_region',phone:'prof_f_phone',location:'prof_f_location',username:'prof_f_username',card:'prof_f_card'};
+// Eslatma FAQAT sotuvchi rejimida — ega xaridor rejimida ko'rganda bezovta qilmasin.
+function profileGaps(){ return (appMode==='seller' && ME && Array.isArray(ME.profile_gaps)) ? ME.profile_gaps : []; }
+function profileGapText(){ return profileGaps().map(k=>L(_GAP_LBL[k]||k)).join(', '); }
+// Chala maydon kaliti -> profildagi AYNI tahrirlash deskriptori (openFieldEdit uchun).
+function gapFieldDescriptor(k){
+  switch(k){
+    case 'shop_name':    return {label:'🏪 '+L('sp_shop_name'),     key:'shop_name',        type:'text',     kind:'shop'};
+    case 'shop_address': return {label:'📍 '+L('sp_address'),       key:'shop_address',     type:'text',     kind:'shop'};
+    case 'phone':        return {label:'📞 '+L('sp_phone'),         key:'phone',            type:'phone',    kind:'me'};
+    case 'location':     return {label:'📍 '+L('sp_shop_location'), key:'__location__',     type:'location', kind:'shop'};
+    case 'region':       return {label:'📌 '+L('sp_region'),        key:'region_id',        type:'region',   kind:'me'};
+    case 'username':     return {label:L('pf_username'),            key:'telegram_username',type:'text',     kind:'me'};
+  }
+  return null;
+}
+// Profilni ochib, BIRINCHI chala qolgan maydonning to'ldirish oynasini darhol ochadi.
+function openFirstGap(){
+  const gaps=profileGaps();
+  switchTab('profile');
+  if(!gaps.length) return;
+  const d=gapFieldDescriptor(gaps[0]);
+  if(d) setTimeout(()=>{ try{ openFieldEdit(d); }catch(e){} }, 320);
+}
 function renderNotifBanner(){
   const b=document.getElementById('notifBanner'); if(!b) return;
-  if(NOTIF_UNREAD>0){ document.getElementById('notifBannerText').textContent=`📩 ${L('notif_have').replace('{n}',NOTIF_UNREAD)}`; b.style.display='flex'; }
+  const t=document.getElementById('notifBannerText');
+  // Ustuvor: do'kon EGAsi profili to'liq bo'lmasa — har ochilishda "joniga tegadigan" eslatma.
+  if(profileGaps().length){
+    t.textContent='⚠️ '+L('prof_nag_banner');
+    b.style.background='linear-gradient(135deg,#ea580c,#f59e0b)';
+    b.dataset.action='profile'; b.style.display='flex'; return;
+  }
+  b.style.background='linear-gradient(135deg,var(--accent),var(--accent-2))';
+  b.dataset.action='notifs';
+  if(NOTIF_UNREAD>0){ t.textContent=`📩 ${L('notif_have').replace('{n}',NOTIF_UNREAD)}`; b.style.display='flex'; }
   else b.style.display='none';
+}
+function onNotifBannerClick(){
+  const b=document.getElementById('notifBanner');
+  if(b && b.dataset.action==='profile'){ openFirstGap(); }
+  else openNotifs();
 }
 async function openNotifs(){
   document.getElementById('notifview').classList.add('open');
@@ -3400,13 +3653,19 @@ async function openNotifs(){
     const d=await api('/api/my/notifications');
     NOTIF_UNREAD=d.unread||0; renderNotifBanner();
     const items=d.items||[];
-    if(!items.length){ body.innerHTML=`<div class="cartempty"><span class="big">🔔</span>${L('notif_empty')}</div>`; return; }
-    body.innerHTML=`<div class="cobody"><button class="oact soft full" id="notifAllRead" style="margin-bottom:8px">${L('notif_mark_all')}</button>`+
+    // Profil to'liq bo'lmasa — ro'yxat tepasida doimiy (o'qib bo'lmaydigan) eslatma kartasi.
+    const nag = profileGaps().length ? `<div class="ocard" id="notifProfNag" style="cursor:pointer;border-left:3px solid #ea580c;background:rgba(234,88,12,.08)">
+        <div class="orow1"><span class="oname">${L('prof_nag_title')}</span></div>
+        <div class="ometa" style="margin-top:3px">${L('prof_nag_body').replace('{list}', esc(profileGapText()))}</div>
+      </div>` : '';
+    if(!items.length && !nag){ body.innerHTML=`<div class="cartempty"><span class="big">🔔</span>${L('notif_empty')}</div>`; return; }
+    body.innerHTML=`<div class="cobody">`+(items.length?`<button class="oact soft full" id="notifAllRead" style="margin-bottom:8px">${L('notif_mark_all')}</button>`:'')+nag+
       items.map(n=>`<div class="ocard" data-nid="${n.id}" data-nkind="${n.kind}" data-nref="${n.ref_id||''}" style="cursor:pointer;${n.is_read?'':'border-left:3px solid var(--accent)'}">
         <div class="orow1"><span class="oname">${esc(n.title||'')}</span><span class="odate">${fmtDate(n.created_at)}</span></div>
         ${n.body?`<div class="ometa" style="margin-top:3px">${esc(n.body)}</div>`:''}
       </div>`).join('')+`</div>`;
-    document.getElementById('notifAllRead').onclick=async()=>{ await apiSend('/api/my/notifications/read-all','POST',{}); openNotifs(); };
+    const _nag=document.getElementById('notifProfNag'); if(_nag) _nag.onclick=()=>{ document.getElementById('notifview').classList.remove('open'); openFirstGap(); };
+    { const _ar=document.getElementById('notifAllRead'); if(_ar) _ar.onclick=async()=>{ await apiSend('/api/my/notifications/read-all','POST',{}); openNotifs(); }; }
     body.querySelectorAll('[data-nid]').forEach(c=>c.onclick=async()=>{
       try{ await apiSend('/api/my/notifications/'+c.dataset.nid+'/read','POST',{}); }catch(e){}
       await refreshNotifs();
@@ -3567,6 +3826,7 @@ function loadSeller(){
   const acts=[['route','sp_ov_route'],['sched','sp_ov_sched'],
               ...(canStaff?[['staff','sp_ov_staff']]:[]),['chan','sp_ov_chan'],
               ['ai','sp_ov_ai'],...(myCard?[['mycard','sp_ov_mycard']]:[]),
+              ...((owner && ME && ME.monetization && ME.monetization.commission)?[['commission','sp_ov_commission']]:[]),
               ...(owner?[['payments','sp_ov_payments'],['shop','sp_ov_shop']]:[])];
   v.innerHTML = `<div class="vhead">${L('sp_shop')}</div>
     <div class="chips" id="sellerSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding:0 12px 6px">
@@ -3575,7 +3835,7 @@ function loadSeller(){
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments};
+  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission};
   v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>actMap[o.dataset.act]());
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
@@ -3714,6 +3974,42 @@ async function loadPayments(){
   }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 document.getElementById('paymentsClose').onclick=()=>document.getElementById('paymentsview').classList.remove('open');
+
+// ---------- SOTUVCHI KOMISSIYA EKRANI (#18 — platformaga qancha berishi) ----------
+async function openCommission(){ document.getElementById('commissionview').classList.add('open'); await loadCommission(); }
+function commOrderCard(o){
+  const open = !o.commission_settled_at;
+  const tag = open
+    ? `<span style="color:var(--sale);font-weight:600;font-size:12px">${L('comm_row_open')}</span>`
+    : `<span style="color:var(--ok,#16a34a);font-weight:600;font-size:12px">✅ ${L('comm_row_paid')}</span>`;
+  return `<div class="ocard">
+    <div class="orow1"><span class="oname" style="font-size:14px">🛍️ ${esc(o.product_name||('#'+o.id))}</span>${tag}</div>
+    <div class="ometa">💰 ${L('comm_title').replace('🏦 ','')}: <b style="color:${open?'var(--sale)':'var(--hint)'}">${money(o.commission_amount||0)}</b> · ${money(o.total_price||0)}</div>
+    <div class="ometa" style="font-size:12px">${o.buyer_name?('👤 '+esc(o.buyer_name)+' · '):''}🗓 ${fmtDate(o.created_at)}</div>
+  </div>`;
+}
+async function loadCommission(){
+  const b=document.getElementById('commissionBody');
+  b.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const d=await api('/api/seller/commission');
+    const orders=(d && d.orders)||[];
+    const head=`<div style="padding:12px 12px 0">
+      ${!d.active?`<div class="ocard" style="background:var(--accent-soft)"><div class="ometa" style="color:var(--accent)">ℹ️ ${L('comm_inactive')}</div></div>`:''}
+      <div class="ocard">
+        <div class="prow"><span>${L('comm_percent')}</span><b>${d.percent||0}%</b></div>
+        <div class="prow"><span>${L('comm_owed_lbl')}</span><b style="color:var(--sale)">${money(d.owed||0)}</b></div>
+        <div class="prow"><span>${L('comm_paid_lbl')}</span><b style="color:var(--ok,#16a34a)">${money(d.paid||0)}</b></div>
+        <div class="ometa" style="font-size:12px;margin-top:6px;line-height:1.5">${L('comm_how').replace('{p}', d.percent||0)}</div>
+      </div>
+      <div class="lbl" style="padding:6px 2px 2px">${L('comm_orders_lbl')}</div></div>`;
+    const list = orders.length
+      ? `<div class="olist" style="padding:0 0 12px">`+orders.map(commOrderCard).join('')+`</div>`
+      : `<div class="empty"><span class="big">🏦</span>${L('comm_no_orders')}</div>`;
+    b.innerHTML=head+list;
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('commissionClose').onclick=()=>document.getElementById('commissionview').classList.remove('open');
 document.getElementById('chanClose').onclick=()=>document.getElementById('chanview').classList.remove('open');
 
 // ---------- XODIMLAR (multivendor) ----------
@@ -4222,6 +4518,7 @@ function sellerOrderCard(o){
     <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
     ${o.delivery_address?`<div class="oshop">📍 ${esc(o.delivery_address)}</div>`:''}
     ${countdownHtml(o)}
+    ${cancelInfoHtml(o)}
     ${contact}
     <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">${L('sp_msg')}</button>
     ${actions}
@@ -5233,7 +5530,7 @@ function loadAdmin(){
               ['users','adm_users'],['shops','adm_shops'],['channels','adm_channels'],
               ['orders','adm_orders'],['products','adm_products'],['deleted','adm_deleted'],
               ['audit','adm_audit'],['broadcast','adm_broadcast'],
-              ['admins','adm_admins'],['monetization','adm_monetization'],['payments','adm_payments'],['settings','adm_settings']];
+              ['admins','adm_admins'],['monetization','adm_monetization'],['commissions','adm_commissions'],['payments','adm_payments'],['settings','adm_settings']];
   v.innerHTML=`<div class="vhead">${L('adm_title')}</div>
     <div class="chips" id="admSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding-bottom:6px">${segs.map(s=>`<div class="chip${s[0]===admSeg?' active':''}" data-seg="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}</div>
     <div id="admBody"><div class="loading">...</div></div>`;
@@ -5241,7 +5538,7 @@ function loadAdmin(){
   const fn={stats:admStats,requests:admRequests,disputes:admDisputes,users:admUsers,
             shops:admShops,channels:admChannels,orders:admOrders,products:admProducts,
             deleted:admDeleted,audit:admAudit,broadcast:admBroadcast,
-            admins:admAdmins,monetization:admMonetization,payments:admPayments,moderation:admModeration,fraud:admFraud,
+            admins:admAdmins,monetization:admMonetization,commissions:admCommissions,payments:admPayments,moderation:admModeration,fraud:admFraud,
             analytics:admAnalytics,financial:admFinancial,sentiment:admSentiment,settings:admSettings,support:openAdminSupport}[admSeg];
   if(fn) fn();
 }
@@ -5274,7 +5571,7 @@ async function admAnalytics(){
     const lst=(arr,fmt)=>(arr&&arr.length)?arr.map(fmt).join(''):'<div class="ometa">—</div>';
     b.innerHTML=`<div style="padding:0 12px 16px">
       <div class="ocard"><div class="lbl" style="margin-bottom:4px">🔻 ${L('an_funnel')}</div>
-        <div class="ometa">${L('an_total')}: <b>${a.total_orders||0}</b></div>
+        <div class="ometa">${L('an_issued')}: <b>${(a.total_issued!=null?a.total_issued:a.total_orders)||0}</b>${(a.total_issued!=null&&a.total_issued>a.total_orders)?` <span style="opacity:.6">(${L('an_current')}: ${a.total_orders||0})</span>`:''}</div>
         ${fbar(L('an_confirmed'), a.confirmed_total, a.confirm_rate, 'var(--accent)')}
         ${fbar(L('an_delivered'), a.delivered_total, a.deliver_rate, 'var(--ok)')}
         ${fbar(L('an_cancelled'), a.cancelled_total, a.cancel_rate, 'var(--sale)')}
@@ -5338,6 +5635,48 @@ async function admFinancial(){
       </div>
     </div>`;
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+
+// #18 — Komissiya (sotuvchilar kesimida): admin qaysi sotuvchidan qancha olishi + undirish
+async function admCommissions(){
+  const b=admBox();
+  try{
+    const d=await api('/api/admin/commissions');
+    const sellers=(d&&d.sellers)||[];
+    const head=`<div style="padding:0 12px 6px">
+      ${!d.active?`<div class="ocard" style="background:var(--accent-soft)"><div class="ometa" style="color:var(--accent)">${L('comm_adm_off')}</div></div>`:''}
+      <div class="ocard">
+        <div class="ometa">${L('comm_adm_hint').replace('{p}', d.percent||0)}</div>
+        <div class="ometa" style="margin-top:4px">${L('comm_adm_total_owed')}: <b style="color:var(--sale)">${money(d.total_owed||0)}</b></div>
+        <div class="ometa">${L('comm_adm_total_paid')}: <b style="color:var(--ok,#16a34a)">${money(d.total_paid||0)}</b></div>
+      </div></div>`;
+    if(!sellers.length){ b.innerHTML=head+admEmpty(L('comm_adm_empty')); return; }
+    const card=s=>{
+      const name=s.shop_name||s.seller_name||('#'+s.seller_id);
+      const uname=s.telegram_username?(' · @'+String(s.telegram_username).replace('@','')):'';
+      const owed=s.owed||0;
+      return `<div class="ocard">
+        <div class="orow1"><span class="oname" style="font-size:14px">🏪 ${esc(name)}</span></div>
+        ${(s.seller_name||uname)?`<div class="ometa" style="font-size:12px">${esc(s.seller_name||'')}${uname}</div>`:''}
+        <div class="ometa">${L('comm_owed_lbl')}: <b style="color:var(--sale)">${money(owed)}</b> (${s.owed_count||0}) · ${L('comm_paid_lbl')}: <b>${money(s.paid||0)}</b></div>
+        ${owed>0?`<div class="oactions"><button class="oact ok" data-settle="${s.seller_id}" data-name="${esc(name)}" data-amt="${owed}">${L('comm_settle_btn')}</button></div>`:''}
+      </div>`;
+    };
+    b.innerHTML=head+`<div class="olist" style="padding:0 0 12px">`+sellers.map(card).join('')+`</div>`;
+    b.querySelectorAll('[data-settle]').forEach(btn=>btn.onclick=()=>settleCommission(btn.dataset.settle, btn.dataset.name, btn.dataset.amt));
+  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+}
+async function settleCommission(sellerId, name, amt){
+  const msg=L('comm_settle_confirm').replace('{n}', name).replace('{a}', money(amt));
+  const go=async()=>{
+    try{
+      const r=await apiSend('/api/admin/commissions/settle','POST',{seller_id:Number(sellerId)});
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      tg.showAlert((r && r.count>0)?L('comm_settle_ok'):L('comm_settle_none'));
+      admCommissions();
+    }catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); }
+  };
+  if(tg.showConfirm) tg.showConfirm(msg, ok=>{ if(ok) go(); }); else if(confirm(msg)) go();
 }
 async function admStats(){
   const b=admBox();
@@ -5932,6 +6271,9 @@ async function admOrders(){
       return `<div class="ocard"><div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
         <div class="oname">#${o.id} ${esc(o.product_name||'')}</div>
         <div class="ometa">${o.quantity||1} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
+        ${(o.shop_name||o.seller_name)?`<div class="oshop">🏪 ${esc(o.shop_name||o.seller_name)}</div>`:''}
+        ${o.buyer_name?`<div class="oshop">👤 ${esc(o.buyer_name)}${o.buyer_phone?` · 📞 ${esc(o.buyer_phone)}`:''}</div>`:''}
+        ${cancelInfoHtml(o)}
         ${canCancel?`<button class="oact no" data-fcancel="${o.id}" style="width:100%;margin-top:8px;background:#fdebef;color:var(--sale)">${L('adm_force_cancel')}</button>`:''}</div>`;
     }).join('')+`</div>`;
     b.querySelectorAll('[data-fcancel]').forEach(btn=>btn.onclick=()=>{
@@ -6000,6 +6342,9 @@ loadPending();   // #23 — kutilayotgan ishlar eslatmasi
     const sp = (tg.initDataUnsafe && tg.initDataUnsafe.start_param) || '';
     const m = /^product_(\d+)$/.exec(String(sp));
     if(m) setTimeout(()=>{ try{ openDetail(m[1]); }catch(e){} }, 400);
+    // Bot deeplink web_app tugmasi start_param uzatmaydi → ?product=<id> query'dan o'qiymiz
+    const qprod = new URLSearchParams(location.search||'').get('product');
+    if(qprod && /^\d+$/.test(qprod)) setTimeout(()=>{ try{ openDetail(qprod); }catch(e){} }, 400);
     // #13 — chat push tugmasidan (startapp=chat_<order_id>) to'g'ridan-to'g'ri chatni ochamiz
     const mc = /^chat_(\d+)$/.exec(String(sp));
     if(mc) setTimeout(()=>{ try{ openChat(mc[1]); }catch(e){} }, 500);

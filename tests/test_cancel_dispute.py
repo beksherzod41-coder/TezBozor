@@ -118,6 +118,40 @@ def test_resolve_requires_disputed(db, buyer, seller, product):
     assert db.get_order_by_id(oid)["status"] == "confirmed"
 
 
+# ===================== transition_order_status: cancel_by/cancel_reason =====================
+def test_transition_cancel_records_cancel_by(db, buyer, seller, product):
+    """Oddiy bekor (pending→cancelled) kim bekor qilganini saqlaydi —
+    xaridor/sotuvchi/admin ekranlarida ko'rsatish uchun."""
+    oid = db.create_order(buyer_id=buyer, seller_id=seller, product_id=product,
+                          quantity=1, total_price=1000,
+                          payment_method="cash", delivery_type="pickup")
+    assert db.transition_order_status(oid, "cancelled", "pending", cancel_by="seller") is True
+    o = db.get_order_by_id(oid)
+    assert o["status"] == "cancelled"
+    assert o["cancel_by"] == "seller"
+
+
+def test_transition_cancel_without_by_leaves_null(db, buyer, seller, product):
+    """cancel_by berilmasa — eski xatti-harakat (NULL qoladi), regressiyasiz."""
+    oid = db.create_order(buyer_id=buyer, seller_id=seller, product_id=product,
+                          quantity=1, total_price=1000,
+                          payment_method="cash", delivery_type="pickup")
+    assert db.transition_order_status(oid, "cancelled", "pending") is True
+    assert db.get_order_by_id(oid).get("cancel_by") is None
+
+
+def test_transition_cancel_preserves_existing_reason(db, buyer, seller, product):
+    """cancel_reason berilmasa (None) — mavjud sabab COALESCE bilan saqlanadi:
+    admin majburan bekor qilsa, kim (admin) yangilanadi, lekin xaridorning asl
+    sababi yo'qolmaydi."""
+    oid = _confirmed_order(db, buyer, seller, product)
+    db.request_order_cancel(oid, "buyer", "fikrim o'zgardi")
+    assert db.transition_order_status(oid, "cancelled", "confirmed", cancel_by="admin") is True
+    o = db.get_order_by_id(oid)
+    assert o["cancel_by"] == "admin"             # bu o'tishni bajargan aktor
+    assert o["cancel_reason"] == "fikrim o'zgardi"  # sabab ezilmadi (cancel_reason=None)
+
+
 def test_get_disputed_orders_lists_it(db, buyer, seller, product):
     oid = _confirmed_order(db, buyer, seller, product)
     db.request_order_cancel(oid, "buyer", "x")
