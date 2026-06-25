@@ -14986,6 +14986,13 @@ def main():
         # Shaxsiy chatdan boshqa har qanday joydan kelgan update'ni to'xtatamiz
         if chat is not None and chat.type != Chat.PRIVATE:
             raise ApplicationHandlerStop
+        # Faollik kuzatuvi (throttled): shaxsiy chatdagi har qanday harakat (xabar/
+        # buyruq/tugma) foydalanuvchini "faol" deb belgilaydi → faol vs bir martalik.
+        if update.effective_user is not None:
+            try:
+                db.touch_user_activity(telegram_id=update.effective_user.id)
+            except Exception:
+                pass
 
     # group=-100 — qolgan barcha handler'lardan oldin ishlaydi
     app.add_handler(TypeHandler(Update, _guard_private_only), group=-100)

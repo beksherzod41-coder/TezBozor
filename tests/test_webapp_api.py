@@ -105,6 +105,21 @@ def test_staff_product_under_shop_owner(client):
                         json={"price": 6000}).status_code == 200
 
 
+def test_seller_deleted_audit_list(client):
+    """App «O'chirilgan» tab: o'chirilgan mahsulot product_audit orqali EGAsiga ko'rinadi,
+    boshqa do'konga ko'rinmaydi."""
+    db = webapp_server.db
+    other = db.create_user(telegram_id=5042, phone_number="998900000042", name="Other", role="seller")
+    r = client.post("/api/seller/product", headers=hdr(5002), json={"name": "Ochiriladigan", "price": 7000})
+    pid = r.json()["product_id"]
+    # buyurtmasi yo'q → jismonan o'chadi + audit yoziladi
+    assert client.delete(f"/api/seller/product/{pid}", headers=hdr(5002)).status_code == 200
+    mine = client.get("/api/seller/deleted", headers=hdr(5002)).json()
+    assert any(a.get("name") == "Ochiriladigan" for a in mine)
+    theirs = client.get("/api/seller/deleted", headers=hdr(5042)).json()
+    assert not any(a.get("name") == "Ochiriladigan" for a in theirs)
+
+
 def test_orders_carry_creator_for_staff_filter(client):
     """Taklif: buyurtmalar xodim (creator) ma'lumotini olib keladi — ega xodim bo'yicha filtrlaydi."""
     db = webapp_server.db

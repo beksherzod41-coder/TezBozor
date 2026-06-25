@@ -12,6 +12,38 @@ def test_create_and_fetch_user(db):
     assert u["name"] == "Ali"
 
 
+def test_user_activity_tracking(db):
+    """Faollik kuzatuvi: yangi user faol; eski (bir martalik) nofaol sanaladi; touch qaytadan faol qiladi."""
+    db.create_user(telegram_id=777, name="Faol", role="buyer")
+    s = db.get_admin_stats_summary()
+    assert s["active_24h"] >= 1           # yangi yaratilgan — faol
+    # Bir martalik (40 kun oldin kelib ketgan) userni simulyatsiya qilamiz
+    old_uid = db.create_user(telegram_id=778, name="Eski", role="buyer")
+    conn = db.get_connection(); cur = conn.cursor()
+    cur.execute("UPDATE users SET last_active_at = datetime('now','-40 days') WHERE id=?", (old_uid,))
+    conn.commit()
+    assert db.get_admin_stats_summary()["inactive_users"] >= 1
+    # touch — uni qaytadan "faol" qiladi (throttle eski bo'lgani uchun yoziladi)
+    db.touch_user_activity(user_id=old_uid)
+    assert db.get_user_by_telegram_id(778)["last_active_at"] is not None
+    assert db.get_admin_stats_summary()["active_24h"] >= 2
+    # telegram_id bo'yicha touch ham ishlaydi
+    db.touch_user_activity(telegram_id=777)
+
+
+def test_users_paginated_inactive_filter(db):
+    """Nofaol filtri: 30+ kun faollik yo'q user qaytadi, faol user chiqmaydi."""
+    faol = db.create_user(telegram_id=901, name="Faol", role="buyer")     # last_active = hozir
+    nofaol = db.create_user(telegram_id=902, name="Nofaol", role="buyer")
+    conn = db.get_connection(); cur = conn.cursor()
+    cur.execute("UPDATE users SET last_active_at = datetime('now','-40 days') WHERE id=?", (nofaol,))
+    conn.commit()
+    total, rows = db.get_users_paginated(inactive_only=True)
+    ids = [r["id"] for r in rows]
+    assert nofaol in ids
+    assert faol not in ids
+
+
 def test_create_order_defaults(db, buyer, seller, product):
     oid = make_order(db, buyer, seller, product)
     order = db.get_order_by_id(oid)

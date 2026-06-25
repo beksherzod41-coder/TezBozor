@@ -184,11 +184,19 @@ class Database:
             ("telegram_username", "TEXT"),
             ("shop_lat", "REAL"),
             ("shop_lon", "REAL"),
+            ("last_active_at", "TIMESTAMP"),   # faollik kuzatuvi (DAU/WAU/MAU; faol vs bir martalik)
         ]:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
             except Exception:
                 pass
+
+        # last_active_at boshlang'ich qiymati: eski yozuvlarda yo'q bo'lsa ro'yxatdan
+        # o'tgan vaqtga tenglashtiramiz (faollik tarixi shu nuqtadan boshlanadi).
+        try:
+            cursor.execute("UPDATE users SET last_active_at = created_at WHERE last_active_at IS NULL")
+        except Exception:
+            pass
 
         # Eslatma: orders/products jadvallari uchun migratsiyalar ushbu jadvallar
         # YARATILGANDAN KEYIN bajariladi (pastdagi "MIGRATSIYALAR" blokiga qarang).
@@ -1030,7 +1038,8 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO users (telegram_id, phone_number, name, role, referral_code) VALUES (?,?,?,?,?)",
+            "INSERT INTO users (telegram_id, phone_number, name, role, referral_code, last_active_at) "
+            "VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)",
             (telegram_id, phone_number, name, role, ref_code)
         )
         uid = cursor.lastrowid
@@ -1043,6 +1052,24 @@ class Database:
         cursor.execute("SELECT * FROM users WHERE telegram_id=?", (telegram_id,))
         row = cursor.fetchone()
         return dict(row) if row else None
+
+    def touch_user_activity(self, user_id=None, telegram_id=None, throttle_minutes=10):
+        """Foydalanuvchi faolligini (last_active_at) hozirgi vaqtga yangilaydi — THROTTLED.
+        user_id YOKI telegram_id bo'yicha. Faqat oxirgi faollik throttle_minutes'dan
+        eski (yoki NULL) bo'lsa yozadi — har so'rovda ortiqcha yozuvni oldini oladi.
+        Bot va App'dagi har qanday harakat chaqiradi → "faol" vs "bir martalik" farqi shu."""
+        if user_id is None and telegram_id is None:
+            return
+        col, val = ("id", user_id) if user_id is not None else ("telegram_id", telegram_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE users SET last_active_at=CURRENT_TIMESTAMP "
+            f"WHERE {col}=? AND (last_active_at IS NULL "
+            f"OR last_active_at < datetime('now','-{int(throttle_minutes)} minutes'))",
+            (val,)
+        )
+        conn.commit()
 
     def get_user_by_id(self, user_id):
         conn = self.get_connection()
@@ -3235,6 +3262,21 @@ class Database:
         """, (limit,))
         return [dict(r) for r in cursor.fetchall()]
 
+    def get_seller_product_audit(self, seller_id, limit=100):
+        """Shu sotuvchining (do'konning) o'chirilgan mahsulotlari jurnali —
+        App «O'chirilgan» tabi uchun (eng yangilari birinchi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT a.*, u.name as deleted_by_name
+            FROM product_audit a
+            LEFT JOIN users u ON a.deleted_by=u.id
+            WHERE a.seller_id=?
+            ORDER BY a.deleted_at DESC
+            LIMIT ?
+        """, (seller_id, limit))
+        return [dict(r) for r in cursor.fetchall()]
+
     def get_product_audit_entry(self, audit_id):
         """Bitta audit yozuvining to'liq ma'lumoti."""
         conn = self.get_connection()
@@ -3973,13 +4015,19 @@ class Database:
         """, (seller_id, limit))
         return [dict(r) for r in cursor.fetchall()]
 
-    def get_users_paginated(self, limit=15, offset=0):
-        """Sahifalangan foydalanuvchilar ro'yxati."""
+    def get_users_paginated(self, limit=15, offset=0, inactive_only=False):
+        """Sahifalangan foydalanuvchilar ro'yxati.
+        inactive_only=True — faqat NOFAOL (30+ kun faollik yo'q yoki hech qachon)
+        foydalanuvchilar; eng nofaoli (NULL/eng eski faollik) birinchi."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM users")
+        where = ("WHERE last_active_at IS NULL "
+                 "OR last_active_at < datetime('now','-30 days')") if inactive_only else ""
+        cursor.execute(f"SELECT COUNT(*) FROM users {where}")
         total = cursor.fetchone()[0]
-        cursor.execute("SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, offset))
+        order = "last_active_at ASC" if inactive_only else "created_at DESC"
+        cursor.execute(f"SELECT * FROM users {where} ORDER BY {order} LIMIT ? OFFSET ?",
+                       (limit, offset))
         rows = [dict(r) for r in cursor.fetchall()]
         return total, rows
 
@@ -4334,6 +4382,20 @@ class Database:
         """)
         role_counts = {r[0]: r[1] for r in cur.fetchall()}
 
+        # Faol foydalanuvchilar (last_active_at bo'yicha — DAU/WAU/MAU) + bir martalik.
+        # "inactive" = hech qachon faol bo'lmagan YOKI 30+ kun faollik yo'q
+        # (bir kirib chiqib ketgan / tashlab ketgan foydalanuvchilar).
+        cur.execute("""
+            SELECT
+                COUNT(CASE WHEN last_active_at >= datetime('now','-1 day')   THEN 1 END) as active_24h,
+                COUNT(CASE WHEN last_active_at >= datetime('now','-7 days')  THEN 1 END) as active_7d,
+                COUNT(CASE WHEN last_active_at >= datetime('now','-30 days') THEN 1 END) as active_30d,
+                COUNT(CASE WHEN last_active_at IS NULL
+                            OR last_active_at < datetime('now','-30 days')   THEN 1 END) as inactive
+            FROM users
+        """)
+        act = cur.fetchone()
+
         # Mahsulotlar soni
         cur.execute("SELECT COUNT(*) FROM products")
         products_count = cur.fetchone()[0]
@@ -4373,6 +4435,10 @@ class Database:
             'sellers': role_counts.get('seller', 0),
             'admins': role_counts.get('admin', 0),
             'total_users': sum(role_counts.values()),
+            'active_24h': act[0] or 0,
+            'active_7d': act[1] or 0,
+            'active_30d': act[2] or 0,
+            'inactive_users': act[3] or 0,
             'products': products_count,
             'pending': order_stats.get('pending', {}).get('count', 0),
             'confirmed': order_stats.get('confirmed', {}).get('count', 0),

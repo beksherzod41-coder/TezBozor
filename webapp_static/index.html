@@ -953,6 +953,10 @@ const I18N = {
   adm_clean:{uz:"🧹 Eski bekorlarni tozalash",ru:"🧹 Очистить старые отмены"}, adm_clean_done:{uz:"{n} ta buyurtma o'chirildi",ru:"Удалено заказов: {n}"},
   adm_buyers:{uz:"Xaridorlar",ru:"Покупатели"}, adm_sellers:{uz:"Sotuvchilar",ru:"Продавцы"},
   adm_total_users:{uz:"Jami foydalanuvchi",ru:"Всего пользователей"}, adm_revenue:{uz:"Aylanma",ru:"Оборот"},
+  adm_active_users:{uz:"Faol foydalanuvchilar",ru:"Активные пользователи"},
+  adm_active_24h:{uz:"Bugun (24s)",ru:"Сегодня (24ч)"}, adm_active_7d:{uz:"Hafta",ru:"Неделя"}, adm_active_30d:{uz:"Oy",ru:"Месяц"},
+  adm_inactive_users:{uz:"Nofaol / bir martalik",ru:"Неактивные / разовые"},
+  adm_active_hint:{uz:"30+ kun ichida kirmagan yoki bir kirib chiqib ketganlar",ru:"Не заходили 30+ дней или зашли один раз"},
   adm_today:{uz:"Bugun",ru:"Сегодня"}, adm_week:{uz:"Hafta",ru:"Неделя"}, adm_month:{uz:"Oy",ru:"Месяц"},
   adm_total:{uz:"Jami",ru:"Всего"}, adm_orders_cnt:{uz:"Buyurtmalar",ru:"Заказы"},
   adm_no_requests:{uz:"Yangi so'rov yo'q",ru:"Новых заявок нет"}, adm_no_disputes:{uz:"Nizo yo'q",ru:"Споров нет"},
@@ -1179,6 +1183,14 @@ const I18N = {
   sp_pending_approval:{uz:"⏳ Tasdiq kutyapti ({n}) — xodim joylagan",ru:"⏳ Ждут подтверждения ({n}) — добавил сотрудник"},
   sp_no_products:{uz:"Hali mahsulot yo'q",ru:"Товаров пока нет"},
   sp_reject_product_confirm:{uz:"Mahsulot rad etilsinmi (o'chiriladi)?",ru:"Отклонить товар (будет удалён)?"},
+  // mahsulot turkumlari (ichki tablar)
+  sp_tab_active:{uz:"🟢 Sotuvda",ru:"🟢 В продаже"}, sp_tab_hidden:{uz:"🙈 Yashirilgan",ru:"🙈 Скрытые"},
+  sp_tab_reserve:{uz:"📦 Zaxirada",ru:"📦 На складе"}, sp_tab_deleted:{uz:"🗑 O'chirilgan",ru:"🗑 Удалённые"},
+  sp_reserve_hint:{uz:"Zaxirasi tugagan mahsulotlar. Zaxira to'ldirilsa avtomatik sotuvga qaytadi.",ru:"Товары, у которых закончился запас. При пополнении автоматически вернутся в продажу."},
+  sp_hidden_hint:{uz:"Sotuvdan qo'lda yashirgan mahsulotlaringiz. Mahsulotni ochib «Sotuvga qaytarish» bosing.",ru:"Товары, скрытые вами вручную. Откройте товар и нажмите «Вернуть в продажу»."},
+  sp_empty_active:{uz:"Sotuvda mahsulot yo'q",ru:"Нет товаров в продаже"}, sp_empty_hidden:{uz:"Yashirilgan mahsulot yo'q",ru:"Нет скрытых товаров"},
+  sp_empty_reserve:{uz:"Zaxirada mahsulot yo'q",ru:"Нет товаров на складе"}, sp_empty_deleted:{uz:"O'chirilgan mahsulot yo'q",ru:"Нет удалённых товаров"},
+  sp_deleted_at:{uz:"O'chirilgan",ru:"Удалён"},
   // mahsulot formasi
   sp_edit_product:{uz:"Mahsulotni tahrirlash",ru:"Редактировать товар"}, sp_new_product:{uz:"Yangi mahsulot",ru:"Новый товар"},
   sp_images:{uz:"Rasmlar ({n}/4 — 1-chi asosiy)",ru:"Фото ({n}/4 — 1-е основное)"}, sp_main:{uz:"Asosiy",ru:"Основное"},
@@ -1406,6 +1418,10 @@ const I18N = {
   bp_all_regions:{uz:"Barcha hududlar",ru:"Все регионы"}, bp_whole_region:{uz:"butun viloyat",ru:"вся область"},
   bp_region_title:{uz:"🌍 Hudud",ru:"🌍 Регион"},
   adm_role_all:{uz:"Hammasi",ru:"Все"}, adm_role_buyers:{uz:"Xaridorlar",ru:"Покупатели"}, adm_role_sellers:{uz:"Sotuvchilar",ru:"Продавцы"},
+  adm_role_inactive:{uz:"💤 Nofaol",ru:"💤 Неактивные"},
+  adm_u_last_active:{uz:"Oxirgi faollik",ru:"Последняя активность"},
+  adm_u_never_active:{uz:"Hech qachon faol bo'lmagan",ru:"Никогда не был активен"},
+  adm_u_active_today:{uz:"Bugun faol",ru:"Активен сегодня"}, adm_u_days_ago:{uz:"kun oldin",ru:"дн. назад"},
   bp_cancel_failed:{uz:"Bekor qilinmadi: ",ru:"Не отменено: "}, bp_cancel_confirm:{uz:"Buyurtmani bekor qilasizmi?",ru:"Отменить заказ?"}, bp_cancel_q:{uz:"Bekor qilinsinmi?",ru:"Отменить?"},
   bp_name_label:{uz:"Ism",ru:"Имя"}, bp_name_ph:{uz:"Ismingiz",ru:"Ваше имя"}, bp_lang:{uz:"Til",ru:"Язык"}, bp_name_req:{uz:"Ismingizni kiriting.",ru:"Введите ваше имя."},
   bp_link_not_ready:{uz:"Havola tayyor emas, birozdan keyin urinib ko'ring.",ru:"Ссылка не готова, попробуйте позже."},
@@ -1472,6 +1488,14 @@ function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,
 function fmtThousands(v){ return String(v).replace(/\D/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,' '); }
 function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+// Alfavit bo'yicha saralash kaliti: boshidagi emoji/belgilarni olib tashlab kichik harfga
+function chipSortKey(s){ return String(s||'').replace(/^[^\p{L}]+/u,'').toLowerCase(); }
+// Chiplarni yorliqning bosh harfi bo'yicha alfavit tartibida saralab HTML qaytaradi (harf-prefiksisiz).
+// items: [{lbl(i18n key), attr(masalan data-sub="x"), active}]
+function chipsAlpha(items){
+  return items.slice().sort((x,y)=>chipSortKey(L(x.lbl)).localeCompare(chipSortKey(L(y.lbl)),'uz'))
+    .map(c=>`<div class="chip${c.active?' active':''}" ${c.attr} style="flex:0 0 auto">${L(c.lbl)}</div>`).join('');
+}
 // Uzun matnni 7 qatorga yig'adi; faqat HAQIQATDAN oshib ketsa "Ko'proq o'qish" tugmasi (gradient ham faqat shunda)
 function setupClamp(t, btn){
   if(!t) return;
@@ -2512,10 +2536,34 @@ async function acceptStaffInvite(code){
 
 function closeDetail(){ document.getElementById('detail').classList.remove('open'); }
 document.getElementById('backBtn').onclick = closeDetail;
-tg.BackButton && tg.onEvent('backButtonClicked', ()=>{
-  const co = document.getElementById('checkout');
-  if(co.classList.contains('open')) closeCheckout(); else closeDetail();
-});
+// ---------- Universal native "Orqaga" tugmasi ----------
+// HAR qanday ochiq overlay (.detail / .checkout — detal, savat, xabarnoma, do'kon,
+// chat, nizo, profil tahrir va h.k.) native Telegram tugmasi bilan yopiladi. Eng
+// ustki (z-index/DOM) overlay'ning o'z ✕/‹Orqaga tugmasi "bosiladi" — har bir
+// ekranning cleanup'i (poll to'xtatish va h.k.) ishlaydi. Hech qaysi ochiq
+// bo'lmasa tugma yashiriladi.
+(function(){
+  if(!tg.BackButton) return;
+  const openOverlays = ()=>[...document.querySelectorAll('.detail.open, .checkout.open')];
+  function topOverlay(){
+    const ov = openOverlays();
+    if(!ov.length) return null;
+    return ov.reduce((a,b)=>{
+      const za=parseInt(getComputedStyle(a).zIndex)||0, zb=parseInt(getComputedStyle(b).zIndex)||0;
+      if(zb!==za) return zb>za?b:a;
+      return (a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)?b:a;  // teng → DOM'da keyingisi ustda
+    });
+  }
+  const syncBack = ()=>{ openOverlays().length ? tg.BackButton.show() : tg.BackButton.hide(); };
+  tg.onEvent('backButtonClicked', ()=>{
+    const top = topOverlay();
+    if(top){ const btn = top.querySelector('.x, .bk'); btn ? btn.click() : top.classList.remove('open'); }
+    setTimeout(syncBack, 60);
+  });
+  const mo = new MutationObserver(syncBack);
+  document.querySelectorAll('.detail, .checkout').forEach(el=>mo.observe(el,{attributes:true, attributeFilter:['class']}));
+  syncBack();
+})();
 // ---------- DO'KON QIDIRISH ----------
 let catMode='products', SHOP_ITEMS=[];
 document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
@@ -3300,6 +3348,16 @@ function goPendingTab(tab){
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
 let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, CHANNEL_URL = null, SELLER_ORDERS_LIST = [], COURIER_ORDERS = [], dState = {}, appMode = 'buyer';
+let sellerProdTab = 'active';   // Mahsulot bo'limidagi ichki turkum: active|hidden|reserve|deleted
+// Mahsulotni turkumga ajratadi: Sotuvda / Yashirilgan(qo'lda) / Zaxirada(avto) / O'chirilgan.
+// purged/mod_blocked — hech bir tabda ko'rinmaydi (ataylab yashirin / moderatsiyada).
+function prodCat(p){
+  const st = p.status || 'active';
+  if(st==='deleted') return 'deleted';
+  if(st==='purged' || st==='mod_blocked') return 'skip';
+  if(st==='reserve') return 'reserve';
+  return p.in_stock ? 'active' : 'hidden';
+}
 
 async function loadMe(){
   let needReg=false;
@@ -3828,10 +3886,13 @@ function loadSeller(){
               ['ai','sp_ov_ai'],...(myCard?[['mycard','sp_ov_mycard']]:[]),
               ...((owner && ME && ME.monetization && ME.monetization.commission)?[['commission','sp_ov_commission']]:[]),
               ...(owner?[['payments','sp_ov_payments'],['shop','sp_ov_shop']]:[])];
+  const sellerChips=chipsAlpha([
+    ...segs.map(s=>({lbl:s[1], attr:`data-sub="${s[0]}"`, active:sellerSub===s[0]})),
+    ...acts.map(a=>({lbl:a[1], attr:`data-act="${a[0]}"`, active:false})),
+  ]);
   v.innerHTML = `<div class="vhead">${L('sp_shop')}</div>
     <div class="chips" id="sellerSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding:0 12px 6px">
-      ${segs.map(s=>`<div class="chip${sellerSub===s[0]?' active':''}" data-sub="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}
-      ${acts.map(a=>`<div class="chip" data-act="${a[0]}" style="flex:0 0 auto">${L(a[1])}</div>`).join('')}
+      ${sellerChips}
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
@@ -4737,30 +4798,71 @@ async function loadSellerProducts(){
           <div style="display:flex;gap:6px;flex:0 0 auto"><button class="oact ok" data-approve="${p.id}" style="width:auto;padding:7px 12px">✅</button><button class="oact no" data-reject="${p.id}" style="width:auto;padding:7px 12px;background:#fdebef;color:var(--sale)">❌</button></div>
         </div>`).join('')}</div>`;
     }
-    const searchBox = prods.length>3 ? `<div style="padding:0 12px 6px"><input class="search" id="spSearch" placeholder="${L('sp_search_ph')}" style="box-shadow:none;border:1px solid var(--line)"></div>` : '';
-    const listHtml = prods.length ? `<div class="olist" id="spList">${prods.map(sellerProductCard).join('')}</div>` : `<div class="empty"><span class="big">📦</span>${L('sp_no_products')}</div>`;
-    b.innerHTML = addBtn + pendHtml + searchBox + listHtml;
+    // Turkumlarga ajratamiz (Sotuvda / Yashirilgan / Zaxirada). O'chirilgan — alohida tabda (audit).
+    const groups = {active:[], hidden:[], reserve:[]};
+    prods.forEach(p=>{ const c=prodCat(p); if(groups[c]) groups[c].push(p); });
+    if(!['active','hidden','reserve','deleted'].includes(sellerProdTab)) sellerProdTab='active';
+    const tabs = [['active','sp_tab_active',groups.active.length],
+                  ['hidden','sp_tab_hidden',groups.hidden.length],
+                  ['reserve','sp_tab_reserve',groups.reserve.length],
+                  ['deleted','sp_tab_deleted',null]];
+    const tabsHtml = `<div class="chips" id="spTabs" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding:2px 12px 6px">`+
+      tabs.map(t=>`<div class="chip${sellerProdTab===t[0]?' active':''}" data-ptab="${t[0]}" style="flex:0 0 auto">${L(t[1])}${t[2]!=null?` <b>${t[2]}</b>`:''}</div>`).join('')+`</div>`;
+    b.innerHTML = addBtn + pendHtml + tabsHtml + `<div id="spTabBody"></div>`;
     document.getElementById('pfAddBtn').onclick = ()=>openProductForm(null);
-    const bindCards=()=>{
-      b.querySelectorAll('.ocard[data-pid]').forEach(c=>c.onclick=()=>{
-        const p = SELLER_PRODUCTS.find(x=>String(x.id)===c.dataset.pid);
-        if(p) openProductForm(p);
-      });
-      b.querySelectorAll('[data-stock]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); quickStock(btn.dataset.stock); });
-      b.querySelectorAll('[data-boost]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); boostProduct(btn.dataset.boost); });
-    };
-    bindCards();
+    b.querySelectorAll('#spTabs [data-ptab]').forEach(o=>o.onclick=()=>{ sellerProdTab=o.dataset.ptab; renderProdTab(); });
     b.querySelectorAll('[data-approve]').forEach(btn=>btn.onclick=()=>approveProduct(btn.dataset.approve, true));
     b.querySelectorAll('[data-reject]').forEach(btn=>btn.onclick=()=>approveProduct(btn.dataset.reject, false));
-    const sp=document.getElementById('spSearch');
-    if(sp) sp.oninput=()=>{
-      const q=sp.value.trim().toLowerCase();
-      const filt = q ? SELLER_PRODUCTS.filter(p=>String(p.name||'').toLowerCase().includes(q)) : SELLER_PRODUCTS;
-      const lst=document.getElementById('spList');
-      lst.innerHTML = filt.length ? filt.map(sellerProductCard).join('') : `<div class="empty" style="padding:24px"><span class="big">🔍</span>${L('nothing_found')}</div>`;
-      bindCards();
-    };
+    renderProdTab();
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+// Mahsulot kartalaridagi tugmalarni bog'laydi (ochish / zaxira / boost).
+function bindProdCards(scope){
+  scope.querySelectorAll('.ocard[data-pid]').forEach(c=>c.onclick=()=>{
+    const p = SELLER_PRODUCTS.find(x=>String(x.id)===c.dataset.pid);
+    if(p) openProductForm(p);
+  });
+  scope.querySelectorAll('[data-stock]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); quickStock(btn.dataset.stock); });
+  scope.querySelectorAll('[data-boost]').forEach(btn=>btn.onclick=(e)=>{ e.stopPropagation(); boostProduct(btn.dataset.boost); });
+}
+// Tanlangan turkumni chiqaradi. 'deleted' — audit endpointidan (faqat o'qish).
+function renderProdTab(){
+  document.querySelectorAll('#spTabs [data-ptab]').forEach(o=>o.classList.toggle('active', o.dataset.ptab===sellerProdTab));
+  const body = document.getElementById('spTabBody');
+  if(!body) return;
+  if(sellerProdTab==='deleted'){ loadDeletedProducts(body); return; }
+  const list = SELLER_PRODUCTS.filter(p=>prodCat(p)===sellerProdTab);
+  const hintKey = sellerProdTab==='reserve' ? 'sp_reserve_hint' : (sellerProdTab==='hidden' ? 'sp_hidden_hint' : null);
+  const hint = hintKey ? `<div style="padding:0 14px 7px;font-size:12px;color:var(--hint);line-height:1.4">${L(hintKey)}</div>` : '';
+  const emptyKey = {active:'sp_empty_active',hidden:'sp_empty_hidden',reserve:'sp_empty_reserve'}[sellerProdTab];
+  const searchBox = list.length>3 ? `<div style="padding:0 12px 6px"><input class="search" id="spSearch" placeholder="${L('sp_search_ph')}" style="box-shadow:none;border:1px solid var(--line)"></div>` : '';
+  const listHtml = list.length ? `<div class="olist" id="spList">${list.map(sellerProductCard).join('')}</div>` : `<div class="empty"><span class="big">📦</span>${L(emptyKey)}</div>`;
+  body.innerHTML = hint + searchBox + listHtml;
+  bindProdCards(body);
+  const sp=document.getElementById('spSearch');
+  if(sp) sp.oninput=()=>{
+    const q=sp.value.trim().toLowerCase();
+    const filt = q ? list.filter(p=>String(p.name||'').toLowerCase().includes(q)) : list;
+    const lst=document.getElementById('spList');
+    lst.innerHTML = filt.length ? filt.map(sellerProductCard).join('') : `<div class="empty" style="padding:24px"><span class="big">🔍</span>${L('nothing_found')}</div>`;
+    bindProdCards(body);
+  };
+}
+// «O'chirilgan» tab — product_audit jurnali (tarix, faqat o'qish).
+async function loadDeletedProducts(body){
+  body.innerHTML = `<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const list = await api('/api/seller/deleted');
+    if(!list.length){ body.innerHTML = `<div class="empty"><span class="big">🗑️</span>${L('sp_empty_deleted')}</div>`; return; }
+    body.innerHTML = `<div class="olist">`+list.map(a=>`<div class="ocard" style="display:flex;gap:12px;align-items:center;opacity:.7">
+      <div class="coprod" style="padding:0;background:none;box-shadow:none;flex:0 0 auto"><div class="ph">🗑️</div></div>
+      <div style="flex:1;min-width:0">
+        <div class="oname" style="font-size:14px">${esc(a.name||'')}</div>
+        <div class="ometa"><b>${money(a.price||0)}</b></div>
+        <div class="oshop" style="font-size:12px;color:var(--hint)">${L('sp_deleted_at')}: ${fmtDate(a.deleted_at)}</div>
+      </div>
+    </div>`).join('')+`</div>`;
+  }catch(e){ body.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 function approveProduct(pid, ok){
   const doIt=async()=>{
@@ -5532,7 +5634,7 @@ function loadAdmin(){
               ['audit','adm_audit'],['broadcast','adm_broadcast'],
               ['admins','adm_admins'],['monetization','adm_monetization'],['commissions','adm_commissions'],['payments','adm_payments'],['settings','adm_settings']];
   v.innerHTML=`<div class="vhead">${L('adm_title')}</div>
-    <div class="chips" id="admSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding-bottom:6px">${segs.map(s=>`<div class="chip${s[0]===admSeg?' active':''}" data-seg="${s[0]}" style="flex:0 0 auto">${L(s[1])}</div>`).join('')}</div>
+    <div class="chips" id="admSeg" style="flex-wrap:wrap;overflow-x:visible;gap:7px;padding-bottom:6px">${chipsAlpha(segs.map(s=>({lbl:s[1], attr:`data-seg="${s[0]}"`, active:s[0]===admSeg})))}</div>
     <div id="admBody"><div class="loading">...</div></div>`;
   v.querySelectorAll('#admSeg .chip').forEach(c=>c.onclick=()=>{ admSeg=c.dataset.seg; loadAdmin(); });
   const fn={stats:admStats,requests:admRequests,disputes:admDisputes,users:admUsers,
@@ -5685,6 +5787,10 @@ async function admStats(){
     b.innerHTML=`<div style="padding:0 12px 16px">
       <div class="ocard"><div class="ometa">👥 ${L('adm_total_users')}: <b>${s.total_users||0}</b></div>
         <div class="ometa">${L('adm_buyers')}: ${s.buyers||0} · ${L('adm_sellers')}: ${s.sellers||0} · 🛍️ ${s.products||0}</div></div>
+      <div class="ocard"><div class="ometa">🟢 ${L('adm_active_users')}</div>
+        <div class="ometa">${L('adm_active_24h')}: <b>${s.active_24h||0}</b> · ${L('adm_active_7d')}: <b>${s.active_7d||0}</b> · ${L('adm_active_30d')}: <b>${s.active_30d||0}</b></div>
+        <div class="ometa" style="color:var(--sale)">💤 ${L('adm_inactive_users')}: <b>${s.inactive_users||0}</b></div>
+        <div class="ometa" style="font-size:11.5px;color:var(--hint)">${L('adm_active_hint')}</div></div>
       <div class="ocard"><div class="ometa">📦 ${L('adm_orders_cnt')}: <b>${s.total_orders||0}</b></div>
         <div class="ometa">${L('st_pending')}: ${s.pending||0} · ${L('st_confirmed')}: ${s.confirmed||0} · ${L('st_delivered')}: ${s.delivered||0} · ${L('st_cancelled')}: ${s.cancelled||0}</div></div>
       <div class="ocard"><div class="ometa">💰 ${L('adm_revenue')}</div>
@@ -5798,7 +5904,7 @@ let admUserRole='';
 async function admUsers(){
   admUsersOffset=0; admUsersList=[];
   const b=admBox();
-  const roles=[['','adm_role_all'],['buyer','adm_role_buyers'],['seller','adm_role_sellers']];
+  const roles=[['','adm_role_all'],['buyer','adm_role_buyers'],['seller','adm_role_sellers'],['inactive','adm_role_inactive']];
   b.innerHTML=`<div class="chips" id="admURole" style="padding-top:0">${roles.map(r=>`<div class="chip${r[0]===admUserRole?' active':''}" data-urole="${r[0]}">${L(r[1])}</div>`).join('')}</div>
     <div style="padding:0 12px 8px"><input class="search" id="admUserSearch" placeholder="${L('adm_search_user')}" style="box-shadow:none;border:1px solid var(--line)"></div><div id="admUserList"></div>`;
   b.querySelectorAll('#admURole .chip').forEach(c=>c.onclick=()=>{ admUserRole=c.dataset.urole; admUsers(); });
@@ -5811,7 +5917,8 @@ async function admUserFetch(q, reset){
   const wrap=document.getElementById('admUserList'); if(!wrap) return;
   if(reset){ admUsersOffset=0; admUsersList=[]; wrap.innerHTML=`<div class="loading">...</div>`; }
   try{
-    const res=await api('/api/admin/users?q='+encodeURIComponent(q||'')+'&offset='+admUsersOffset+(admUserRole?('&role='+admUserRole):''));
+    const roleParam = admUserRole==='inactive' ? '&inactive=1' : (admUserRole?('&role='+admUserRole):'');
+    const res=await api('/api/admin/users?q='+encodeURIComponent(q||'')+'&offset='+admUsersOffset+roleParam);
     admUsersList=admUsersList.concat(res.users||[]);
     if(!admUsersList.length){ wrap.innerHTML=admEmpty(L('adm_no_requests')); return; }
     const more=(res.total!=null && admUsersList.length<res.total && !q);
@@ -5823,11 +5930,22 @@ async function admUserFetch(q, reset){
   }catch(e){ wrap.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 function admRoleLabel(r){ return r==='seller'?L('prof_seller'):(r==='admin'?L('prof_admin'):L('prof_buyer')); }
+// Oxirgi faollikni "🟢 Bugun faol" / "🟢 N kun oldin" / "💤 30+ kun" / "💤 Hech qachon" ko'rinishida.
+function lastActiveLabel(la){
+  if(!la) return `<span style="color:var(--sale)">💤 ${L('adm_u_never_active')}</span>`;
+  const d=new Date(String(la).replace(' ','T')+'Z');
+  if(isNaN(d.getTime())) return '';
+  const days=Math.floor((Date.now()-d.getTime())/86400000);
+  const inactive=days>=30;
+  const txt = days<=0 ? L('adm_u_active_today') : (days+' '+L('adm_u_days_ago'));
+  return `<span style="color:${inactive?'var(--sale)':'var(--hint)'}">${inactive?'💤':'🟢'} ${txt}</span>`;
+}
 function admUserRow(u){
   return `<div class="ocard" data-au="${u.id}">
     <div class="oname">👤 ${esc(u.name||'—')} ${u.is_blocked?'🚫':''}</div>
     <div class="ometa">${admRoleLabel(u.role)}${u.phone_number?' · '+esc(u.phone_number):''}${u.telegram_username?' · @'+esc(u.telegram_username):''}</div>
     ${u.shop_name?`<div class="ometa">🏪 ${esc(u.shop_name)}</div>`:''}
+    <div class="ometa">${lastActiveLabel(u.last_active_at)}</div>
   </div>`;
 }
 async function openAUser(u){
@@ -5861,6 +5979,7 @@ function renderAUser(d){
       ${_aurow(L('adm_u_referral'), d.referral_code)}
       ${_aurow(L('adm_u_orders'), d.buyer_orders_count)}
       ${_aurow(L('adm_u_created'), fmtDate(d.created_at))}
+      ${_aurow(L('adm_u_last_active'), d.last_active_at?fmtDate(d.last_active_at):L('adm_u_never_active'))}
     </div>
     ${seller?`<div class="ocard"><div class="oname">🏪 ${esc(d.shop_name||'—')}</div>
       ${_aurow(L('adm_u_approved'), d.is_approved?'✅':'❌')}

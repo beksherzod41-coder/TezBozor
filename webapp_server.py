@@ -1168,6 +1168,11 @@ def _buyer_from_auth(authorization):
     buyer = db.get_user_by_telegram_id(tg_id)
     if not buyer:
         raise HTTPException(status_code=403, detail="not_registered")
+    # Faollik kuzatuvi (throttled): har App so'rovi foydalanuvchini "faol" deb belgilaydi.
+    try:
+        db.touch_user_activity(user_id=buyer["id"])
+    except Exception:
+        pass
     return buyer
 
 
@@ -2072,6 +2077,14 @@ def api_seller_orders(authorization: str = Header(None)):
 def api_seller_products(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     return _rows(db.get_products_by_seller(_owner_id(user)))   # do'kon mahsulotlari (ega+xodimlar)
+
+
+@app.get("/api/seller/deleted")
+def api_seller_deleted(authorization: str = Header(None)):
+    """App «O'chirilgan» tabi — shu do'konning o'chirilgan mahsulotlari jurnali
+    (product_audit). Faqat o'qish uchun (tarix)."""
+    user = dict(_buyer_from_auth(authorization))
+    return _rows(db.get_seller_product_audit(_owner_id(user)))
 
 
 @app.get("/api/courier/orders")
@@ -5045,11 +5058,16 @@ async def api_admin_seller_decide(user_id: int, body: SellerReqDecision,
 
 @app.get("/api/admin/users")
 def api_admin_users(authorization: str = Header(None), q: str = Query(None),
-                    offset: int = Query(0), role: str = Query(None)):
+                    offset: int = Query(0), role: str = Query(None),
+                    inactive: bool = Query(False)):
     _admin_from_auth(authorization)
     q = (q or "").strip()
     if q:
         return {"total": None, "offset": 0, "users": _rows(db.search_users(q, limit=30))}
+    if inactive:
+        # 💤 Faqat nofaol / bir martalik (30+ kun faollik yo'q yoki hech qachon)
+        total, rows = db.get_users_paginated(limit=ADMIN_PAGE, offset=max(0, offset), inactive_only=True)
+        return {"total": total, "offset": offset, "users": _rows(rows), "inactive": True}
     role = role if role in ("buyer", "seller", "admin") else None
     if role:
         allr = db.get_all_users(role=role)
