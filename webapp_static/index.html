@@ -889,6 +889,7 @@ const I18N = {
   adm_msg_ph:{uz:"Xabar yozing...",ru:"Напишите сообщение..."}, adm_send:{uz:"📨 Yuborish",ru:"📨 Отправить"},
   adm_bcast_ph:{uz:"Hammaga yuboriladigan xabar...",ru:"Сообщение для рассылки..."},
   adm_bcast_all:{uz:"Hammaga",ru:"Всем"}, adm_bcast_sent:{uz:"Yuborildi",ru:"Отправлено"},
+  adm_bcast_result:{uz:"📩 Ilovaga: {app} kishi · 📲 Telegram push: {sent}/{total}",ru:"📩 В приложение: {app} чел. · 📲 Telegram-пуш: {sent}/{total}"},
   adm_dispute_chat:{uz:"💬 Nizo yozishmasi",ru:"💬 Переписка по спору"},
   adm_confirm_del:{uz:"Mahsulot o'chirilsinmi?",ru:"Удалить товар?"},
   adm_del:{uz:"🗑 O'chirish",ru:"🗑 Удалить"}, adm_sold:{uz:"sotilgan",ru:"продано"},
@@ -5980,7 +5981,7 @@ function admBroadcast(){
       const btn=document.getElementById('bcastSend'); btn.disabled=true; btn.textContent=L('sending');
       try{ const res=await apiSend('/api/admin/broadcast','POST',{text:txt, target:bt});
         document.getElementById('bcastview').classList.remove('open');
-        tg.showAlert(L('adm_bcast_sent')+': '+(res.sent||0)+'/'+(res.total||0));
+        tg.showAlert(L('adm_bcast_result').replace('{app}',res.app_notified||0).replace('{sent}',res.sent||0).replace('{total}',res.total||0));
       }catch(e){ btn.disabled=false; btn.textContent=L('adm_send'); tg.showAlert(L('err')+': '+e.message); }
     };
     document.getElementById('bcastview').classList.add('open');

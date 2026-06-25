@@ -1148,6 +1148,33 @@ def test_admin_broadcast_empty_400(client):
     assert r.status_code == 400
 
 
+def test_admin_broadcast_plain_text_and_app_banner(client, monkeypatch):
+    """Matn parse_mode'siz oddiy yuborilsin (apostrof &#x27; ga aylanmasin) va
+    HAMMA foydalanuvchi app-banner xabarnomasini olsin (push xato bo'lsa ham)."""
+    sent_payloads = []
+
+    async def _fake(method, payload):
+        sent_payloads.append(payload)
+        return {"ok": True}
+
+    monkeypatch.setattr(webapp_server, "_tg_call", _fake)
+    text = "TezBozor yangilandi — bozor cho'ntagingizda!"
+    r = client.post("/api/admin/broadcast", headers=hdr(5003), json={"text": text})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    # App-banner hammaga (push muvaffaqiyatidan qat'i nazar)
+    assert data["app_notified"] >= data["sent"] >= 1
+    # Matn AYNAN yuborilsin — html.escape yo'q, parse_mode yo'q
+    assert any(p.get("text") == text for p in sent_payloads)
+    assert all("parse_mode" not in p for p in sent_payloads)
+    assert all("&#x27;" not in (p.get("text") or "") for p in sent_payloads)
+    # Qabul qiluvchida app-banner notification yaratilganini tasdiqlash
+    sid = webapp_server.db.get_user_by_telegram_id(5001)["id"]
+    notifs = webapp_server.db.get_user_notifications(sid)
+    assert any(text in (n.get("body") or "") for n in notifs)
+
+
 def test_admin_seller_request_decide_by_seller_403(client):
     sid = webapp_server.db.get_user_by_telegram_id(5001)["id"]
     r = client.post(f"/api/admin/seller-request/{sid}", headers=hdr(5002),

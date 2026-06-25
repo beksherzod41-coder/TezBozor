@@ -5435,18 +5435,28 @@ async def api_admin_broadcast(body: BroadcastIn, authorization: str = Header(Non
         raise HTTPException(status_code=400, detail="too_long")
     role = body.target if body.target in ("buyer", "seller") else None
     users = db.get_all_users(role=role)
-    sent, failed = 0, 0
+    sent, failed, app_notified = 0, 0, 0
+    title = "📢 Yangilik / Новость"
     for u in users:
         u = dict(u)
-        tg = u.get("telegram_id")
-        if not tg or u.get("is_blocked"):
+        if u.get("is_blocked"):
             continue
-        res = await _tg_call("sendMessage", {"chat_id": tg, "text": html.escape(text)})
+        # App-banner: HAMMA foydalanuvchi ko'radi — botni shaxsiy chatda /start qilmagan
+        # (app-first ro'yxatdan o'tgan) userlar ham. Telegram push faqat qo'shimcha.
+        _notify_db(u.get("id"), "info", title, text)
+        app_notified += 1
+        tg = u.get("telegram_id")
+        if not tg:
+            continue
+        # parse_mode'siz oddiy matn: apostrof va maxsus belgilar to'g'ri chiqsin
+        # (html.escape + parse_mode'siz "&#x27;" kabi belgilarga aylanardi).
+        res = await _tg_call("sendMessage", {"chat_id": tg, "text": text})
         if res and res.get("ok"):
             sent += 1
         else:
             failed += 1
-    return {"ok": True, "sent": sent, "failed": failed, "total": len(users)}
+    return {"ok": True, "sent": sent, "failed": failed,
+            "app_notified": app_notified, "total": len(users)}
 
 
 # ---- #6 KANALLAR (bot admin_channels pariteti) ----
