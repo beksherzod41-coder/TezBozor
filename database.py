@@ -185,6 +185,7 @@ class Database:
             ("shop_lat", "REAL"),
             ("shop_lon", "REAL"),
             ("last_active_at", "TIMESTAMP"),   # faollik kuzatuvi (DAU/WAU/MAU; faol vs bir martalik)
+            ("spam_count", "INTEGER DEFAULT 0"),  # bloklangan spam/flood urinishlari soni
         ]:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -1070,6 +1071,109 @@ class Database:
             (val,)
         )
         conn.commit()
+
+    def increment_spam_count(self, value):
+        """Bloklangan spam/flood urinishini foydalanuvchiga yozadi (admin statistikasi
+        uchun: 'nechtasi spam qilgan'). `value` — DB id YOKI telegram_id bo'lishi mumkin;
+        avval id bo'yicha urinamiz, mos kelmasa telegram_id bo'yicha (chaqiruv joylari
+        ikkala turdagi raqamni uzatadi). Hech qayerga mos kelmasa — jim e'tibor bermaydi."""
+        if value is None:
+            return
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE users SET spam_count = COALESCE(spam_count,0) + 1 WHERE id=?", (value,))
+        if cursor.rowcount == 0:
+            cursor.execute(
+                "UPDATE users SET spam_count = COALESCE(spam_count,0) + 1 WHERE telegram_id=?",
+                (value,))
+        conn.commit()
+
+    def delete_user_completely(self, user_id):
+        """Foydalanuvchini VA u bilan bog'liq BARCHA ma'lumotni butunlay o'chiradi —
+        test akkauntini '0 ga qaytarish' uchun. Keyin xuddi yangidek qayta ro'yxatdan
+        o'tish mumkin. FK enforcement ON bo'lgani uchun bola qatorlar AVVAL, foydalanuvchi
+        qatori ENG OXIRIDA o'chiriladi. Qaytaradi: {'ok':bool, 'deleted':{jadval:son}}.
+        Eslatma: asosiy admin (ADMIN_ID) o'chirilsa ham, telegram_id o'zgarmagani uchun
+        qayta ro'yxatdan o'tganda admin huquqi env orqali avtomatik tiklanadi."""
+        conn = self.get_connection()
+        cur = conn.cursor()
+        deleted = {}
+
+        def _run(sql, params=()):
+            try:
+                cur.execute(sql, params)
+                return cur.rowcount or 0
+            except Exception:
+                return 0
+
+        def _add(name, n):
+            if n and n > 0:
+                deleted[name] = deleted.get(name, 0) + n
+
+        uid = user_id
+        # 1) Shu foydalanuvchiga tegishli mahsulot va buyurtma id'lari
+        cur.execute("SELECT id FROM products WHERE seller_id=? OR created_by=?", (uid, uid))
+        product_ids = [r[0] for r in cur.fetchall()]
+        cur.execute("SELECT id FROM orders WHERE buyer_id=? OR seller_id=? OR courier_id=?",
+                    (uid, uid, uid))
+        order_ids = {r[0] for r in cur.fetchall()}
+        if product_ids:
+            qm = ",".join("?" * len(product_ids))
+            cur.execute(f"SELECT id FROM orders WHERE product_id IN ({qm})", product_ids)
+            order_ids |= {r[0] for r in cur.fetchall()}
+        order_ids = list(order_ids)
+
+        def _del_in(table, col, ids):
+            if not ids:
+                return
+            qm = ",".join("?" * len(ids))
+            _add(table, _run(f"DELETE FROM {table} WHERE {col} IN ({qm})", list(ids)))
+
+        # 2) Buyurtma-bog'liq bolalar
+        _del_in("messages", "order_id", order_ids)
+        _del_in("dispute_messages", "order_id", order_ids)
+        _del_in("reviews", "order_id", order_ids)
+        # 3) Mahsulot-bog'liq bolalar
+        for tbl in ("product_attributes", "product_images", "product_audit",
+                    "scheduled_posts", "auto_reposts", "favorites", "haggle_deals", "reviews"):
+            _del_in(tbl, "product_id", product_ids)
+        # 4) Buyurtmalar va mahsulotlar
+        _del_in("orders", "id", order_ids)
+        _del_in("products", "id", product_ids)
+        # 5) Support tbranchlari (avval xabarlar, keyin tranchlar)
+        try:
+            cur.execute("SELECT id FROM support_threads WHERE user_id=?", (uid,))
+            tids = [r[0] for r in cur.fetchall()]
+        except Exception:
+            tids = []
+        _del_in("support_messages", "thread_id", tids)
+        # 6) Foydalanuvchiga to'g'ridan-to'g'ri tegishli qolgan qatorlar
+        _add("favorites", _run("DELETE FROM favorites WHERE buyer_id=?", (uid,)))
+        _add("haggle_deals", _run("DELETE FROM haggle_deals WHERE buyer_id=?", (uid,)))
+        _add("reviews", _run("DELETE FROM reviews WHERE seller_id=? OR buyer_id=?", (uid, uid)))
+        _add("referrals", _run("DELETE FROM referrals WHERE referrer_id=? OR referred_id=?", (uid, uid)))
+        _add("messages", _run("DELETE FROM messages WHERE sender_id=? OR receiver_id=?", (uid, uid)))
+        _add("dispute_messages", _run("DELETE FROM dispute_messages WHERE sender_id=?", (uid,)))
+        _add("payments", _run("DELETE FROM payments WHERE user_id=?", (uid,)))
+        _add("feature_usage", _run("DELETE FROM feature_usage WHERE user_id=?", (uid,)))
+        _add("notifications", _run("DELETE FROM notifications WHERE user_id=?", (uid,)))
+        _add("seller_requests", _run("DELETE FROM seller_requests WHERE user_id=?", (uid,)))
+        _add("seller_channels", _run("DELETE FROM seller_channels WHERE seller_id=?", (uid,)))
+        _add("support_messages", _run("DELETE FROM support_messages WHERE sender_id=?", (uid,)))
+        _add("support_threads", _run("DELETE FROM support_threads WHERE user_id=?", (uid,)))
+        _add("shop_staff", _run("DELETE FROM shop_staff WHERE user_id=? OR added_by=?", (uid, uid)))
+        _add("shop_invites", _run("DELETE FROM shop_invites WHERE created_by=? OR used_by=?", (uid, uid)))
+        _add("shops", _run("DELETE FROM shops WHERE owner_user_id=?", (uid,)))
+        _add("scheduled_posts", _run("DELETE FROM scheduled_posts WHERE seller_id=? OR created_by=?", (uid, uid)))
+        _add("auto_reposts", _run("DELETE FROM auto_reposts WHERE seller_id=? OR created_by=?", (uid, uid)))
+        _add("product_audit", _run("DELETE FROM product_audit WHERE seller_id=? OR deleted_by=?", (uid, uid)))
+        # Boshqa foydalanuvchilar shu userni referrer sifatida ko'rsatgan bo'lsa — bog'lanishni uzamiz
+        _run("UPDATE users SET referred_by=NULL WHERE referred_by=?", (uid,))
+        # 7) NIHOYAT — foydalanuvchining o'zi
+        n_user = _run("DELETE FROM users WHERE id=?", (uid,))
+        conn.commit()
+        return {"ok": bool(n_user), "deleted": deleted}
 
     def get_user_by_id(self, user_id):
         conn = self.get_connection()
@@ -4385,16 +4489,29 @@ class Database:
         # Faol foydalanuvchilar (last_active_at bo'yicha — DAU/WAU/MAU) + bir martalik.
         # "inactive" = hech qachon faol bo'lmagan YOKI 30+ kun faollik yo'q
         # (bir kirib chiqib ketgan / tashlab ketgan foydalanuvchilar).
+        # MUHIM: adminlar (o'zimiz/test nazorat) bu hisobdan CHIQARILADI — aks holda
+        # sonlar sun'iy shishadi va "real foydalanuvchi faolligi" buziladi.
         cur.execute("""
             SELECT
                 COUNT(CASE WHEN last_active_at >= datetime('now','-1 day')   THEN 1 END) as active_24h,
                 COUNT(CASE WHEN last_active_at >= datetime('now','-7 days')  THEN 1 END) as active_7d,
                 COUNT(CASE WHEN last_active_at >= datetime('now','-30 days') THEN 1 END) as active_30d,
                 COUNT(CASE WHEN last_active_at IS NULL
-                            OR last_active_at < datetime('now','-30 days')   THEN 1 END) as inactive
-            FROM users
+                            OR last_active_at < datetime('now','-30 days')   THEN 1 END) as inactive,
+                COUNT(*) as real_total
+            FROM users WHERE COALESCE(role,'') != 'admin'
         """)
         act = cur.fetchone()
+
+        # Spam/flood: nechta foydalanuvchi spam qilgan + jami bloklangan urinishlar
+        # (adminlar bundan ham chiqariladi). 'spammers' = spam_count>0 bo'lganlar soni.
+        cur.execute("""
+            SELECT
+                COUNT(CASE WHEN COALESCE(spam_count,0) > 0 THEN 1 END) as spammers,
+                COALESCE(SUM(spam_count), 0) as spam_events
+            FROM users WHERE COALESCE(role,'') != 'admin'
+        """)
+        spam = cur.fetchone()
 
         # Mahsulotlar soni
         cur.execute("SELECT COUNT(*) FROM products")
@@ -4439,6 +4556,9 @@ class Database:
             'active_7d': act[1] or 0,
             'active_30d': act[2] or 0,
             'inactive_users': act[3] or 0,
+            'real_users': act[4] or 0,          # adminsiz jami (faol+nofaol bazasi)
+            'spammers': spam[0] or 0,           # spam qilgan foydalanuvchilar soni
+            'spam_events': spam[1] or 0,        # jami bloklangan spam/flood urinishlari
             'products': products_count,
             'pending': order_stats.get('pending', {}).get('count', 0),
             'confirmed': order_stats.get('confirmed', {}).get('count', 0),

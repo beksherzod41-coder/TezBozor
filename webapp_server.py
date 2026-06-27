@@ -1150,6 +1150,13 @@ def _rate_limit(bucket, user_id, max_calls, window):
     key = (bucket, user_id)
     arr = [t for t in _RATE.get(key, ()) if now - t < window]
     if len(arr) >= max_calls:
+        # Limit oshdi = flood/spam urinishi → admin statistikasi uchun yozamiz.
+        # user_id DB id YOKI telegram_id bo'lishi mumkin (chaqiruv joyiga qarab) —
+        # increment_spam_count ikkalasini ham qo'llab-quvvatlaydi.
+        try:
+            db.increment_spam_count(user_id)
+        except Exception:
+            pass
         raise HTTPException(status_code=429, detail="too_many_requests")
     arr.append(now)
     _RATE[key] = arr
@@ -5095,6 +5102,25 @@ def api_admin_block_user(user_id: int, body: UserBlockIn, authorization: str = H
         raise HTTPException(status_code=400, detail="cant_block_admin")
     db.update_user(user_id, is_blocked=1 if body.block else 0)
     return {"ok": True, "is_blocked": 1 if body.block else 0}
+
+
+@app.delete("/api/admin/user/{user_id}")
+def api_admin_delete_user(user_id: int, authorization: str = Header(None)):
+    """Foydalanuvchini VA uning butun ma'lumotini TIZIMDAN BUTUNLAY o'chiradi
+    (test akkauntini '0 ga qaytarish'). Keyin xuddi yangidek qayta ro'yxatdan o'tish
+    mumkin. Har qanday admin (jumladan ZAHIRA admin) istalgan foydalanuvchini —
+    asosiy adminni (ADMIN_ID) ham — o'chira oladi: zahira admin 100% asosiy admin
+    huquqiga ega. Bu xavfsiz, chunki asosiy adminning huquqi DB qatoridan emas,
+    ADMIN_ID env'dan keladi — o'chirilsa ham, o'sha Telegram bilan qayta kirsa
+    admin avtomatik tiklanadi (lockout bo'lmaydi)."""
+    _admin_from_auth(authorization)
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    result = db.delete_user_completely(user_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=500, detail="delete_failed")
+    return result
 
 
 # ============================================================

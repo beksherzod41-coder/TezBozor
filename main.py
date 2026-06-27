@@ -3973,6 +3973,10 @@ async def order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Buyurtma spam tekshiruvi
     if buyer and check_order_spam(context, buyer['id'], product_id):
+        try:
+            db.increment_spam_count(buyer['id'])  # admin statistikasi: "nechtasi spam qilgan"
+        except Exception:
+            pass
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=t(lang, 'order_spam')

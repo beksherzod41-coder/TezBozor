@@ -44,6 +44,49 @@ def test_users_paginated_inactive_filter(db):
     assert faol not in ids
 
 
+def test_increment_spam_count(db):
+    """Spam hisoblagichi: DB id bo'yicha ham, telegram_id bo'yicha ham ortadi;
+    admin statistikasida 'spammers' va 'spam_events' to'g'ri chiqadi."""
+    uid = db.create_user(telegram_id=555, name="Spammer", role="buyer")
+    db.increment_spam_count(uid)               # DB id bo'yicha
+    db.increment_spam_count(telegram_id := 555)  # telegram_id bo'yicha (id mos kelmasa fallback)
+    u = db.get_user_by_id(uid)
+    assert u["spam_count"] == 2
+    s = db.get_admin_stats_summary()
+    assert s["spammers"] >= 1
+    assert s["spam_events"] >= 2
+    # mos kelmaydigan qiymat — jim e'tibor bermaydi (xato bermaydi)
+    db.increment_spam_count(99999999)
+
+
+def test_admin_stats_excludes_admins(db):
+    """Adminlar faol/nofaol/spam hisobidan CHIQARILADI (sonlar shishmasligi uchun)."""
+    db.create_user(telegram_id=10, name="Admin", role="admin")
+    db.create_user(telegram_id=11, name="Xaridor", role="buyer")
+    s = db.get_admin_stats_summary()
+    assert s["real_users"] == 1            # faqat buyer sanaladi, admin emas
+    assert s["active_24h"] == 1            # yangi buyer faol; admin hisobga olinmaydi
+
+
+def test_delete_user_completely(db, buyer, seller, product):
+    """To'liq o'chirish: foydalanuvchi VA uning butun ma'lumoti (mahsulot, buyurtma,
+    sevimli, sharh...) yo'qoladi; boshqa foydalanuvchilar va FK butunligi buzilmaydi."""
+    oid = make_order(db, buyer, seller, product)
+    db.add_favorite(buyer, product) if hasattr(db, "add_favorite") else None
+    # Sotuvchini o'chiramiz — uning mahsuloti va shu mahsulotga bog'liq buyurtma ham ketadi
+    res = db.delete_user_completely(seller)
+    assert res["ok"] is True
+    assert db.get_user_by_id(seller) is None
+    assert db.get_product_by_id(product) is None
+    assert db.get_order_by_id(oid) is None
+    # Xaridor (boshqa user) joyida qoladi
+    assert db.get_user_by_id(buyer) is not None
+    # Orphan qatorlar qolmaganini tekshiramiz (FK butunligi)
+    conn = db.get_connection(); cur = conn.cursor()
+    cur.execute("PRAGMA foreign_key_check")
+    assert cur.fetchall() == []
+
+
 def test_create_order_defaults(db, buyer, seller, product):
     oid = make_order(db, buyer, seller, product)
     order = db.get_order_by_id(oid)

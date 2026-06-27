@@ -956,7 +956,9 @@ const I18N = {
   adm_active_users:{uz:"Faol foydalanuvchilar",ru:"Активные пользователи"},
   adm_active_24h:{uz:"Bugun (24s)",ru:"Сегодня (24ч)"}, adm_active_7d:{uz:"Hafta",ru:"Неделя"}, adm_active_30d:{uz:"Oy",ru:"Месяц"},
   adm_inactive_users:{uz:"Nofaol / bir martalik",ru:"Неактивные / разовые"},
-  adm_active_hint:{uz:"30+ kun ichida kirmagan yoki bir kirib chiqib ketganlar",ru:"Не заходили 30+ дней или зашли один раз"},
+  adm_active_hint:{uz:"30+ kun ichida kirmagan yoki bir kirib chiqib ketganlar · adminlar hisobga olinmaydi",ru:"Не заходили 30+ дней или зашли один раз · админы не учитываются"},
+  adm_spam_title:{uz:"Spam / flood",ru:"Спам / флуд"},
+  adm_spammers:{uz:"Spam qilganlar",ru:"Спамеры"}, adm_spam_events:{uz:"jami urinish",ru:"всего попыток"},
   adm_today:{uz:"Bugun",ru:"Сегодня"}, adm_week:{uz:"Hafta",ru:"Неделя"}, adm_month:{uz:"Oy",ru:"Месяц"},
   adm_total:{uz:"Jami",ru:"Всего"}, adm_orders_cnt:{uz:"Buyurtmalar",ru:"Заказы"},
   adm_no_requests:{uz:"Yangi so'rov yo'q",ru:"Новых заявок нет"}, adm_no_disputes:{uz:"Nizo yo'q",ru:"Споров нет"},
@@ -1422,6 +1424,10 @@ const I18N = {
   adm_u_last_active:{uz:"Oxirgi faollik",ru:"Последняя активность"},
   adm_u_never_active:{uz:"Hech qachon faol bo'lmagan",ru:"Никогда не был активен"},
   adm_u_active_today:{uz:"Bugun faol",ru:"Активен сегодня"}, adm_u_days_ago:{uz:"kun oldin",ru:"дн. назад"},
+  adm_u_spam:{uz:"Spam urinishlari",ru:"Попытки спама"},
+  adm_u_delete:{uz:"🗑 To'liq o'chirish (0 ga qaytarish)",ru:"🗑 Полностью удалить (сброс)"},
+  adm_u_delete_confirm:{uz:"DIQQAT: bu foydalanuvchini va uning BARCHA ma'lumotini (mahsulot, buyurtma, chat...) butunlay o'chiradi. Qaytarib bo'lmaydi. Davom etilsinmi?",ru:"ВНИМАНИЕ: это полностью удалит пользователя и ВСЕ его данные (товары, заказы, чаты...). Необратимо. Продолжить?"},
+  adm_u_deleted:{uz:"✅ Foydalanuvchi butunlay o'chirildi",ru:"✅ Пользователь полностью удалён"},
   bp_cancel_failed:{uz:"Bekor qilinmadi: ",ru:"Не отменено: "}, bp_cancel_confirm:{uz:"Buyurtmani bekor qilasizmi?",ru:"Отменить заказ?"}, bp_cancel_q:{uz:"Bekor qilinsinmi?",ru:"Отменить?"},
   bp_name_label:{uz:"Ism",ru:"Имя"}, bp_name_ph:{uz:"Ismingiz",ru:"Ваше имя"}, bp_lang:{uz:"Til",ru:"Язык"}, bp_name_req:{uz:"Ismingizni kiriting.",ru:"Введите ваше имя."},
   bp_link_not_ready:{uz:"Havola tayyor emas, birozdan keyin urinib ko'ring.",ru:"Ссылка не готова, попробуйте позже."},
@@ -5791,6 +5797,8 @@ async function admStats(){
         <div class="ometa">${L('adm_active_24h')}: <b>${s.active_24h||0}</b> · ${L('adm_active_7d')}: <b>${s.active_7d||0}</b> · ${L('adm_active_30d')}: <b>${s.active_30d||0}</b></div>
         <div class="ometa" style="color:var(--sale)">💤 ${L('adm_inactive_users')}: <b>${s.inactive_users||0}</b></div>
         <div class="ometa" style="font-size:11.5px;color:var(--hint)">${L('adm_active_hint')}</div></div>
+      <div class="ocard"><div class="ometa">🚫 ${L('adm_spam_title')}</div>
+        <div class="ometa">${L('adm_spammers')}: <b style="color:var(--sale)">${s.spammers||0}</b> · ${s.spam_events||0} ${L('adm_spam_events')}</div></div>
       <div class="ocard"><div class="ometa">📦 ${L('adm_orders_cnt')}: <b>${s.total_orders||0}</b></div>
         <div class="ometa">${L('st_pending')}: ${s.pending||0} · ${L('st_confirmed')}: ${s.confirmed||0} · ${L('st_delivered')}: ${s.delivered||0} · ${L('st_cancelled')}: ${s.cancelled||0}</div></div>
       <div class="ocard"><div class="ometa">💰 ${L('adm_revenue')}</div>
@@ -5942,7 +5950,7 @@ function lastActiveLabel(la){
 }
 function admUserRow(u){
   return `<div class="ocard" data-au="${u.id}">
-    <div class="oname">👤 ${esc(u.name||'—')} ${u.is_blocked?'🚫':''}</div>
+    <div class="oname">👤 ${esc(u.name||'—')} ${u.is_blocked?'🚫':''}${u.spam_count?` <span style="color:var(--sale);font-size:12px">🚫${u.spam_count}</span>`:''}</div>
     <div class="ometa">${admRoleLabel(u.role)}${u.phone_number?' · '+esc(u.phone_number):''}${u.telegram_username?' · @'+esc(u.telegram_username):''}</div>
     ${u.shop_name?`<div class="ometa">🏪 ${esc(u.shop_name)}</div>`:''}
     <div class="ometa">${lastActiveLabel(u.last_active_at)}</div>
@@ -5980,6 +5988,7 @@ function renderAUser(d){
       ${_aurow(L('adm_u_orders'), d.buyer_orders_count)}
       ${_aurow(L('adm_u_created'), fmtDate(d.created_at))}
       ${_aurow(L('adm_u_last_active'), d.last_active_at?fmtDate(d.last_active_at):L('adm_u_never_active'))}
+      ${d.spam_count?`<div class="ometa"><span style="color:var(--hint)">${L('adm_u_spam')}:</span> <b style="color:var(--sale)">${d.spam_count}</b></div>`:''}
     </div>
     ${seller?`<div class="ocard"><div class="oname">🏪 ${esc(d.shop_name||'—')}</div>
       ${_aurow(L('adm_u_approved'), d.is_approved?'✅':'❌')}
@@ -5995,11 +6004,25 @@ function renderAUser(d){
     ${d.can_askfill?`<button class="oact ok" id="auFill" style="width:100%;margin-top:8px">${L('adm_u_askfill')}</button>`:''}
     ${seller?`<button class="oact ${d.is_approved?'no':'ok'}" id="auVerify" style="width:100%;margin-top:8px">${d.is_approved?L('adm_freeze'):L('adm_unfreeze')}</button>`:''}
     ${d.role==='admin'?'':`<button class="oact ${blocked?'ok':'no'}" id="auBlock" style="width:100%;margin-top:8px">${blocked?L('adm_unblock'):L('adm_block')}</button>`}
+    <button class="oact no" id="auDelete" style="width:100%;margin-top:8px;background:var(--sale);color:#fff">${L('adm_u_delete')}</button>
   </div>`;
   const bb=document.getElementById('auBlock');
   if(bb) bb.onclick=async()=>{ try{ await apiSend('/api/admin/user/'+d.id+'/block','POST',{block:!blocked});
     document.getElementById('auserview').classList.remove('open'); admUserFetch('',true);
   }catch(e){ tg.showAlert(L('err')+': '+e.message); } };
+  const delb=document.getElementById('auDelete');
+  if(delb) delb.onclick=()=>{
+    const doDel=async()=>{
+      try{
+        await apiSend('/api/admin/user/'+d.id,'DELETE');
+        try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+        tg.showAlert(L('adm_u_deleted'));
+        document.getElementById('auserview').classList.remove('open'); admUserFetch('',true);
+      }catch(e){ tg.showAlert(L('err')+': '+e.message); }
+    };
+    if(tg.showConfirm) tg.showConfirm(L('adm_u_delete_confirm'), ok=>{ if(ok) doDel(); });
+    else if(confirm(L('adm_u_delete_confirm'))) doDel();
+  };
   const vb=document.getElementById('auVerify');
   if(vb) vb.onclick=async()=>{ try{ await apiSend('/api/admin/user/'+d.id+'/verify','POST');
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
