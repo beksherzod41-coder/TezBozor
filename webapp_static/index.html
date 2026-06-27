@@ -5934,7 +5934,9 @@ async function admUserFetch(q, reset){
       (more?`<div style="padding:0 12px 12px"><button class="oact ok" id="admMore" style="width:100%;background:var(--bg);color:var(--accent)">${L('adm_load_more')}</button></div>`:'');
     wrap.querySelectorAll('[data-au]').forEach(x=>x.onclick=()=>openAUser(admUsersList.find(u=>String(u.id)===x.dataset.au)));
     const mb=document.getElementById('admMore');
-    if(mb) mb.onclick=()=>{ admUsersOffset+=admUsersList.length; admUserFetch(q,false); };
+    // offset = ALLAQACHON yuklangan soni (admUsersList — jami to'plangan ro'yxat).
+    // Avval '+=' edi → offset jadal oshib, foydalanuvchilar o'tkazib yuborilardi.
+    if(mb) mb.onclick=()=>{ admUsersOffset=admUsersList.length; admUserFetch(q,false); };
   }catch(e){ wrap.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 function admRoleLabel(r){ return r==='seller'?L('prof_seller'):(r==='admin'?L('prof_admin'):L('prof_buyer')); }
