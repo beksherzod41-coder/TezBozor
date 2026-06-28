@@ -283,11 +283,11 @@ def test_order_reminders_none_at_start():
 def test_order_reminders_fire_one_at_a_time():
     """Har bosqich navbati bilan, bittadan ishga tushadi (normal 60s tiklar)."""
     fired = []
-    # ~5 daqiqa qoldi
-    due = main._due_order_reminders(290, fired)
-    assert due == [5]
+    # ~6 daqiqa qoldi
+    due = main._due_order_reminders(350, fired)
+    assert due == [6]
     fired += due
-    assert main._due_order_reminders(290, fired) == []      # qayta yubormaydi
+    assert main._due_order_reminders(350, fired) == []      # qayta yubormaydi
     # ~3 daqiqa qoldi
     assert main._due_order_reminders(170, fired) == [3]
     fired.append(3)
@@ -298,5 +298,5 @@ def test_order_reminders_fire_one_at_a_time():
 def test_order_reminders_restart_burst_then_no_dupes():
     """Restartda (fired bo'sh) qolgan oz vaqtda o'tib ketgan bosqichlar birato'la
     yuboriladi, lekin keyin takrorlanmaydi (idempotent)."""
-    assert main._due_order_reminders(50, []) == [5, 3, 1]
-    assert main._due_order_reminders(50, [5, 3, 1]) == []
+    assert main._due_order_reminders(50, []) == [6, 3, 1]
+    assert main._due_order_reminders(50, [6, 3, 1]) == []

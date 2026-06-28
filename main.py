@@ -4428,7 +4428,7 @@ ORDER_TTL_SECONDS = 600  # buyurtma tasdiqlash muddati (10 daqiqa)
 # ⏰ Muddat tugashidan oldin sotuvchiga ALOHIDA push eslatma (yangi xabar — telefon
 # "biqillaydi") yuboriladigan bosqichlar: qolgan vaqt, daqiqada. Har biri BIR marta.
 # Jonli sanoq faqat mavjud xabarni tahrirlaydi (push bermaydi) — bu esa qo'shimcha push.
-ORDER_REMINDER_MINUTES = [5, 3, 1]
+ORDER_REMINDER_MINUTES = [6, 3, 1]
 
 
 def _due_order_reminders(remaining_sec, fired):
