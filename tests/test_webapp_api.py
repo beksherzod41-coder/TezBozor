@@ -2181,6 +2181,31 @@ def test_courier_orders_expose_buyer_contact_and_location(client):
     assert o["delivery_address"] == "Ko'cha 1"
 
 
+def test_seller_orders_rich_fields_and_distance(client):
+    """Sotuvchi App buyurtma kartasi bot xabarnomasidagi kabi to'liq ma'lumotni
+    olishi kerak: to'lov usuli, telegram username, mahsulot rasmi, mijoz GPS'i va
+    do'kon → xaridor masofasi (dist_km, bot bilan bir xil haversine)."""
+    d = webapp_server.db
+    bid = dict(d.get_user_by_telegram_id(5001))["id"]
+    sid = dict(d.get_user_by_telegram_id(5002))["id"]
+    d.update_user(bid, telegram_username="rich_un")
+    d.update_user(sid, shop_lat=41.30, shop_lon=69.24)   # do'kon nuqtasi
+    oid = d.create_order(buyer_id=bid, seller_id=sid, product_id=client.pid,
+                         quantity=1, total_price=1000, delivery_type="delivery",
+                         payment_method="terminal", delivery_address="Ko'cha 7",
+                         buyer_lat=41.40, buyer_lon=69.30)
+    rows = client.get("/api/seller/orders", headers=hdr(5002)).json()
+    o = next(r for r in rows if r["id"] == oid)
+    assert o["payment_method"] == "terminal"
+    assert o["buyer_username"] == "rich_un"
+    assert o["buyer_lat"] == 41.40 and o["buyer_lon"] == 69.30
+    assert "product_image" in o
+    # masofa hisoblandi va oqilona (do'kon → xaridor ~11-13 km atrofida)
+    assert o["dist_km"] is not None and 8 < o["dist_km"] < 20
+    # shop_lat/shop_lon faqat hisob uchun — frontend'ga uzatilmaydi
+    assert "shop_lat" not in o and "shop_lon" not in o
+
+
 def test_courier_buyer_chat(client):
     """#13 — biriktirilgan kuryer buyurtma chatida ishtirok etadi: xabar yozadi,
     o'qiydi; tracking esa xaridorga kuryer kontaktini qaytaradi."""

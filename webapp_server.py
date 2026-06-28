@@ -2114,7 +2114,18 @@ async def _notify_price_drop(product_id, name, old_price, new_price):
 @app.get("/api/seller/orders")
 def api_seller_orders(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
-    return _rows(db.get_seller_orders_list(_owner_id(user)))   # do'kon (ega+xodimlar) buyurtmalari
+    rows = _rows(db.get_seller_orders_list(_owner_id(user)))   # do'kon (ega+xodimlar) buyurtmalari
+    # Bot xabarnomasidagidek do'kon → xaridor masofasini (km) qo'shamiz. shop_lat/shop_lon
+    # — do'kon EGAsining koordinatasi (faqat hisob uchun, frontend'ga uzatilmaydi).
+    for o in rows:
+        slat, slon = o.pop("shop_lat", None), o.pop("shop_lon", None)
+        blat, blon = o.get("buyer_lat"), o.get("buyer_lon")
+        if o.get("delivery_type") == "delivery" and blat and blon and slat and slon:
+            try:
+                o["dist_km"] = round(_haversine_km(slat, slon, blat, blon), 1)
+            except Exception:
+                pass
+    return rows
 
 
 @app.get("/api/seller/products")

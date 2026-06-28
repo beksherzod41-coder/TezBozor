@@ -4027,13 +4027,16 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT o.*, p.name as product_name, p.price as product_price,
+                   p.image_url as product_image,
                    p.created_by as creator_id, cu.name as creator_name,
                    u.name as buyer_name, u.phone_number as buyer_phone, u.telegram_id as buyer_tg,
                    u.telegram_username as buyer_username,
+                   su.shop_lat as shop_lat, su.shop_lon as shop_lon,
                    co.name as courier_name, co.phone_number as courier_phone
             FROM orders o
             JOIN products p ON o.product_id=p.id
             JOIN users u ON o.buyer_id=u.id
+            JOIN users su ON o.seller_id=su.id
             LEFT JOIN users cu ON p.created_by=cu.id
             LEFT JOIN users co ON o.courier_id=co.id
             WHERE o.seller_id=?
