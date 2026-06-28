@@ -4433,9 +4433,12 @@ ORDER_REMINDER_MINUTES = [6, 3, 1]
 
 def _due_order_reminders(remaining_sec, fired):
     """Hozir yuborilishi kerak bo'lgan eslatma bosqichlari (vaqti kelgan + hali
-    yuborilmagan). `fired` — allaqachon yuborilgan bosqichlar ro'yxati."""
+    yuborilmagan). `fired` — allaqachon yuborilgan bosqichlar ro'yxati.
+
+    +3s tolerance: tik daqiqa chegarasidan bir oz kech (yoki erta) tushsa ham bosqich
+    o'sha tikda ishga tushsin — aks holda butun bir daqiqa (60s) kechikardi."""
     return [thr for thr in ORDER_REMINDER_MINUTES
-            if remaining_sec <= thr * 60 and thr not in fired]
+            if remaining_sec <= thr * 60 + 3 and thr not in fired]
 
 
 def _parse_utc(ts):
@@ -4526,9 +4529,28 @@ async def _send_order_notification(context, recipient_tg, slang, *, photo, stati
 
 def _schedule_order_countdown(job_queue, *, order_id=None, group_id=None, first=60):
     """Buyurtma uchun jonli sanoq (har 60s) jobini qo'yadi. Xotirada — restartda
-    _reschedule_pending_order_timers tiklaydi."""
+    _reschedule_pending_order_timers tiklaydi.
+
+    Tiklar DEADLINE'ga moslanadi (`first = qolgan_vaqt % 60`): aks holda tik soati
+    buyurtma yaratilgan vaqtdan siljib qoladi (webapp buyurtmasi dispatch-job orqali
+    ~12-20s kech rejalanadi) → eslatmalar (6/3/1 daq) va avto-bekor shuncha kech kelardi.
+    Moslangach har tik aniq daqiqa chegarasiga tushadi."""
     if not job_queue:
         return
+    try:
+        from datetime import datetime, timezone
+        if group_id:
+            _rows = db.get_orders_in_group(group_id)
+            _dl = _order_deadline(_rows[0]) if _rows else None
+        else:
+            _o = db.get_order_by_id(order_id)
+            _dl = _order_deadline(_o) if _o else None
+        if _dl:
+            _rem = (_dl - datetime.now(timezone.utc)).total_seconds()
+            if _rem > 0:
+                first = max(1, _rem % 60)   # keyingi daqiqa chegarasigacha
+    except Exception:
+        pass   # deadline o'qilmasa — fallback first (60/5) bilan davom etamiz
     if group_id:
         job_queue.run_repeating(order_countdown_job, interval=60, first=first,
                                 data={'group_id': str(group_id)}, name=f"countdown_group_{group_id}")

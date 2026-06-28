@@ -300,3 +300,10 @@ def test_order_reminders_restart_burst_then_no_dupes():
     yuboriladi, lekin keyin takrorlanmaydi (idempotent)."""
     assert main._due_order_reminders(50, []) == [6, 3, 1]
     assert main._due_order_reminders(50, [6, 3, 1]) == []
+
+
+def test_order_reminders_tolerance_late_tick():
+    """Tik daqiqa chegarasidan bir oz kech tushsa ham (mas. 6 daq=360s, tik 362s'da)
+    bosqich o'sha tikda ishga tushadi — 60s kechikmaydi (+3s tolerance)."""
+    assert main._due_order_reminders(362, []) == [6]   # 362 <= 363 → ishlaydi
+    assert main._due_order_reminders(364, []) == []    # 364 > 363 → hali emas
