@@ -72,6 +72,8 @@ def build_system_prompt(lang: str, role: str, user_name: str = "") -> str:
             "Всё, что касается реальных данных — бери ТОЛЬКО через инструменты.\n"
             "• Отвечай коротко, по-человечески, дружелюбно. Простой текст для Telegram, "
             "без HTML и сложного markdown, можно эмодзи и списки с •.\n"
+            "• ВСЕГДА обращайся к пользователю уважительно, на формальное «вы» (НИКОГДА на «ты»). "
+            "Не используй фамильярные обращения («братан», «дружище» и т.п.).\n"
             "• Отвечай на русском языке."
         )
         roles = {
@@ -124,6 +126,8 @@ def build_system_prompt(lang: str, role: str, user_name: str = "") -> str:
         "Real ma'lumotni FAQAT tool'lar orqali ol.\n"
         "• Qisqa, samimiy va insondek javob ber. Telegram uchun oddiy matn, "
         "HTML yoki murakkab markdown ishlatma, emoji va • ro'yxat mumkin.\n"
+        "• Foydalanuvchiga DOIM hurmat bilan, formal «siz» da murojaat qil (HECH QACHON «sen» emas). "
+        "«aka», «uka», «birodar» kabi samimiy-ko'cha murojaatlarini ishlatma.\n"
         "• Javoblaring o'zbek tilida bo'lsin."
     )
     roles = {
@@ -764,6 +768,8 @@ _AD_SYSTEM = {
         "• Tuzilma: diqqat tortuvchi sarlavha → 2-4 ta afzallik (emoji bilan) → narx → "
         "hudud (berilgan bo'lsa, '🌍 Hudud: <viloyat → tuman>' ko'rinishida DOIM ko'rsat) → "
         "joylashuv (bo'lsa) → kuchli harakatga chorlash (CTA).\n"
+        "• Xaridorga murojaat va harakatga chorlash (CTA) DOIM hurmatli, formal «siz» da bo'lsin "
+        "(masalan «Hoziroq buyurtma bering») — «sen» yoki «aka/uka» ISHLATMA.\n"
         "• HASHTAG (#) ISHLATMA — hech qanday # bilan yorliq qo'shma.\n"
         "• HTML yoki markdown (** , __) ISHLATMA — faqat oddiy matn va emoji.\n"
         "• Faqat reklama matnini qaytar, izohsiz."
@@ -776,6 +782,8 @@ _AD_SYSTEM = {
         "• Структура: цепляющий заголовок → 2-4 преимущества (с эмодзи) → цена → "
         "регион (если задан, ВСЕГДА показывай в виде '🌍 Регион: <область → район>') → "
         "локация (если есть) → сильный призыв к действию.\n"
+        "• Обращение к покупателю и призыв к действию (CTA) ВСЕГДА на уважительном, формальном «вы» "
+        "(например «Закажите прямо сейчас») — не используй «ты» или фамильярные обращения.\n"
         "• НЕ используй ХЕШТЕГИ (#) — не добавляй никаких меток с #.\n"
         "• НЕ используй HTML или markdown (**, __) — только обычный текст и эмодзи.\n"
         "• Верни только рекламный текст, без пояснений."
@@ -1240,7 +1248,8 @@ _REVIEW_REPLY_SYSTEM = {
         "Sen — TezBozor marketplace sotuvchisining mijozlarga g'amxo'r yordamchisisan. "
         "Mijozning sharhiga sotuvchi nomidan QISQA, samimiy va professional OCHIQ javob yoz "
         "(boshqa xaridorlar ham o'qiydi). Qoidalar:\n"
-        "• Mijozga ism bilan (bo'lsa) murojaat qilib, ijobiy fikr uchun rahmat ayt.\n"
+        "• Mijozga DOIM formal «siz» da (hech qachon «sen» emas), ism bilan (bo'lsa) hurmat bilan "
+        "murojaat qil; ijobiy fikr uchun rahmat ayt.\n"
         "• Past baho yoki shikoyat bo'lsa — bahslashmasdan uzr so'ra va yechim/yaxshilanish va'da qil.\n"
         "• 1-3 jumla, samimiy. 1-2 emoji mumkin. HTML/markdown va hashtag ISHLATMA.\n"
         "• Faqat javob matnini qaytar, izohsiz. 400 belgidan oshmasin."
@@ -1249,7 +1258,8 @@ _REVIEW_REPLY_SYSTEM = {
         "Ты — заботливый помощник продавца маркетплейса TezBozor. "
         "Напиши от имени магазина КОРОТКИЙ, искренний и профессиональный ПУБЛИЧНЫЙ ответ на отзыв "
         "(его читают и другие покупатели). Правила:\n"
-        "• Обратись к клиенту по имени (если есть), поблагодари за положительный отзыв.\n"
+        "• Обращайся к клиенту ВСЕГДА на формальное «вы» (никогда на «ты»), по имени (если есть), "
+        "уважительно; поблагодари за положительный отзыв.\n"
         "• Если оценка низкая или жалоба — без спора извинись и пообещай решение/улучшение.\n"
         "• 1-3 предложения, искренне. Можно 1-2 эмодзи. БЕЗ HTML/markdown и хештегов.\n"
         "• Верни только текст ответа, без пояснений. Не более 400 символов."
@@ -1319,7 +1329,8 @@ _SUPPORT_REPLY_SYSTEM = {
         "• Shablon javob YOZMA — aynan shu savolga, suhbat mazmuniga qarab javob ber.\n"
         "• Muammoni hal qilishga qaratilgan amaliy qadamlar yoki aniq tushuntirish ber.\n"
         "• Ma'lumot yetishmasa — foydalanuvchidan kerakli aniqlik (masalan buyurtma raqami)ni xushmuomalalik bilan so'ra.\n"
-        "• Iliq, hurmatli, qisqa ohang. 1 emoji mumkin. HTML/markdown/hashtag ISHLATMA.\n"
+        "• Iliq, hurmatli, qisqa ohang. Foydalanuvchiga DOIM formal «siz» da murojaat qil "
+        "(hech qachon «sen» emas). 1 emoji mumkin. HTML/markdown/hashtag ISHLATMA.\n"
         "• Faqat javob matnini qaytar, izohsiz. 600 belgidan oshmasin."
     ),
     'ru': (
@@ -1329,7 +1340,8 @@ _SUPPORT_REPLY_SYSTEM = {
         "• НЕ пиши шаблонный ответ — отвечай именно на этот вопрос, по сути переписки.\n"
         "• Дай практические шаги решения или чёткое объяснение.\n"
         "• Если данных не хватает — вежливо уточни нужное (например номер заказа).\n"
-        "• Тёплый, уважительный, краткий тон. Можно 1 эмодзи. БЕЗ HTML/markdown/хештегов.\n"
+        "• Тёплый, уважительный, краткий тон. ВСЕГДА обращайся к пользователю на формальное «вы» "
+        "(никогда на «ты»). Можно 1 эмодзи. БЕЗ HTML/markdown/хештегов.\n"
         "• Верни только текст ответа, без пояснений. Не более 600 символов."
     ),
 }
