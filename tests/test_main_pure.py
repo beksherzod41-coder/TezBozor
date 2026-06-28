@@ -267,3 +267,36 @@ def test_product_is_new_old():
 
 def test_product_is_new_none():
     assert main._product_is_new(None) is False
+
+
+# ==================== ⏰ Buyurtma push-eslatma bosqichlari ====================
+def test_order_reminders_three_thresholds_defined():
+    """3 ta eslatma bosqichi bo'lishi kerak (foydalanuvchi: 2 emas, 3 marta)."""
+    assert len(main.ORDER_REMINDER_MINUTES) == 3
+
+
+def test_order_reminders_none_at_start():
+    """Boshlanishda (10 daqiqa qoldi) hali eslatma yo'q — birinchi bosqich 5 daqiqa."""
+    assert main._due_order_reminders(600, []) == []
+
+
+def test_order_reminders_fire_one_at_a_time():
+    """Har bosqich navbati bilan, bittadan ishga tushadi (normal 60s tiklar)."""
+    fired = []
+    # ~5 daqiqa qoldi
+    due = main._due_order_reminders(290, fired)
+    assert due == [5]
+    fired += due
+    assert main._due_order_reminders(290, fired) == []      # qayta yubormaydi
+    # ~3 daqiqa qoldi
+    assert main._due_order_reminders(170, fired) == [3]
+    fired.append(3)
+    # ~1 daqiqa qoldi
+    assert main._due_order_reminders(50, fired) == [1]
+
+
+def test_order_reminders_restart_burst_then_no_dupes():
+    """Restartda (fired bo'sh) qolgan oz vaqtda o'tib ketgan bosqichlar birato'la
+    yuboriladi, lekin keyin takrorlanmaydi (idempotent)."""
+    assert main._due_order_reminders(50, []) == [5, 3, 1]
+    assert main._due_order_reminders(50, [5, 3, 1]) == []

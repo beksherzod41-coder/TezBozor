@@ -4425,6 +4425,17 @@ async def _fanout_order_to_staff(context, product, text, kb, dlv=None,
 # BUYURTMA BILDIRISHNOMASI — rasm + xaridor bilan bog'lanish + jonli teskari sanoq
 # ============================================================
 ORDER_TTL_SECONDS = 600  # buyurtma tasdiqlash muddati (10 daqiqa)
+# ⏰ Muddat tugashidan oldin sotuvchiga ALOHIDA push eslatma (yangi xabar — telefon
+# "biqillaydi") yuboriladigan bosqichlar: qolgan vaqt, daqiqada. Har biri BIR marta.
+# Jonli sanoq faqat mavjud xabarni tahrirlaydi (push bermaydi) — bu esa qo'shimcha push.
+ORDER_REMINDER_MINUTES = [5, 3, 1]
+
+
+def _due_order_reminders(remaining_sec, fired):
+    """Hozir yuborilishi kerak bo'lgan eslatma bosqichlari (vaqti kelgan + hali
+    yuborilmagan). `fired` — allaqachon yuborilgan bosqichlar ro'yxati."""
+    return [thr for thr in ORDER_REMINDER_MINUTES
+            if remaining_sec <= thr * 60 and thr not in fired]
 
 
 def _parse_utc(ts):
@@ -4583,9 +4594,45 @@ async def _autocancel_order_or_group(context, order, gid, oid, slang):
         logging.error(f"Avto-bekor (order {oid or gid}) xatosi: {e}")
 
 
+async def _push_order_reminder(context, order, gid, oid, slang, mins_left):
+    """⏰ Muddat tugashidan oldin sotuvchiga (va mahsulotni joylagan xodimga) ALOHIDA
+    push eslatma — jonli sanoq faqat xabarni tahrirlaydi, bu esa YANGI xabar (telefon
+    push'i 'biqillaydi'). Yakka va guruh buyurtma uchun bir xil. Tugmasiz (amal App'da)."""
+    disp = fmt_order_id(int(gid)) if gid else fmt_order_id(oid)
+    if slang == 'ru':
+        text = (f"⏰ Напоминание! Заказ {disp} ещё не подтверждён — осталось ~{mins_left} мин. "
+                f"Подтвердите или отклоните в приложении, иначе он отменится автоматически.")
+    else:
+        text = (f"⏰ Eslatma! {disp} buyurtma hali tasdiqlanmagan — ~{mins_left} daqiqa qoldi. "
+                f"Ilovada tasdiqlang yoki bekor qiling, aks holda avtomatik bekor bo'ladi.")
+    recipients = set()
+    if order.get('seller_tg'):
+        recipients.add(order['seller_tg'])
+    # MULTI-SOTUVCHI: mahsulot(lar)ni joylagan xodim(lar)ga ham
+    try:
+        rows = db.get_orders_in_group(gid) if gid else [order]
+        for o in rows:
+            prod = db.get_product_basic(o.get('product_id')) if o.get('product_id') else None
+            if not prod:
+                continue
+            cb = prod.get('created_by')
+            if cb and cb != prod.get('seller_id'):
+                su = db.get_user_by_id(cb)
+                if su and su.get('telegram_id'):
+                    recipients.add(su['telegram_id'])
+    except Exception:
+        pass
+    for chat_id in recipients:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=text)
+        except Exception as e:
+            logging.warning(f"Buyurtma eslatma push xato (order {oid or gid}, chat {chat_id}): {e}")
+
+
 async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
     """Har ~60s: sotuvchi bildirishnomasidagi jonli teskari sanoqni yangilaydi va
-    muddat tugaganda buyurtmani avto-bekor qiladi. Buyurtma 'pending' bo'lmasa to'xtaydi."""
+    muddat tugaganda buyurtmani avto-bekor qiladi. Buyurtma 'pending' bo'lmasa to'xtaydi.
+    Bundan tashqari muddat tugashidan oldin 3 marta ALOHIDA push eslatma yuboradi."""
     from datetime import datetime, timezone
     try:
         d = context.job.data
@@ -4611,6 +4658,14 @@ async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
             await _autocancel_order_or_group(context, order, gid, oid, slang)
             context.job.schedule_removal()
             return
+
+        # ⏰ Push eslatmalar (5/3/1 daqiqa qoldi) — har bosqich BIR marta. job.data'da
+        # kuzatiladi; restartda 'fired' tozalanadi (kamdan-kam — bir martalik takror mumkin).
+        remaining_sec = (deadline - now).total_seconds()
+        fired = d.setdefault('reminders_fired', [])
+        for thr in _due_order_reminders(remaining_sec, fired):
+            fired.append(thr)
+            await _push_order_reminder(context, order, gid, oid, slang, thr)
 
         chat_id = order.get('notify_chat_id')
         msg_id = order.get('notify_message_id')
