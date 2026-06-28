@@ -608,7 +608,7 @@
   </div>
 
   <div class="checkout" id="commissionview">
-    <div class="cohead"><span id="ttl_commissionview">🏦 Komissiya</span><span class="x" id="commissionClose">✕</span></div>
+    <div class="cohead"><span id="ttl_commissionview">🏦 Xizmat haqi</span><span class="x" id="commissionClose">✕</span></div>
     <div id="commissionBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
@@ -903,7 +903,7 @@ const I18N = {
   fin_total:{uz:"Jami tushum (yetkazilgan)",ru:"Всего доход (доставлено)"}, fin_month:{uz:"Oylik tushum",ru:"Доход за месяц"},
   fin_delivered:{uz:"Yetkazilgan buyurtmalar",ru:"Доставленных заказов"}, fin_top_sellers:{uz:"Top sotuvchilar",ru:"Топ продавцы"},
   fin_by_pay:{uz:"To'lov usuli bo'yicha",ru:"По способу оплаты"}, fin_by_dlv:{uz:"Yetkazish turi bo'yicha",ru:"По типу доставки"}, fin_empty:{uz:"Yetkazilgan buyurtma yo'q",ru:"Нет доставленных заказов"},
-  fin_platform:{uz:"Platforma daromadi (monetizatsiya)",ru:"Доход платформы (монетизация)"}, fin_platform_total:{uz:"Jami",ru:"Итого"}, fin_commission:{uz:"Komissiya (sotuvlardan)",ru:"Комиссия (с продаж)"},
+  fin_platform:{uz:"Platforma daromadi (monetizatsiya)",ru:"Доход платформы (монетизация)"}, fin_platform_total:{uz:"Jami",ru:"Итого"}, fin_commission:{uz:"Xizmat haqi (sotuvlardan)",ru:"Сбор (с продаж)"},
   adm_fraud_hint:{uz:"Shubhali signallar (avtomatik jazo yo'q — o'zingiz tekshiring).",ru:"Подозрительные сигналы (без авто-наказания — проверьте сами)."},
   adm_fraud_empty:{uz:"✅ Shubhali faollik aniqlanmadi.",ru:"✅ Подозрительная активность не обнаружена."},
   adm_fr_self:{uz:"O'z-o'ziga sharh",ru:"Самоотзыв"}, adm_fr_farm:{uz:"Bitta juftlikda ko'p buyurtma",ru:"Много заказов в одной паре"},
@@ -922,8 +922,8 @@ const I18N = {
   adm_admin_done:{uz:"✅ Bajarildi",ru:"✅ Готово"},
   mon_master:{uz:"Monetizatsiya (bosh rubilnik)",ru:"Монетизация (главный выключатель)"},
   mon_master_hint:{uz:"O'chiq bo'lsa — hamma narsa bepul. Yoqsangiz, quyidagilar ishlay boshlaydi.",ru:"Если выключено — всё бесплатно. При включении заработают пункты ниже."},
-  mon_commission:{uz:"Sotuv komissiyasi",ru:"Комиссия с продаж"},
-  mon_commission_pct:{uz:"Komissiya foizi (%)",ru:"Процент комиссии (%)"},
+  mon_commission:{uz:"Sotuvdan xizmat haqi",ru:"Сбор с продаж"},
+  mon_commission_pct:{uz:"Haq foizi (%)",ru:"Процент сбора (%)"},
   mon_boost:{uz:"Boost (pullik ko'tarish)",ru:"Boost (платное продвижение)"},
   mon_boost_price:{uz:"Boost narxi (so'm)",ru:"Цена Boost (сум)"},
   mon_boost_days:{uz:"Boost muddati (kun)",ru:"Срок Boost (дней)"},
@@ -1180,7 +1180,7 @@ const I18N = {
   prk_rank_d:{uz:"Pro do'konlar qidiruvda yuqorida (faqat pulli boost ulardan ham tepada).",ru:"Pro-магазины выше в поиске (только платный boost выше них)."},
   prk_excel:{uz:"Excel hisobot",ru:"Excel-отчёт"},
   prk_excel_d:{uz:"Buyurtma/mahsulotlarni chiroyli Excel'ga yuklab olish. Cheksiz.",ru:"Выгрузка заказов/товаров в красивый Excel. Без лимита."},
-  comm_owed:{uz:"Platformaga komissiya:",ru:"Комиссия платформе:"},
+  comm_owed:{uz:"Platformaga xizmat haqi:",ru:"Сбор платформе:"},
   sp_add_product:{uz:"➕ Mahsulot qo'shish",ru:"➕ Добавить товар"},
   sp_pending_approval:{uz:"⏳ Tasdiq kutyapti ({n}) — xodim joylagan",ru:"⏳ Ждут подтверждения ({n}) — добавил сотрудник"},
   sp_no_products:{uz:"Hali mahsulot yo'q",ru:"Товаров пока нет"},
@@ -1330,6 +1330,9 @@ const I18N = {
   cour_contact_tg:{uz:"💬 Telegramda yozish",ru:"💬 Написать в Telegram"},
   cour_call:{uz:"📞 Qo'ng'iroq",ru:"📞 Позвонить"},
   cour_no_loc:{uz:"⚠️ Xaridor GPS lokatsiyani ulashmagan — manzil matni bo'yicha boring",ru:"⚠️ Покупатель не поделился GPS — ориентируйтесь по адресу"},
+  sp_dist_lbl:{uz:"📏 Do'kondan masofa",ru:"📏 Расстояние от магазина"},
+  sp_pay_lbl:{uz:"💳 To'lov",ru:"💳 Оплата"},
+  sp_no_loc:{uz:"⚠️ Xaridor GPS lokatsiyani ulashmagan",ru:"⚠️ Покупатель не поделился GPS"},
   cour_no_contact:{uz:"Bog'lanish ma'lumoti yo'q",ru:"Нет контактных данных"},
   cour_chat:{uz:"💬 Chat (ilovada)",ru:"💬 Чат (в приложении)"},
   cour_phone_lbl:{uz:"Telefon",ru:"Телефон"},
@@ -1350,29 +1353,29 @@ const I18N = {
   sp_no_payments:{uz:"Hali to'lovlar yo'q",ru:"Платежей пока нет"},
   pay_purpose_boost:{uz:"🚀 Reklama boost",ru:"🚀 Продвижение (boost)"},
   pay_purpose_subscription:{uz:"⭐ Pro obuna",ru:"⭐ Pro подписка"},
-  pay_purpose_commission:{uz:"🏦 Komissiya to'lovi",ru:"🏦 Оплата комиссии"},
+  pay_purpose_commission:{uz:"🏦 Xizmat haqi to'lovi",ru:"🏦 Оплата за услуги"},
   // ===== KOMISSIYA (sotuvchi alohida ekran + admin sotuvchilar kesimi) =====
-  sp_ov_commission:{uz:"🏦 Komissiya",ru:"🏦 Комиссия"},
-  comm_title:{uz:"🏦 Platforma komissiyasi",ru:"🏦 Комиссия платформы"},
-  comm_percent:{uz:"Komissiya foizi",ru:"Процент комиссии"},
+  sp_ov_commission:{uz:"🏦 Xizmat haqi",ru:"🏦 Сервисный сбор"},
+  comm_title:{uz:"🏦 Ko'rsatilgan xizmat uchun haq",ru:"🏦 Плата за оказанные услуги"},
+  comm_percent:{uz:"Haq foizi",ru:"Процент сбора"},
   comm_owed_lbl:{uz:"To'lanishi kerak (qoldiq)",ru:"К оплате (остаток)"},
   comm_paid_lbl:{uz:"Allaqachon to'langan",ru:"Уже оплачено"},
-  comm_how:{uz:"Har yetkazilgan buyurtmadan {p}% platformaga komissiya hisoblanadi. Admin pulni qabul qilgach, qoldiq nolga tushadi.",ru:"С каждого доставленного заказа начисляется {p}% комиссии платформе. После приёма оплаты администратором остаток обнуляется."},
-  comm_inactive:{uz:"Hozir komissiya o'chiq — hech narsa to'lanmaydi.",ru:"Сейчас комиссия выключена — ничего платить не нужно."},
+  comm_how:{uz:"Har yetkazilgan buyurtmadan {p}% ko'rsatilgan xizmat uchun haq hisoblanadi. Admin pulni qabul qilgach, qoldiq nolga tushadi.",ru:"С каждого доставленного заказа начисляется {p}% платы за оказанные услуги. После приёма оплаты администратором остаток обнуляется."},
+  comm_inactive:{uz:"Hozir xizmat haqi o'chiq — hech narsa to'lanmaydi.",ru:"Сейчас сбор выключен — ничего платить не нужно."},
   comm_orders_lbl:{uz:"Buyurtmalar bo'yicha",ru:"По заказам"},
-  comm_no_orders:{uz:"Hali komissiyali buyurtma yo'q",ru:"Пока нет заказов с комиссией"},
+  comm_no_orders:{uz:"Hali haq hisoblangan buyurtma yo'q",ru:"Пока нет заказов со сбором"},
   comm_row_open:{uz:"qarz",ru:"долг"},
   comm_row_paid:{uz:"to'langan",ru:"оплачено"},
   // admin tomoni
-  adm_commissions:{uz:"🏦 Komissiya",ru:"🏦 Комиссия"},
-  comm_adm_hint:{uz:"Sotuvchilardan undiriladigan komissiya. Hozirgi foiz: {p}%",ru:"Комиссия к взысканию с продавцов. Текущий процент: {p}%"},
-  comm_adm_off:{uz:"⚠️ Komissiya hozir o'chiq (Monetizatsiya bo'limidan yoqing).",ru:"⚠️ Комиссия сейчас выключена (включите в разделе Монетизация)."},
-  comm_adm_empty:{uz:"Hali undiriladigan komissiya yo'q",ru:"Пока нет комиссии к взысканию"},
+  adm_commissions:{uz:"🏦 Xizmat haqi",ru:"🏦 Сервисный сбор"},
+  comm_adm_hint:{uz:"Sotuvchilardan undiriladigan xizmat haqi. Hozirgi foiz: {p}%",ru:"Сбор к взысканию с продавцов. Текущий процент: {p}%"},
+  comm_adm_off:{uz:"⚠️ Xizmat haqi hozir o'chiq (Monetizatsiya bo'limidan yoqing).",ru:"⚠️ Сбор сейчас выключен (включите в разделе Монетизация)."},
+  comm_adm_empty:{uz:"Hali undiriladigan xizmat haqi yo'q",ru:"Пока нет сбора к взысканию"},
   comm_adm_total_owed:{uz:"Jami qoldiq (undirilishi kerak)",ru:"Всего к взысканию"},
   comm_adm_total_paid:{uz:"Jami undirilgan",ru:"Всего взыскано"},
   comm_settle_btn:{uz:"💰 To'landi deb belgilash",ru:"💰 Отметить оплаченным"},
   comm_settle_confirm:{uz:"\"{n}\" sotuvchidan {a} undirildi deb belgilansinmi? Qarz yopiladi.",ru:"Отметить, что с продавца \"{n}\" взыскано {a}? Долг будет закрыт."},
-  comm_settle_ok:{uz:"✅ Komissiya yopildi",ru:"✅ Комиссия закрыта"},
+  comm_settle_ok:{uz:"✅ Xizmat haqi yopildi",ru:"✅ Сбор закрыт"},
   comm_settle_none:{uz:"Bu sotuvchida ochiq qarz yo'q",ru:"У продавца нет открытого долга"},
   pay_state_paid:{uz:"✅ To'langan",ru:"✅ Оплачено"},
   pay_state_pending:{uz:"⏳ Kutilmoqda",ru:"⏳ Ожидание"},
@@ -1387,6 +1390,7 @@ const I18N = {
   bp_loading:{uz:"Yuklanmoqda...",ru:"Загрузка..."}, bp_profile:{uz:"Profil",ru:"Профиль"},
   bp_in_stock:{uz:"✓ Mavjud: {n} dona",ru:"✓ В наличии: {n} шт"}, bp_sold_out_x:{uz:"✕ Tugagan",ru:"✕ Закончился"},
   bp_order_btn:{uz:"🛒 Buyurtma berish",ru:"🛒 Оформить заказ"}, bp_not_available:{uz:"Hozircha mavjud emas",ru:"Пока недоступно"},
+  bp_own_product:{uz:"Bu sizning mahsulotingiz",ru:"Это ваш товар"},
   bp_order_failed:{uz:"Buyurtma berilmadi: ",ru:"Заказ не оформлен: "},
   bp_prod_incomplete:{uz:"Mahsulot ma'lumoti to'liq emas.",ru:"Данные о товаре неполные."},
   bp_cart_other_shop:{uz:"Savatda boshqa do'kon mahsuloti bor. Tozalab, yangi do'kondan boshlaymizmi?",ru:"В корзине товар другого магазина. Очистить и начать заново?"},
@@ -1826,12 +1830,13 @@ async function openDetail(id){
         <div class="dsec"><button class="ocontact" id="dtShare" style="width:100%">${L('bp_share_product')}</button></div>
       </div>
       <div class="buybar">
-        ${stockOk?`<div style="display:flex;gap:10px">
+        ${p.is_own?`<button disabled>${L('bp_own_product')}</button>`
+          :(stockOk?`<div style="display:flex;gap:10px">
           <button id="cartBtn" style="flex:0 0 auto;width:56px;background:var(--accent-soft);color:var(--accent);box-shadow:none">➕</button>
           <button id="buyBtn" style="flex:1">${L('bp_order_btn')}</button>
-        </div>`:`<button disabled>${L('bp_not_available')}</button>`}
+        </div>`:`<button disabled>${L('bp_not_available')}</button>`)}
       </div>`;
-    if(stockOk){
+    if(stockOk && !p.is_own){
       document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
       document.getElementById('cartBtn').onclick = ()=>{ cartAdd(p); tg.showAlert && null; };
     }
@@ -1926,6 +1931,7 @@ async function captureLocation(setter, btnId){
 // ---------- CHECKOUT (to'liq app ichida) ----------
 let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='', coLat=null, coLon=null;
 function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
+function payLabel(code){ const m=PAYMENTS().find(x=>x[0]===code); return m?m[1]:(code||'—'); }
 
 async function openCheckout(id){
   const co = document.getElementById('checkout');
@@ -4558,6 +4564,10 @@ function sellerOrderCard(o){
   const st = ORDER_STATUS(o.status);
   const dlv = o.delivery_type==='delivery' ? L('sp_delivery') : L('sp_pickup');
   const contact = o.buyer_phone ? `<a class="ocontact" href="tel:${esc(o.buyer_phone)}">📞 ${esc(o.buyer_phone)}</a>` : '';
+  const uname = o.buyer_username ? String(o.buyer_username).replace('@','') : '';
+  const isDelivery = o.delivery_type==='delivery';
+  const hasGps = isDelivery && o.buyer_lat!=null && o.buyer_lon!=null;
+  const thumb = o.product_image ? `<img src="${imgUrl(o.product_image)}" style="width:48px;height:48px;border-radius:10px;object-fit:cover;flex:0 0 auto" onerror="this.style.display='none'">` : '';
   const cs = o.cancel_state||'';
   let actions='';
   if(o.status==='pending')
@@ -4579,15 +4589,24 @@ function sellerOrderCard(o){
   if(o.amount_due && o.amount_due>0) actions=`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`+actions;
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
-    <div class="oname">${esc(o.product_name||'')}</div>
+    <div style="display:flex;gap:10px;align-items:center">${thumb}<div style="flex:1;min-width:0">
+      <div class="oname" style="margin:0">${esc(o.product_name||'')}</div>
+      <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
+    </div></div>
     ${(_ordHasStaff && o.creator_name)?`<div class="ometa" style="color:var(--accent)">🏷 ${L('sp_order_by')}: ${esc(o.creator_name)}</div>`:''}
-    <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
+    <div class="oshop">${L('sp_pay_lbl')}: ${esc(payLabel(o.payment_method))}</div>
     ${o.delivery_address?`<div class="oshop">📍 ${esc(o.delivery_address)}</div>`:''}
+    ${o.dist_km!=null?`<div class="oshop">${L('sp_dist_lbl')}: ~${o.dist_km} km</div>`:''}
+    ${(isDelivery && !hasGps)?`<div style="font-size:11.5px;color:var(--sale);margin-top:4px">${L('sp_no_loc')}</div>`:''}
     ${countdownHtml(o)}
     ${cancelInfoHtml(o)}
     ${contact}
-    <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">${L('sp_msg')}</button>
+    ${hasGps?`<button class="oact ok" data-snav="${o.buyer_lat},${o.buyer_lon}" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#2563eb,#3b82f6)">${L('cour_navigate')}</button>`:''}
+    <div style="display:flex;gap:7px;margin-top:8px">
+      <button class="ocontact" data-chat="${o.id}" style="flex:1;margin-top:0;background:var(--bg);color:var(--accent)">${L('sp_msg')}</button>
+      ${(uname||o.buyer_phone)?`<button class="ocontact" data-stg="${esc(uname)}" data-stgphone="${esc(o.buyer_phone||'')}" style="flex:1;margin-top:0;background:var(--bg);color:var(--accent)">${L('cour_contact_tg')}</button>`:''}
+    </div>
     ${actions}
     ${(o.status==='confirmed' && o.delivery_type==='delivery')?`<button class="oact ok" data-assigncourier="${o.id}" style="width:100%;margin-top:7px;background:var(--bg);color:var(--accent);box-shadow:none">🚴 ${o.courier_name?L('cr_assigned').replace('{name}',esc(o.courier_name)):L('cr_assign')}</button>`:''}
     ${(o.status==='confirmed' && o.delivery_type==='delivery')?`<button class="oact ok" data-sharel="${o.id}" style="width:100%;margin-top:7px;background:var(--accent-soft);color:var(--accent);box-shadow:none">${o.courier_updated_at?L('trk_update'):L('trk_share')}</button>`:''}
@@ -4659,6 +4678,8 @@ function renderSellerOrders(){
   b.querySelectorAll('[data-ostaff]').forEach(ch=>ch.onclick=()=>{ orderStaffFilter = ch.dataset.ostaff || null; renderSellerOrders(); });
   b.querySelectorAll('[data-act]').forEach(btn=>btn.onclick=()=>sellerOrderAction(btn.dataset.oid, btn.dataset.act, btn));
   b.querySelectorAll('[data-chat]').forEach(btn=>btn.onclick=()=>openChat(btn.dataset.chat));
+  b.querySelectorAll('[data-snav]').forEach(btn=>btn.onclick=()=>{ const [la,lo]=btn.dataset.snav.split(','); openExternal(`https://www.google.com/maps/dir/?api=1&destination=${la},${lo}`); });
+  b.querySelectorAll('[data-stg]').forEach(btn=>btn.onclick=()=>openTgContact(btn.dataset.stg, btn.dataset.stgphone));
   b.querySelectorAll('[data-deliver]').forEach(btn=>btn.onclick=()=>openDeliver(btn.dataset.deliver));
   b.querySelectorAll('[data-assigncourier]').forEach(btn=>btn.onclick=()=>assignCourier(btn.dataset.assigncourier));
   b.querySelectorAll('[data-screqcancel]').forEach(btn=>btn.onclick=()=>sellerRequestCancel(btn.dataset.screqcancel));
