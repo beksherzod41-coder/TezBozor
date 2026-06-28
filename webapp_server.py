@@ -1511,6 +1511,10 @@ async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
         pn = order.get("product_name") or ""
         _notify_db(order["seller_id"], "order", ("❌ Xaridor buyurtmani bekor qildi", "❌ Покупатель отменил заказ"),
                    (pn, pn), ref_id=order_id)
+        # ADMIN — bekor qilinganidan xabardor bo'lsin (app banner + Telegram push)
+        await _notify_admins(
+            f"❌ Buyurtma bekor qilindi {fmt_order_id(order_id)}",
+            f"{pn} · xaridor bekor qildi", kind="order", ref_id=order_id)
         cid = order.get("notify_chat_id")
         mid = order.get("notify_message_id")
         if cid and mid:
@@ -3513,6 +3517,10 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
         else:
             _notify_db(order["buyer_id"], "order", ("❌ Buyurtma bekor qilindi", "❌ Заказ отменён"),
                        (pn, pn), ref_id=order_id)
+            # ADMIN — sotuvchi buyurtmani rad etganidan xabardor bo'lsin
+            await _notify_admins(
+                f"❌ Sotuvchi buyurtmani rad etdi {oid}",
+                f"{pn}", kind="order", ref_id=order_id)
     except Exception as e:
         logging.error(f"xaridorga xabar xato (order {order_id}): {e}")
 

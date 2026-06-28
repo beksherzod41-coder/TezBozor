@@ -4283,6 +4283,21 @@ async def _dispatch_order_notification(context, order_id):
         if product:
             await _fanout_order_to_staff(context, product, text, kb,
                                          dlv, buyer_lat, buyer_lon, owner_tg=seller_tg, photo=photo)
+
+        # ADMIN — har yangi buyurtmadan xabardor bo'lsin. Bu funksiya buyurtma uchun
+        # YAGONA o'tish nuqtasi (HAM bot order_confirm'i, HAM Mini App fon-job'i shu yerga
+        # keladi) — shuning uchun adminga xabar AYNAN BIR MARTA ketadi (spam yo'q).
+        try:
+            shop = (seller.get('shop_name') or seller.get('name')) if seller else None
+            atext = (f"📥 <b>Yangi buyurtma</b> {fmt_order_id(order_id)}\n"
+                     f"📦 {html.escape(order.get('product_name') or '')} × {qty}\n"
+                     f"💰 {fmt_price(total)}\n"
+                     f"👤 {html.escape(order.get('buyer_name') or '—')} · "
+                     f"{order.get('buyer_phone') or '—'}\n"
+                     f"🏪 {html.escape(shop or '—')}")
+            await notify_admins(context, atext)
+        except Exception as e:
+            logging.error(f"Adminga yangi buyurtma xabari ketmadi (order {order_id}): {e}")
     except Exception as e:
         logging.error(f"Sotuvchiga bildirishnoma ketmadi (order {order_id}): {e}")
 
@@ -4309,6 +4324,20 @@ async def _dispatch_group_notification(context, group_id):
         await _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat, b_lon, addr,
                                    deadline=deadline)
         _schedule_order_countdown(context.application.job_queue, group_id=group_id, first=60)
+
+        # ADMIN — yangi savat (guruh) buyurtmasidan xabardor bo'lsin (BITTA marta)
+        try:
+            shop = (seller.get('shop_name') or seller.get('name')) if seller else None
+            gtotal = sum(float(o.get('total_price') or 0) for o in orders)
+            atext = (f"📥 <b>Yangi savat buyurtma</b> {fmt_order_id(int(group_id))}\n"
+                     f"🧺 {len(orders)} ta mahsulot\n"
+                     f"💰 {fmt_price(gtotal)}\n"
+                     f"👤 {html.escape(first.get('buyer_name') or '—')} · "
+                     f"{first.get('buyer_phone') or '—'}\n"
+                     f"🏪 {html.escape(shop or '—')}")
+            await notify_admins(context, atext)
+        except Exception as e:
+            logging.error(f"Adminga yangi guruh buyurtma xabari ketmadi (group {group_id}): {e}")
     except Exception as e:
         logging.error(f"Guruh bildirishnomasi (group {group_id}) ketmadi: {e}")
 

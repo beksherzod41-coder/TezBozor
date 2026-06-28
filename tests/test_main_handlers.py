@@ -159,3 +159,25 @@ def test_cart_view_with_items_shows_total(env):
     assert q.edit_message_text.await_count == 1
     # Yuborilgan matn 2 dona × 45000 = 90000 summasini hisobga oladi
     assert main._cart_total(ctx) == 90000
+
+
+# ==================== ADMIN yangi buyurtma bildirishnomasi ====================
+def test_admin_notified_on_new_order(env, monkeypatch):
+    """Yangi buyurtmada ADMIN ham Telegram push olsin. `_dispatch_order_notification`
+    bot va Mini App uchun YAGONA o'tish nuqtasi — admin xabari shu yerda, BIR marta.
+    Og'ir yordamchilar (sotuvchi push'i, xodim fan-out) mock'lanadi, faqat admin
+    yo'nalishini tekshiramiz (ADMIN_ID=1, test boshida o'rnatilgan)."""
+    db = env.db
+    oid = db.create_order(buyer_id=env.buyer, seller_id=env.seller,
+                          product_id=env.product, quantity=2, total_price=90000,
+                          payment_method="cash", delivery_type="pickup")
+    monkeypatch.setattr(main, "_send_order_notification", AsyncMock(return_value=(1, False)))
+    monkeypatch.setattr(main, "_fanout_order_to_staff", AsyncMock())
+    ctx = types.SimpleNamespace(
+        bot=types.SimpleNamespace(send_message=AsyncMock(), send_location=AsyncMock()),
+        application=types.SimpleNamespace(job_queue=None),
+    )
+    run(main._dispatch_order_notification(ctx, oid))
+    calls = ctx.bot.send_message.await_args_list
+    assert any(c.kwargs.get("chat_id") == 1 and "Yangi buyurtma" in (c.kwargs.get("text") or "")
+               for c in calls), "Adminga (chat_id=1) yangi buyurtma push'i ketmadi"

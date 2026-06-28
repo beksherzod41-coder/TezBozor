@@ -30,6 +30,11 @@ def hdr(tg_id):
     return {"Authorization": "tma " + init}
 
 
+async def _ok_tg_call(method, payload):
+    """Telegram chaqiruvini soxtalashtiradi (real tarmoqsiz) — push'ni 'muvaffaqiyatli' qaytaradi."""
+    return {"ok": True}
+
+
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     d = Database(db_path=str(tmp_path / "wa.db"))
@@ -1239,6 +1244,40 @@ def test_buyer_cancel_after_confirm_409(client):
     r = client.post(f"/api/order/{oid}/cancel", headers=hdr(5001))
     assert r.status_code == 409
     assert db.get_order_by_id(oid)["status"] == "confirmed"
+
+
+def test_admin_notified_on_buyer_cancel(client, monkeypatch):
+    """Xaridor buyurtmani bekor qilsa, ADMIN ham xabardor bo'lsin (app-banner +
+    Telegram push). Push'ni mock qilamiz; banner DB'da yaratilganini tasdiqlaymiz."""
+    monkeypatch.setattr(webapp_server, "_tg_call", _ok_tg_call)
+    db = webapp_server.db
+    db.create_shop(db.get_user_by_telegram_id(5002)["id"])
+    ro = client.post("/api/order", headers=hdr(5001),
+                     json={"product_id": client.pid, "quantity": 1,
+                           "delivery_type": "pickup", "payment_method": "cash"})
+    oid = ro.json()["order_id"]
+    assert client.post(f"/api/order/{oid}/cancel", headers=hdr(5001)).status_code == 200
+    aid = db.get_user_by_telegram_id(5003)["id"]
+    notifs = db.get_user_notifications(aid)
+    assert any("bekor" in (n.get("title") or "").lower() for n in notifs), \
+        "Adminga bekor qilish bildirishnomasi yaratilmadi"
+
+
+def test_admin_notified_on_seller_reject(client, monkeypatch):
+    """Sotuvchi buyurtmani rad etsa, ADMIN ham xabardor bo'lsin."""
+    monkeypatch.setattr(webapp_server, "_tg_call", _ok_tg_call)
+    db = webapp_server.db
+    db.create_shop(db.get_user_by_telegram_id(5002)["id"])
+    ro = client.post("/api/order", headers=hdr(5001),
+                     json={"product_id": client.pid, "quantity": 1,
+                           "delivery_type": "pickup", "payment_method": "cash"})
+    oid = ro.json()["order_id"]
+    assert client.post(f"/api/seller/order/{oid}/action", headers=hdr(5002),
+                       json={"action": "reject"}).status_code == 200
+    aid = db.get_user_by_telegram_id(5003)["id"]
+    notifs = db.get_user_notifications(aid)
+    assert any("rad" in (n.get("title") or "").lower() for n in notifs), \
+        "Adminga rad etish bildirishnomasi yaratilmadi"
 
 
 def test_deliver_atomic_guard_no_double(client):
