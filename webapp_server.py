@@ -101,6 +101,31 @@ def _rows(result):
     return out
 
 
+def _own_shop_seller_id(authorization):
+    """Joriy foydalanuvchining O'Z do'koni seller_id si (do'kon egasi yoki xodim bo'lsa),
+    aks holda None. Buyer katalogida o'z do'koni mahsulotlarini YASHIRISH uchun: sotuvchi
+    o'z mahsulotini sotib ololmaydi (own_product), shuning uchun katalogda ko'rsatmaymiz.
+    Oddiy xaridorda do'kon yo'q → o'z id'si qaytadi, lekin u hech bir mahsulot seller_id'siga
+    to'g'ri kelmaydi (xaridorda mahsulot yo'q) → hech narsa filtrlanmaydi (xavfsiz)."""
+    try:
+        auth = require_auth(authorization)
+        tg = (auth.get("user") or {}).get("id")
+        if not tg:
+            return None
+        u = db.get_user_by_telegram_id(tg)
+        return _owner_id(dict(u)) if u else None
+    except Exception:
+        return None
+
+
+def _hide_own(rows, own_seller_id):
+    """`rows` (dict ro'yxati) ichidan seller_id == own_seller_id bo'lganlarini olib tashlaydi.
+    own_seller_id None bo'lsa — o'zgartirmasdan qaytaradi."""
+    if not own_seller_id:
+        return rows
+    return [d for d in rows if d.get("seller_id") != own_seller_id]
+
+
 # ============================================================
 # API
 # ============================================================
@@ -124,14 +149,16 @@ def api_products(
         query=q, category_id=category_id, sort_by=sort, region_id=region_id,
         seller_id=seller_id,
     )
-    return _rows(items)
+    # O'z do'koni mahsulotlarini buyer katalogda yashiramiz (own_product chalkashligi yo'q)
+    return _hide_own(_rows(items), _own_shop_seller_id(authorization))
 
 
 @app.get("/api/products/{product_id}/related")
 def api_product_related(product_id: int, authorization: str = Header(None)):
     """AI #10 — "Bular bilan olishadi" (item-to-item cross-sell)."""
     require_auth(authorization)
-    return _rows(db.get_frequently_bought_together(product_id, 8))
+    return _hide_own(_rows(db.get_frequently_bought_together(product_id, 8)),
+                     _own_shop_seller_id(authorization))
 
 
 @app.get("/api/products/ai-search")
@@ -182,7 +209,8 @@ async def api_products_ai_search(
                 items.append(r)
         if len(items) >= 30:
             break
-    return {"interpreted": ", ".join(interp["keywords"]), "items": _rows(items[:30])}
+    return {"interpreted": ", ".join(interp["keywords"]),
+            "items": _hide_own(_rows(items[:30]), _own_shop_seller_id(authorization))}
 
 
 def _shop_facts_text(prod, lang):
@@ -459,12 +487,17 @@ def api_discover(authorization: str = Header(None)):
     }
     tg_id = (auth.get("user") or {}).get("id")
     u = db.get_user_by_telegram_id(tg_id) if tg_id else None
+    own = None
     if u:
         uid = dict(u)["id"]
+        own = _owner_id(dict(u))   # o'z do'koni mahsulotlarini yashirish uchun
         out["for_you"] = _rows(db.get_recommendations(uid, 12))   # #1 shaxsiy tavsiya
         rid = dict(u).get("region_id")
         if rid:
             out["nearby"] = _rows(db.search_products(region_id=rid, sort_by="newest")[:12])
+    # Har bo'limdan o'z do'koni mahsulotlarini olib tashlaymiz (buyer katalog parite)
+    for k in ("for_you", "trending", "discounts", "nearby"):
+        out[k] = _hide_own(out[k], own)
     return out
 
 

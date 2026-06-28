@@ -1246,6 +1246,20 @@ def test_buyer_cancel_after_confirm_409(client):
     assert db.get_order_by_id(oid)["status"] == "confirmed"
 
 
+def test_own_products_hidden_from_buyer_catalog(client):
+    """Sotuvchi buyer katalogida O'Z do'koni mahsulotini KO'RMASLIGI kerak (own_product
+    chalkashligi bo'lmasin). Oddiy xaridor esa mahsulotni ko'radi."""
+    db = webapp_server.db
+    sid = db.get_user_by_telegram_id(5002)["id"]            # 5002 — client.pid egasi
+    db.update_user(sid, is_approved=1)                       # katalogda ko'rinishi uchun tasdiqlangan
+    seller_view = client.get("/api/products", headers=hdr(5002)).json()
+    assert all(p["id"] != client.pid for p in seller_view), \
+        "Sotuvchi o'z mahsulotini buyer katalogda ko'rdi"
+    buyer_view = client.get("/api/products", headers=hdr(5001)).json()
+    assert any(p["id"] == client.pid for p in buyer_view), \
+        "Oddiy xaridor mahsulotni katalogda ko'rmadi"
+
+
 def test_admin_notified_on_buyer_cancel(client, monkeypatch):
     """Xaridor buyurtmani bekor qilsa, ADMIN ham xabardor bo'lsin (app-banner +
     Telegram push). Push'ni mock qilamiz; banner DB'da yaratilganini tasdiqlaymiz."""
