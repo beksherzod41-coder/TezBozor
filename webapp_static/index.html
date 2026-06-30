@@ -1226,6 +1226,7 @@ const I18N = {
   sp_stock_now:{uz:"Hozirgi zahira",ru:"Текущий запас"}, sp_stock_req:{uz:"Zahira sonini kiriting.",ru:"Введите количество."},
   sp_ov_stock:{uz:"📦 Zahira",ru:"📦 Запас"},
   sp_chan_add_group:{uz:"➕ Botni guruhga qo'shish",ru:"➕ Добавить бота в группу"},
+  sp_chan_add_channel:{uz:"➕ Botni kanalga qo'shish",ru:"➕ Добавить бота в канал"},
   sp_exp_orders:{uz:"🧾 Buyurtmalar (Excel)",ru:"🧾 Заказы (Excel)"}, sp_exp_products:{uz:"📦 Mahsulotlar (Excel)",ru:"📦 Товары (Excel)"},
   sp_exp_full:{uz:"📊 To'liq hisobot (4 sahifa)",ru:"📊 Полный отчёт (4 листа)"},
   sd_ledger_btn:{uz:"💳 Qarzlar daftari",ru:"💳 Книга долгов"}, sd_title:{uz:"Qarzlar",ru:"Долги"},
@@ -3999,14 +4000,17 @@ async function loadChannels(){
     const botU = BOT_USERNAME ? '@'+BOT_USERNAME : 'bot';
     const help=`<div class="cosec" style="margin:0 12px"><div style="font-size:13px;line-height:1.55">${L('sp_chan_help').replace('{bot}', esc(botU))}</div></div>`;
     const addG = BOT_USERNAME ? `<div style="padding:0 12px 8px"><button class="oact ok" id="chanAddGroup" style="width:100%">${L('sp_chan_add_group')}</button></div>` : '';
+    const addC = BOT_USERNAME ? `<div style="padding:0 12px 8px"><button class="oact ok" id="chanAddChannel" style="width:100%">${L('sp_chan_add_channel')}</button></div>` : '';
     const refresh=`<div style="padding:8px 12px"><button class="oact ok" id="chanRefresh" style="width:100%;background:var(--bg);color:var(--accent)">${L('sp_refresh')}</button></div>`;
     if(!chans.length)
-      b.innerHTML=`<div style="padding:8px 0">${addG}${help}${refresh}</div><div class="empty"><span class="big">📢</span>${L('sp_no_channels')}</div>`;
+      b.innerHTML=`<div style="padding:8px 0">${addC}${addG}${help}${refresh}</div><div class="empty"><span class="big">📢</span>${L('sp_no_channels')}</div>`;
     else
-      b.innerHTML=`<div style="padding:8px 0">${addG}${help}${refresh}<div class="olist" style="margin-top:6px">`+chans.map(chanCard).join('')+`</div></div>`;
+      b.innerHTML=`<div style="padding:8px 0">${addC}${addG}${help}${refresh}<div class="olist" style="margin-top:6px">`+chans.map(chanCard).join('')+`</div></div>`;
     document.getElementById('chanRefresh').onclick=loadChannels;
     const ag=document.getElementById('chanAddGroup');
     if(ag) ag.onclick=()=>{ try{ tg.openTelegramLink('https://t.me/'+BOT_USERNAME+'?startgroup=true'); }catch(e){ tg.showAlert('@'+BOT_USERNAME); } };
+    const ac=document.getElementById('chanAddChannel');
+    if(ac) ac.onclick=()=>{ try{ tg.openTelegramLink('https://t.me/'+BOT_USERNAME+'?startchannel=true'); }catch(e){ tg.showAlert('@'+BOT_USERNAME); } };
     b.querySelectorAll('[data-rmchan]').forEach(btn=>btn.onclick=()=>removeChannel(btn.dataset.rmchan, btn.dataset.title));
   }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }

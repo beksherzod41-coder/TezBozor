@@ -6122,12 +6122,14 @@ async def seller_link_group_start(update: Update, context: ContextTypes.DEFAULT_
 async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Botning guruh/superguruhdagi a'zoligi o'zgarganda ishlaydi.
 
-    Bot guruhga YANGI qo'shilsa — qo'shgan odamni (sotuvchini) aniqlaymiz va guruhni
-    unga bog'laymiz. Endi yangi mahsulotlar avtomatik shu guruhga ham chiqadi.
-    (Kanallar 'forward' orqali ulanadi — bu yerda faqat guruhlar bilan ishlaymiz.)
+    Bot guruh YOKI kanalga qo'shilsa — qo'shgan odamni (sotuvchini) aniqlaymiz va
+    chatni unga bog'laymiz. Endi yangi mahsulotlar avtomatik o'sha yerga ham chiqadi.
 
-    Eslatma: 'my_chat_member' Telegram'ning standart yangilanishlari ichida keladi
-    (alohida 'chat_member' obunasi shart emas)."""
+    Eslatma: Telegram 'my_chat_member' yangilanishini guruh, superguruh VA kanal
+    uchun ham yuboradi (bot admin qilinganda/qo'shilganda). Ilgari kanallar faqat
+    'forward' orqali ulanardi, lekin bot→launcher migratsiyasidan keyin forward
+    oqimi App'ga ko'chib o'lik qoldi — shuning uchun kanallarni ham shu yerda
+    ushlaymiz. (Alohida 'chat_member' obunasi shart emas.)"""
     cmu = update.my_chat_member
     if cmu is None:
         return
@@ -6136,8 +6138,9 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _new = getattr(cmu.new_chat_member, 'status', None)
     logging.info(f"my_chat_member: chat={chat.id} type={chat.type} "
                  f"status {_old}->{_new} by={getattr(cmu.from_user, 'id', None)}")
-    if chat.type not in ('group', 'supergroup'):
+    if chat.type not in ('group', 'supergroup', 'channel'):
         return
+    is_channel = (chat.type == 'channel')
 
     old_status = cmu.old_chat_member.status if cmu.old_chat_member else None
     new_status = cmu.new_chat_member.status if cmu.new_chat_member else None
@@ -6201,7 +6204,8 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Huquq yo'q — post General topicga boradi (topic yopiq bo'lsa avtomatik unga qaytamiz)
                 logging.info(f"Forum topic ochib bo'lmadi (chat {chat.id}): {e} — General ishlatiladi")
 
-    is_new = db.add_seller_channel(seller['id'], chat.id, title, chat_type='group',
+    is_new = db.add_seller_channel(seller['id'], chat.id, title,
+                                   chat_type=('channel' if is_channel else 'group'),
                                    is_forum=is_forum, thread_id=thread_id)
 
     # Bot post yubora oladimi — guruhga HECH NARSA yozmasdan, botning a'zolik huquqidan
@@ -6235,11 +6239,11 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         seller_tg = seller.get('telegram_id')
         if seller_tg:
             if not can_post:
-                key = 'group_linked_need_admin'
+                key = 'channel_linked_need_admin' if is_channel else 'group_linked_need_admin'
             elif is_new:
-                key = 'group_linked_notify'
+                key = 'channel_linked_notify' if is_channel else 'group_linked_notify'
             else:
-                key = 'group_relinked_notify'
+                key = 'channel_relinked_notify' if is_channel else 'group_relinked_notify'
             await context.bot.send_message(
                 chat_id=seller_tg,
                 text=t(slang, key, title=html.escape(title)),

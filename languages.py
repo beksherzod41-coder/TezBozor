@@ -486,6 +486,28 @@ _TEXTS = {
                "Пожалуйста, сделайте меня <b>администратором</b> группы (или разрешите участникам "
                "отправлять сообщения). После этого товары будут публиковаться автоматически."),
     },
+    'channel_linked_notify': {
+        'uz': ("✅ Kanal ulandi: <b>{title}</b>\n\n"
+               "Endi qo'shgan (yoki qayta sotuvga qo'ygan) mahsulotlaringiz "
+               "avtomatik shu kanalga ham chiqadi."),
+        'ru': ("✅ Канал подключён: <b>{title}</b>\n\n"
+               "Теперь добавленные (или повторно выставленные) товары "
+               "будут автоматически публиковаться и в этом канале."),
+    },
+    'channel_relinked_notify': {
+        'uz': ("✅ Kanal qayta ulandi: <b>{title}</b>\n\n"
+               "Mahsulotlaringiz yana shu kanalga avtomatik chiqadi."),
+        'ru': ("✅ Канал переподключён: <b>{title}</b>\n\n"
+               "Товары снова будут публиковаться в этом канале."),
+    },
+    'channel_linked_need_admin': {
+        'uz': ("⚠️ Kanal aniqlandi: <b>{title}</b>, lekin men u yerga <b>post yubora olmadim</b>.\n\n"
+               "Iltimos, meni kanalda <b>admin</b> qiling va <b>“Post yuborish”</b> ruxsatini yoqing. "
+               "Shundan so'ng mahsulotlaringiz avtomatik chiqaveradi."),
+        'ru': ("⚠️ Канал определён: <b>{title}</b>, но я <b>не смог опубликовать</b> в нём.\n\n"
+               "Пожалуйста, сделайте меня <b>администратором</b> канала и включите право "
+               "<b>«Публикация сообщений»</b>. После этого товары будут публиковаться автоматически."),
+    },
     'group_added_not_seller': {
         'uz': ("👋 Salom! Men <b>TezBozor</b> botiman.\n\n"
                "Mahsulotlarni shu guruhga avtomatik joylash uchun avval botda "
