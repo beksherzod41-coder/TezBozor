@@ -1232,17 +1232,22 @@ const I18N = {
   sp_pending_owner:{uz:"⏳ Mahsulot do'kon EGASI tasdig'ini kutmoqda. Tasdiqlangach sotuvga chiqadi.",ru:"⏳ Товар ожидает подтверждения ВЛАДЕЛЬЦА магазина. После одобрения он будет опубликован."},
   sp_min_price:{uz:"🤫 Maxfiy oxirgi narx (savdolashish)",ru:"🤫 Секретная мин. цена (торг)"},
   sp_min_price_hint:{uz:"Faqat siz ko'rasiz. AI shu narxdan pastga tushmay xaridor bilan savdolashadi. Bo'sh = savdolashish o'chiq.",ru:"Видите только вы. AI торгуется, не опускаясь ниже. Пусто = торг выключен."},
-  sp_wholesale:{uz:"📦 Optom (ulgurji) narx",ru:"📦 Оптовая цена"},
-  sp_wholesale_hint:{uz:"Ko'p olganga arzonroq. Masalan: 20+ dona olsa — 19 000 so'm. Ikkala maydon ham to'ldirilsin, bo'sh = optom yo'q.",ru:"Дешевле при большом объёме. Напр.: 20+ шт — 19 000. Заполните оба поля, пусто = без опта."},
-  sp_wholesale_price_lbl:{uz:"Optom narx (dona uchun)",ru:"Оптовая цена (за единицу)"},
-  sp_wholesale_min_lbl:{uz:"Minimal son",ru:"Мин. количество"},
+  sp_wholesale:{uz:"📦 Optom (ulgurji) narx — zinalar",ru:"📦 Оптовая цена — ступени"},
+  sp_wholesale_hint:{uz:"Ko'p olganga arzonroq. Bir nechta zina qo'shing — masalan: 10+ dona → 21 000, 20+ → 19 000, 50+ → 18 000. Son ko'paygani sayin narx pasaysin. Bo'sh = optom yo'q.",ru:"Дешевле при большом объёме. Добавьте несколько ступеней — напр.: 10+ → 21 000, 20+ → 19 000, 50+ → 18 000. Чем больше, тем дешевле. Пусто = без опта."},
+  sp_wholesale_price_lbl:{uz:"Dona narxi",ru:"Цена за ед."},
+  sp_wholesale_min_lbl:{uz:"…dan (min son)",ru:"от (мин. кол-во)"},
   sp_wholesale_price_ph:{uz:"masalan 19 000",ru:"например 19 000"},
   sp_wholesale_min_ph:{uz:"masalan 20",ru:"например 20"},
-  sp_wholesale_err:{uz:"Optom narx dona narxidan past va min. son ≥ 2 bo'lsin (yoki ikkala maydonni bo'sh qoldiring).",ru:"Оптовая цена должна быть ниже обычной, а мин. кол-во ≥ 2 (или оставьте оба поля пустыми)."},
+  sp_wholesale_add:{uz:"➕ Zina qo'shish",ru:"➕ Добавить ступень"},
+  sp_wholesale_none:{uz:"Optom narx yo'q. Zina qo'shish uchun pastdagi tugmani bosing.",ru:"Опта нет. Нажмите кнопку ниже, чтобы добавить ступень."},
+  sp_wholesale_max:{uz:"Ko'pi bilan 6 ta zina.",ru:"Максимум 6 ступеней."},
+  sp_wholesale_err:{uz:"Har zina: narx dona narxidan past, min son ≥ 2; son oshgani sayin narx pasayishi shart.",ru:"Каждая ступень: цена ниже обычной, мин. кол-во ≥ 2; с ростом кол-ва цена должна падать."},
   ws_offer:{uz:"📦 {n}+ {unit} — {p}/{unit}",ru:"📦 {n}+ {unit} — {p}/{unit}"},
   ws_applied:{uz:"✅ Optom narx qo'llandi · {p}/{unit}",ru:"✅ Применена оптовая цена · {p}/{unit}"},
   ws_nudge:{uz:"Yana {k} {unit} qo'shsangiz — {p}/{unit} (jami {s} tejaysiz)",ru:"Добавьте ещё {k} {unit} — {p}/{unit} (сэкономите {s})"},
   ws_saved:{uz:"Optom narx bilan {s} tejadingiz",ru:"Вы сэкономили {s} по оптовой цене"},
+  ws_title:{uz:"Optom narxlar",ru:"Оптовые цены"},
+  ws_next:{uz:"Yana {k} {unit} qo'shsangiz — {p}/{unit}",ru:"Добавьте ещё {k} {unit} — {p}/{unit}"},
   ws_unit_default:{uz:"dona",ru:"шт"},
   hag_btn:{uz:"💬 Savdolashish",ru:"💬 Поторговаться"}, hag_title:{uz:"💬 Savdolashish",ru:"💬 Торг"},
   hag_intro:{uz:"Sotuvchining AI-yordamchisi bilan savdolashing. Narx aytib taklif qiling!",ru:"Торгуйтесь с AI-помощником продавца. Предложите свою цену!"},
@@ -1959,6 +1964,18 @@ async function captureLocation(setter, btnId){
 }
 
 // ---------- CHECKOUT (to'liq app ichida) ----------
+// Optom zinalari (xaridor tomoni) — JSON yoki eski yagona zinadan; faqat to'g'rilari, min bo'yicha o'sib.
+function wsTiers(p){
+  const listed=Number(p.price||0); let arr=[];
+  const raw=p.wholesale_tiers;
+  if(raw){ try{ const a=(typeof raw==='string')?JSON.parse(raw):raw;
+    if(Array.isArray(a)) arr=a.map(t=>({min:Number(t.min)||0, price:Number(t.price)||0})); }catch(e){} }
+  if(!arr.length && Number(p.wholesale_price)>0 && Number(p.wholesale_min_qty)>=2)
+    arr=[{min:Number(p.wholesale_min_qty), price:Number(p.wholesale_price)}];
+  return arr.filter(t=>t.min>=2 && t.price>0 && (listed<=0||t.price<listed)).sort((a,b)=>a.min-b.min);
+}
+function wsUnitPrice(p, qty){ const ap=wsTiers(p).filter(t=>qty>=t.min).map(t=>t.price); return ap.length?Math.min(...ap):Number(p.price||0); }
+function wsNextTier(p, qty){ for(const t of wsTiers(p)){ if(qty<t.min) return t; } return null; }
 let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='', coLat=null, coLon=null;
 function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
 function payLabel(code){ const m=PAYMENTS().find(x=>x[0]===code); return m?m[1]:(code||'—'); }
@@ -1985,12 +2002,12 @@ function renderCheckout(){
     ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`
     : `<div class="ph">🖼️</div>`;
   const listed = Number(p.price||0);
-  // Optom (ulgurji): qty minimumga yetsa dona narx optomga tushadi.
-  const wsQ = Number(p.wholesale_min_qty||0), wsP = Number(p.wholesale_price||0);
-  const wsOn = wsP>0 && wsQ>=2 && wsP<listed;       // optom yoqilgan
-  const wsActive = wsOn && coQty>=wsQ;              // hozir qo'llanmoqda
-  const base = wsActive ? wsP : listed;            // optomga moslangan asos narx
   const U = esc(p.unit || L('ws_unit_default'));
+  // Optom zinalari: qty bo'yicha eng arzon amaldagi narx.
+  const wsList = wsTiers(p);
+  const wsOn = wsList.length>0;
+  const base = wsUnitPrice(p, coQty);          // joriy son uchun amaldagi dona narx
+  const wsActive = wsOn && base < listed;      // qaysidir zina qo'llandi
   const hasDeal = p.deal_price && Number(p.deal_price) < base;
   const unit = hasDeal ? Number(p.deal_price) : base;
   const max = coMaxStock(), total = coQty * unit;
@@ -1998,21 +2015,25 @@ function renderCheckout(){
   if(hasDeal)
     priceHtml = `<div class="pr">${money(unit)} <span style="font-size:12px;color:var(--hint);text-decoration:line-through;font-weight:500">${money(listed)}</span></div><div style="font-size:11.5px;color:var(--ok);font-weight:700">🤝 ${L('hag_deal_applied')}</div>`;
   else if(wsActive)
-    priceHtml = `<div class="pr">${money(unit)} <span style="font-size:12px;color:var(--hint);text-decoration:line-through;font-weight:500">${money(listed)}</span></div><div style="font-size:11.5px;color:var(--ok);font-weight:700">${L('ws_applied').replace('{p}',money(wsP)).replace('{unit}',U)}</div>`;
+    priceHtml = `<div class="pr">${money(unit)} <span style="font-size:12px;color:var(--hint);text-decoration:line-through;font-weight:500">${money(listed)}</span></div><div style="font-size:11.5px;color:var(--ok);font-weight:700">${L('ws_applied').replace('{p}',money(base)).replace('{unit}',U)}</div>`;
   else
     priceHtml = `<div class="pr">${money(listed)}</div>`;
-  // Optom taklifi/turtki (qty bo'limida) — xaridor doim biladi: "20+ olsang 19 000 dan".
+  // Optom narvoni — xaridor barcha zinalarni ko'radi; joriy zina belgilanadi + keyingi zina turtkisi.
   let wsBox = '';
   if(wsOn && !hasDeal){
-    if(wsActive){
-      const saved = Math.round((listed-unit)*coQty);
-      wsBox = `<div style="margin-top:9px;background:rgba(22,163,74,.1);border-radius:10px;padding:9px 11px;font-size:12.5px;color:var(--ok);font-weight:700">💰 ${L('ws_saved').replace('{s}', money(saved))}</div>`;
-    }else{
-      const need = wsQ-coQty, savePer = Math.round((listed-wsP)*wsQ);
-      wsBox = `<div style="margin-top:9px;background:var(--accent-soft);border-radius:10px;padding:9px 11px">
-        <div style="font-size:12.5px;font-weight:700;color:var(--accent)">${L('ws_offer').replace('{n}',wsQ).replace(/\{unit\}/g,U).replace('{p}',money(wsP))}</div>
-        <div style="font-size:11.5px;color:var(--hint);margin-top:3px">${L('ws_nudge').replace('{k}',need).replace(/\{unit\}/g,U).replace('{p}',money(wsP)).replace('{s}',money(savePer))}</div></div>`;
-    }
+    const ladder = wsList.map(t=>{
+      const on = coQty>=t.min;
+      return `<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:2px;${on?'color:var(--ok,#16a34a);font-weight:700':'color:var(--hint)'}">
+        <span>${on?'✅ ':''}${t.min}+ ${U}</span><span>${money(t.price)}/${U}</span></div>`;
+    }).join('');
+    let foot = '';
+    if(wsActive){ const saved=Math.round((listed-base)*coQty);
+      foot += `<div style="font-size:11.5px;color:var(--ok,#16a34a);font-weight:700;margin-top:6px">💰 ${L('ws_saved').replace('{s}', money(saved))}</div>`; }
+    const nx = wsNextTier(p, coQty);
+    if(nx){ const need=nx.min-coQty;
+      foot += `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">${L('ws_next').replace('{k}',need).replace(/\{unit\}/g,U).replace('{p}',money(nx.price))}</div>`; }
+    wsBox = `<div style="margin-top:9px;background:var(--accent-soft);border-radius:10px;padding:9px 11px">
+      <div style="font-size:11.5px;font-weight:700;color:var(--accent);margin-bottom:3px">📦 ${L('ws_title')}</div>${ladder}${foot}</div>`;
   }
   body.innerHTML = `
     <div class="cobody">
@@ -5180,15 +5201,25 @@ function closeProInfo(){ document.getElementById('proinfoview').classList.remove
 document.getElementById('proinfoClose').onclick=closeProInfo;
 
 // ---------- MAHSULOT FORMASI (qo'shish / tahrirlash) ----------
+// Mahsulotdan optom zinalarini o'qiydi: [{min,price}] (JSON yoki eski yagona zina).
+function _loadTiers(prod){
+  if(!prod) return [];
+  const raw=prod.wholesale_tiers;
+  if(raw){ try{ const a=(typeof raw==='string')?JSON.parse(raw):raw;
+    if(Array.isArray(a)&&a.length) return a.map(t=>({min:Number(t.min)||'', price:Number(t.price)||''})); }catch(e){} }
+  if(prod.wholesale_price && prod.wholesale_min_qty)
+    return [{min:Number(prod.wholesale_min_qty), price:Number(prod.wholesale_price)}];
+  return [];
+}
 function openProductForm(prod){
   const base = {mode:'classic', questions:[], attrs:{}, attrLabels:{}, qLoaded:false, qLoading:false};
   pf = prod ? Object.assign({
     id: prod.id, name: prod.name||'', price: prod.price||'', category_id: prod.category_id||null,
     description: prod.description||'', stock_count: (prod.stock_count==null?'':prod.stock_count),
     old_price: prod.old_price||'', unit: prod.unit||'', min_price: prod.min_price||'',
-    wholesale_price: prod.wholesale_price||'', wholesale_min_qty: prod.wholesale_min_qty||'',
+    tiers: _loadTiers(prod),
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
-  }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', wholesale_price:'', wholesale_min_qty:'', images:[] }, base);
+  }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', tiers:[], images:[] }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
@@ -5197,8 +5228,7 @@ function openProductForm(prod){
   if(prod){ loadPriceInsight(prod.id); api('/api/products/'+prod.id).then(d=>{
     if(d && d.unit!=null && !pf.unit){ pf.unit = d.unit||''; }
     if(d && d.min_price!=null && !pf.min_price){ pf.min_price = d.min_price||''; }
-    if(d && d.wholesale_price!=null && !pf.wholesale_price){ pf.wholesale_price = d.wholesale_price||''; }
-    if(d && d.wholesale_min_qty!=null && !pf.wholesale_min_qty){ pf.wholesale_min_qty = d.wholesale_min_qty||''; }
+    if(d && (!pf.tiers || !pf.tiers.length)){ const tt=_loadTiers(d); if(tt.length) pf.tiers=tt; }
     if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,4); }
     if(d && Array.isArray(d.attributes) && d.attributes.length){
       pf.questions = d.attributes.map(a=>({key:a.attr_key, label:a.attr_label||a.attr_key, type:'text', required:false, options:[]}));
@@ -5270,6 +5300,17 @@ async function loadQuestions(){
   pf.qLoading=false; renderProductForm();
 }
 
+// Optom zina qatorlari (min son + dona narx) — dinamik qo'shiladi/o'chiriladi.
+function tierRowsHtml(){
+  const rows=(pf.tiers||[]).map((t,i)=>`<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:7px">
+    <div style="width:34%"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_min_lbl')}</div>
+      <input class="coaddr" data-tiermin="${i}" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_min_ph')}" value="${t.min?String(t.min):''}"></div>
+    <div style="flex:1"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_price_lbl')}</div>
+      <input class="coaddr" data-tierprice="${i}" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_price_ph')}" value="${t.price?fmtThousands(t.price):''}"></div>
+    <button class="oact no" type="button" data-tierrm="${i}" style="width:auto;padding:11px 13px;margin:0;background:#fdebef;color:var(--sale)">✕</button>
+  </div>`).join('');
+  return rows || `<div style="font-size:12px;color:var(--hint);padding:2px 0 8px">${L('sp_wholesale_none')}</div>`;
+}
 function renderProductForm(){
   const body = document.getElementById('prodformBody');
   const isEdit = !!pf.id;
@@ -5296,13 +5337,9 @@ function renderProductForm(){
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_min_price_hint')}</div>
       <input class="coaddr" id="pfMinPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.min_price?fmtThousands(pf.min_price):''}"></div>
     <div class="cosec"><div class="lbl">${L('sp_wholesale')}</div>
-      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_wholesale_hint')}</div>
-      <div style="display:flex;gap:8px">
-        <div style="flex:1"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_price_lbl')}</div>
-          <input class="coaddr" id="pfWsPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_price_ph')}" value="${pf.wholesale_price?fmtThousands(pf.wholesale_price):''}"></div>
-        <div style="width:40%"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_min_lbl')}</div>
-          <input class="coaddr" id="pfWsMin" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_min_ph')}" value="${pf.wholesale_min_qty?String(pf.wholesale_min_qty):''}"></div>
-      </div></div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:8px">${L('sp_wholesale_hint')}</div>
+      <div id="pfTiers">${tierRowsHtml()}</div>
+      <button class="oact soft full" id="pfTierAdd" type="button" style="margin-top:2px">${L('sp_wholesale_add')}</button></div>
     <div class="cosec"><div class="lbl">${L('sp_category')}</div>
       <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>
     <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
@@ -5339,8 +5376,10 @@ function renderProductForm(){
   });
   const uc=document.getElementById('pfUnitCustom'); if(uc) uc.oninput=e=>{ pf.unit=e.target.value; body.querySelectorAll('#pfUnits .chip').forEach(x=>x.classList.remove('active')); };
   const mp=document.getElementById('pfMinPrice'); if(mp) mp.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.min_price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; };
-  const wsp=document.getElementById('pfWsPrice'); if(wsp) wsp.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.wholesale_price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; };
-  const wsm=document.getElementById('pfWsMin'); if(wsm) wsm.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.wholesale_min_qty=dg?Number(dg):''; e.target.value=dg||''; };
+  body.querySelectorAll('[data-tiermin]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tiermin; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].min=dg?Number(dg):''; e.target.value=dg||''; });
+  body.querySelectorAll('[data-tierprice]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tierprice; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; });
+  body.querySelectorAll('[data-tierrm]').forEach(b=>b.onclick=()=>{ pf.tiers.splice(+b.dataset.tierrm,1); renderProductForm(); });
+  const tadd=document.getElementById('pfTierAdd'); if(tadd) tadd.onclick=()=>{ if((pf.tiers||[]).length>=6){ tg.showAlert(L('sp_wholesale_max')); return; } pf.tiers.push({min:'',price:''}); renderProductForm(); };
   body.querySelectorAll('[data-cid]').forEach(ch=>ch.onclick=()=>{
     pf.category_id = Number(ch.dataset.cid);
     body.querySelectorAll('#pfCats .chip').forEach(x=>x.classList.toggle('active', x.dataset.cid==pf.category_id));
@@ -5405,9 +5444,15 @@ async function saveProduct(){
   if(!(pf.name||'').trim()){ tg.showAlert(L('sp_name_req')); return; }
   const price = Number(pf.price);
   if(!price || price<=0){ tg.showAlert(L('sp_price_req')); return; }
-  // Optom: ikkala maydon ham bo'lsin (yoki hech biri), optom narx < dona narx, min ≥ 2.
-  const wsP = Number(pf.wholesale_price)||0, wsQ = Number(pf.wholesale_min_qty)||0;
-  if(((wsP>0)!==(wsQ>0)) || (wsP>0 && (wsP>=price || wsQ<2))){ tg.showAlert(L('sp_wholesale_err')); return; }
+  // Optom zinalari: har zina min≥2, 0<narx<dona narx; min qat'iy o'sib, narx qat'iy kamayib borsin.
+  const tiersOut=[]; let prevMin=0, prevPrice=Infinity;
+  const rows=(pf.tiers||[]).filter(t=>Number(t.min)>0||Number(t.price)>0)
+                           .slice().sort((a,b)=>Number(a.min)-Number(b.min));
+  for(const t of rows){
+    const m=Number(t.min)||0, pr=Number(t.price)||0;
+    if(m<2 || pr<=0 || pr>=price || m<=prevMin || pr>=prevPrice){ tg.showAlert(L('sp_wholesale_err')); return; }
+    prevMin=m; prevPrice=pr; tiersOut.push({min_qty:m, price:pr});
+  }
   const missing = (pf.questions||[]).filter(q=>q.required && !String(pf.attrs[q.key]||'').trim());
   if(missing.length){ tg.showAlert(L('sp_q_required').replace('{f}', missing[0].label)); return; }
   const attributes = Object.keys(pf.attrs||{})
@@ -5422,8 +5467,7 @@ async function saveProduct(){
     old_price: (pf.old_price===''||pf.old_price==null) ? 0 : Number(pf.old_price),
     unit: (pf.unit||'').trim(),
     min_price: (pf.min_price===''||pf.min_price==null) ? 0 : Number(pf.min_price),
-    wholesale_price: (pf.wholesale_price===''||pf.wholesale_price==null) ? 0 : Number(pf.wholesale_price),
-    wholesale_min_qty: (pf.wholesale_min_qty===''||pf.wholesale_min_qty==null) ? 0 : Number(pf.wholesale_min_qty),
+    wholesale_tiers: tiersOut,
     images: pf.images || [],
     attributes: attributes,
   };

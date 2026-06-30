@@ -14,6 +14,7 @@ Kerakli paketlar:  fastapi  uvicorn[standard]  httpx
 """
 import os
 import html
+import json
 import hashlib
 import logging
 import asyncio
@@ -3838,6 +3839,11 @@ class AttrItem(BaseModel):
     label: Optional[str] = None
 
 
+class WholesaleTier(BaseModel):
+    min_qty: int
+    price: float
+
+
 class ProductIn(BaseModel):
     name: str
     price: float
@@ -3847,8 +3853,9 @@ class ProductIn(BaseModel):
     old_price: Optional[float] = None  # chegirma: eski (chizilgan) narx
     unit: Optional[str] = None  # #20 — o'lchov birligi (dona/kg/litr/metr...)
     min_price: Optional[float] = None  # #8 — MAXFIY oxirgi narx (savdolashish floor'i)
-    wholesale_price: Optional[float] = None  # optom (ulgurji) dona narxi
-    wholesale_min_qty: Optional[int] = None  # optom narx amal qiladigan minimal son
+    wholesale_price: Optional[float] = None  # eski yagona zina (moslik)
+    wholesale_min_qty: Optional[int] = None  # eski yagona zina (moslik)
+    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom zinalari (bir nechta)
     image_url: Optional[str] = None  # eski: bitta file_id (moslik uchun)
     images: Optional[List[str]] = None  # galereya: file_id ro'yxati (1-chi = asosiy)
     attributes: Optional[List[AttrItem]] = None  # mahsulot atributlari (klassik/AI)
@@ -3883,25 +3890,60 @@ def _images_list(p):
     return None
 
 
-def _wholesale_fields(price, wp, wq):
-    """Optom narx/min son validatsiyasi -> {'wholesale_price', 'wholesale_min_qty'}.
-    Ikkalasi to'g'ri bo'lsa yoqiladi; ikkalasi bo'sh/0 bo'lsa optom O'CHIQ (NULL).
-    Noto'g'ri (faqat bittasi, min < 2, yoki optom narx >= dona narx) -> 400 bad_wholesale."""
+_MAX_WHOLESALE_TIERS = 6
+
+
+def _wholesale_fields(price, tiers, wp, wq):
+    """Optom narx fieldlarini validatsiya qilib qaytaradi:
+    {'wholesale_tiers' (JSON yoki None), 'wholesale_price', 'wholesale_min_qty' (eski yagona — moslik)}.
+
+    tiers (List[WholesaleTier]) berilsa — KO'P ZINA rejimi: har zina min>=2, 0<price<dona narx;
+    min QAT'IY o'sib, narx QAT'IY kamayib borishi shart; ko'pi bilan 6 zina. Bo'sh ro'yxat = o'chiq.
+    tiers None bo'lsa — eski yagona zina (wp/wq) bilan ishlaydi (orqaga moslik).
+    Noto'g'ri -> 400 bad_wholesale / wholesale_not_cheaper."""
+    pr_listed = float(price) if price not in (None, "") else None
+    if tiers is not None:
+        items = []
+        try:
+            for t in tiers:
+                items.append((int(t.min_qty), float(t.price)))
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(status_code=400, detail="bad_wholesale")
+        if not items:
+            return {"wholesale_tiers": None, "wholesale_price": None, "wholesale_min_qty": None}
+        if len(items) > _MAX_WHOLESALE_TIERS:
+            raise HTTPException(status_code=400, detail="bad_wholesale")
+        items.sort(key=lambda x: x[0])
+        prev_min, prev_price = 0, None
+        for m, p in items:
+            if m < 2 or p <= 0:
+                raise HTTPException(status_code=400, detail="bad_wholesale")
+            if pr_listed is not None and p >= pr_listed:
+                raise HTTPException(status_code=400, detail="wholesale_not_cheaper")
+            if m <= prev_min:
+                raise HTTPException(status_code=400, detail="bad_wholesale")   # min qat'iy o'sishi kerak
+            if prev_price is not None and p >= prev_price:
+                raise HTTPException(status_code=400, detail="bad_wholesale")   # narx qat'iy kamayishi kerak
+            prev_min, prev_price = m, p
+        js = json.dumps([{"min": m, "price": p} for m, p in items])
+        entry = items[0]   # eski yagona ustunlarni eng past zina bilan sinxronlaymiz (moslik)
+        return {"wholesale_tiers": js, "wholesale_price": float(entry[1]), "wholesale_min_qty": int(entry[0])}
+    # --- Orqaga moslik: yagona zina (wp/wq) ---
     try:
         has_wp = wp is not None and float(wp) > 0
         has_wq = wq is not None and int(wq) > 0
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="bad_wholesale")
     if not has_wp and not has_wq:
-        return {"wholesale_price": None, "wholesale_min_qty": None}   # o'chiq
+        return {"wholesale_tiers": None, "wholesale_price": None, "wholesale_min_qty": None}   # o'chiq
     if not (has_wp and has_wq):
         raise HTTPException(status_code=400, detail="bad_wholesale")   # ikkalasi ham kerak
-    wp = float(wp); wq = int(wq)
+    wp, wq = float(wp), int(wq)
     if wq < 2:
-        raise HTTPException(status_code=400, detail="bad_wholesale")   # min kamida 2
-    if price is not None and wp >= float(price):
-        raise HTTPException(status_code=400, detail="wholesale_not_cheaper")  # optom narx arzon bo'lishi shart
-    return {"wholesale_price": wp, "wholesale_min_qty": wq}
+        raise HTTPException(status_code=400, detail="bad_wholesale")
+    if pr_listed is not None and wp >= pr_listed:
+        raise HTTPException(status_code=400, detail="wholesale_not_cheaper")
+    return {"wholesale_tiers": None, "wholesale_price": wp, "wholesale_min_qty": wq}
 
 
 async def _notify_admins_moderation(pid, name, seller, mod):
@@ -3998,7 +4040,7 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
         fields["unit"] = p.unit.strip()[:20]
     if p.min_price is not None:
         fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
-    fields.update(_wholesale_fields(p.price, p.wholesale_price, p.wholesale_min_qty))
+    fields.update(_wholesale_fields(p.price, p.wholesale_tiers, p.wholesale_price, p.wholesale_min_qty))
     try:
         db.update_product_fields(pid, **fields)
     except Exception as e:
@@ -4019,8 +4061,9 @@ class ProductEdit(BaseModel):
     old_price: Optional[float] = None
     unit: Optional[str] = None   # #20 — o'lchov birligi
     min_price: Optional[float] = None   # #8 — maxfiy oxirgi narx
-    wholesale_price: Optional[float] = None   # optom (ulgurji) dona narxi
-    wholesale_min_qty: Optional[int] = None   # optom narx amal qiladigan minimal son
+    wholesale_price: Optional[float] = None   # eski yagona zina (moslik)
+    wholesale_min_qty: Optional[int] = None   # eski yagona zina (moslik)
+    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom zinalari (bir nechta)
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
     attributes: Optional[List[AttrItem]] = None
@@ -4056,11 +4099,11 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
         fields["unit"] = p.unit.strip()[:20] or None
     if p.min_price is not None:
         fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
-    # Optom narx — berilgan bo'lsa (bittasi bo'lsa ham) validatsiya bilan yangilaymiz.
+    # Optom narx — berilgan bo'lsa (zinalar yoki eski yagona) validatsiya bilan yangilaymiz.
     # Amaldagi dona narx = yangi narx (berilgan bo'lsa) yoki mavjud narx.
-    if p.wholesale_price is not None or p.wholesale_min_qty is not None:
+    if p.wholesale_tiers is not None or p.wholesale_price is not None or p.wholesale_min_qty is not None:
         eff_price = fields.get("price", prod.get("price"))
-        fields.update(_wholesale_fields(eff_price, p.wholesale_price, p.wholesale_min_qty))
+        fields.update(_wholesale_fields(eff_price, p.wholesale_tiers, p.wholesale_price, p.wholesale_min_qty))
     # #5 — TAHRIRDA ham moderatsiya: nom/tavsif o'zgargan bo'lsa qayta tekshiramiz.
     # Taqiqlangan bo'lsa darhol bloklaymiz (active'dan mod_blocked'ga). Toza bo'lsa
     # statusga tegmaymiz (avval bloklangan bo'lsa admin o'zi tasdiqlaydi).

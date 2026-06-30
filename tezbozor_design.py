@@ -1,5 +1,6 @@
 """TezBozor — dizayn yordamchilari (matn formatlash, status emojilari)"""
 import re
+import json
 from datetime import datetime, timezone, timedelta
 
 
@@ -41,11 +42,11 @@ def fmt_price(uzs):
         return f"{uzs} so'm"
 
 
-def wholesale_info(product):
-    """Mahsulotning optom (ulgurji) sozlamasini xavfsiz o'qiydi.
-    Optom YOQILGAN deb hisoblanadi: wholesale_price > 0, wholesale_min_qty >= 2,
-    va optom narx dona narxidan PAST. Aks holda enabled=False (xulq o'zgarmaydi).
-    Qaytaradi: {enabled, listed, price (optom), min_qty}."""
+def wholesale_tiers(product):
+    """Mahsulotning optom (ulgurji) narx ZINALARINI qaytaradi: (listed, [{'min','price'}, ...]).
+    Zinalar min bo'yicha o'sib tartiblangan. Manba: `wholesale_tiers` (JSON ro'yxat) yoki
+    eski yagona `wholesale_price`/`wholesale_min_qty` (moslik). Faqat to'g'ri zinalar:
+    price>0, min>=2, price<listed; takror min olib tashlanadi."""
     try:
         p = dict(product)
     except Exception:
@@ -54,31 +55,50 @@ def wholesale_info(product):
         listed = float(p.get("price") or 0)
     except (ValueError, TypeError):
         listed = 0.0
-    wp, wq = p.get("wholesale_price"), p.get("wholesale_min_qty")
-    try:
-        wp = float(wp) if wp not in (None, "") else 0.0
-    except (ValueError, TypeError):
-        wp = 0.0
-    try:
-        wq = int(wq) if wq not in (None, "") else 0
-    except (ValueError, TypeError):
-        wq = 0
-    enabled = (wp > 0 and wq >= 2 and listed > 0 and wp < listed)
-    return {"enabled": enabled, "listed": listed,
-            "price": (wp if enabled else listed), "min_qty": (wq if enabled else 0)}
+    raw = p.get("wholesale_tiers")
+    items = []
+    if raw:
+        try:
+            data = raw if isinstance(raw, list) else json.loads(raw)
+            for t in data:
+                items.append((int(t.get("min")), float(t.get("price"))))
+        except Exception:
+            items = []
+    if not items:   # eski yagona zina (moslik)
+        try:
+            wp = float(p.get("wholesale_price") or 0)
+            wq = int(p.get("wholesale_min_qty") or 0)
+            if wp > 0 and wq >= 2:
+                items = [(wq, wp)]
+        except (ValueError, TypeError):
+            items = []
+    clean, seen = [], set()
+    for m, pr in sorted(items, key=lambda x: x[0]):
+        if m < 2 or pr <= 0 or (listed > 0 and pr >= listed) or m in seen:
+            continue
+        seen.add(m)
+        clean.append({"min": m, "price": pr})
+    return listed, clean
+
+
+def wholesale_info(product):
+    """Optom holati: {enabled, listed, tiers:[...], entry (eng past min), best (eng past narx)}."""
+    listed, tiers = wholesale_tiers(product)
+    return {"enabled": bool(tiers), "listed": listed, "tiers": tiers,
+            "entry": (tiers[0] if tiers else None),
+            "best": (tiers[-1] if tiers else None)}
 
 
 def effective_unit_price(product, qty):
-    """Berilgan son uchun amaldagi DONA narxi: qty optom minimumiga yetsa optom narx,
-    aks holda oddiy (listed) narx. Barcha o'lchov birliklari uchun ishlaydi."""
-    w = wholesale_info(product)
+    """Berilgan son uchun amaldagi DONA narxi: qty yetadigan zinalardan ENG ARZONI;
+    hech bir zinaga yetmasa oddiy (listed) narx. Barcha o'lchov birliklari uchun."""
+    listed, tiers = wholesale_tiers(product)
     try:
         q = int(qty)
     except (ValueError, TypeError):
         q = 0
-    if w["enabled"] and q >= w["min_qty"]:
-        return w["price"]
-    return w["listed"]
+    applicable = [t["price"] for t in tiers if q >= t["min"]]
+    return min(applicable) if applicable else listed
 
 
 def fmt_phone(num):

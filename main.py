@@ -7920,11 +7920,16 @@ async def _build_ad_caption(product, length="long"):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
-    # Optom (ulgurji) taklifi — yoqilgan bo'lsa reklamada alohida ko'rsatamiz.
+    # Optom (ulgurji) taklifi — yoqilgan bo'lsa reklamada zinalarni ko'rsatamiz.
     _w = wholesale_info(product)
     _unit = product.get('unit') or 'dona'
-    wholesale_line = (f"\n📦 Optom: {_w['min_qty']}+ {html.escape(str(_unit))} — "
-                      f"{html.escape(fmt_price(_w['price']))}") if _w['enabled'] else ""
+    _u_esc = html.escape(str(_unit))
+    if _w['enabled']:
+        _tier_txt = ", ".join(f"{t['min']}+ {_u_esc} — {html.escape(fmt_price(t['price']))}"
+                              for t in _w['tiers'])
+        wholesale_line = f"\n📦 Optom: {_tier_txt}"
+    else:
+        wholesale_line = ""
 
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
@@ -7955,8 +7960,8 @@ async def _build_ad_caption(product, length="long"):
         parse_mode = None
         # Optom taklifini AI matniga ham kafolatli qo'shamiz (oddiy matn).
         if _w['enabled']:
-            caption = caption.rstrip() + (f"\n\n📦 Optom narx: {_w['min_qty']}+ {_unit} olsangiz — "
-                                          f"{fmt_price(_w['price'])}")
+            _tiers_plain = ", ".join(f"{t['min']}+ {_unit} — {fmt_price(t['price'])}" for t in _w['tiers'])
+            caption = caption.rstrip() + f"\n\n📦 Optom narx: {_tiers_plain}"
     return caption, parse_mode
 
 
