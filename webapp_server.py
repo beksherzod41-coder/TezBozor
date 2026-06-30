@@ -1448,6 +1448,14 @@ def api_me_pending(authorization: str = Header(None)):
                 items.append({"key": "admin_disputes", "n": len(disp), "tab": "admin"})
         except Exception:
             pass
+        # Admin tasdig'ini kutayotgan to'lovlar (boost/Pro dev-confirm) — tasdiqlanguncha
+        # statik badge bo'lib qoladi (ochilganda yo'qolmaydi).
+        try:
+            pays = db.get_payments_admin(state="pending", limit=100)
+            if pays:
+                items.append({"key": "admin_payments", "n": len(pays), "tab": "admin"})
+        except Exception:
+            pass
 
     return {"total": sum(i["n"] for i in items), "items": items}
 
