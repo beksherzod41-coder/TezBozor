@@ -831,12 +831,15 @@ def _strip_hashtags(text: str) -> str:
 
 
 async def generate_ad_caption(*, name, price_text, category="", description="",
-                              shop="", location="", region="", lang="uz", length="long") -> str:
+                              shop="", location="", region="", lang="uz", length="long",
+                              extra=None) -> str:
     """Mahsulotdan kelib chiqib takrorlanmas reklama matni (caption) yaratadi.
 
     region — viloyat → tuman (masalan "Surxondaryo viloyati → Muzrabot"). Manzildan
     alohida beriladi va reklama matnida DOIM ko'rsatilishi kerak.
     length — 'long' (uzun, batafsil) yoki 'short' (qisqa, lo'nda). Sotuvchi tanlaydi.
+    extra — qo'shimcha faktlar dict (masalan optom: pachka, ranglar, razmer; yoki
+    kategoriya atributlari). Tartibni saqlagan holda faktlarga qo'shiladi.
 
     Xato yoki AI o'chiq bo'lsa — None qaytaradi (chaqiruvchi oddiy matnga qaytadi)."""
     if not is_enabled():
@@ -848,6 +851,10 @@ async def generate_ad_caption(*, name, price_text, category="", description="",
         "nom": name, "narx": price_text, "kategoriya": category,
         "tavsif": description, "do'kon": shop, hudud_key: region, "joylashuv": location,
     }
+    # Qo'shimcha faktlar (optom/kategoriya atributlari) — bo'sh bo'lmaganlari qo'shiladi
+    for _k, _v in (extra or {}).items():
+        if _v:
+            facts[str(_k)] = _v
     facts = {k: v for k, v in facts.items() if v}
     user_msg = ("Mahsulot ma'lumotlari:\n" if lang == 'uz' else "Данные о товаре:\n") + \
                "\n".join(f"- {k}: {v}" for k, v in facts.items())
@@ -1937,6 +1944,84 @@ async def gift_advisor(*, recipient="", occasion="", budget=None, notes="",
     except Exception as e:
         log.warning(f"Sovg'a yordamchisi xato: {e}")
         return None
+
+
+# ============================================================
+# BEKOR QILISH SABABLARI — AI taklif (kontekstli)
+# ============================================================
+_CANCEL_SYSTEM = {
+    'uz': (
+        "Sen — onlayn bozor yordamchisisan. Foydalanuvchi buyurtmani BEKOR qilmoqchi. "
+        "Uning o'rni (xaridor yoki sotuvchi), mahsulot va holatga qarab 4 ta QISQA, "
+        "tabiiy, real bekor qilish sababini taklif qil. Har biri 2-5 so'z, bitta jumla, "
+        "nuqtasiz. Bir-birini takrorlamasin. Faqat JSON qaytar: "
+        '{"reasons": ["sabab1", "sabab2", "sabab3", "sabab4"]}. '
+        "Sodda, jonli o'zbek tilida. Emoji ishlatma."
+    ),
+    'ru': (
+        "Ты — помощник онлайн-маркетплейса. Пользователь хочет ОТМЕНИТЬ заказ. "
+        "С учётом его роли (покупатель или продавец), товара и статуса предложи 4 КОРОТКИЕ, "
+        "естественные, реальные причины отмены. Каждая 2-5 слов, одно предложение, без точки. "
+        "Не повторяй. Верни только JSON: "
+        '{"reasons": ["причина1", "причина2", "причина3", "причина4"]}. '
+        "Простой живой русский. Без эмодзи."
+    ),
+}
+
+
+async def suggest_cancel_reasons(*, party, product_name="", status="", lang="uz") -> list:
+    """Buyurtmani bekor qilish uchun 4 ta kontekstli sabab taklif qiladi (#5 davomi).
+    party: 'buyer' | 'seller'. Qaytaradi [str, ...] yoki [] (AI o'chiq/xato)."""
+    if not is_enabled():
+        return []
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    role_uz = "xaridor" if party == "buyer" else "sotuvchi"
+    role_ru = "покупатель" if party == "buyer" else "продавец"
+    role_label = role_uz if lng == 'uz' else role_ru
+    role_hdr = "Mening o'rnim" if lng == 'uz' else "Моя роль"
+    prod_hdr = "Mahsulot" if lng == 'uz' else "Товар"
+    stat_hdr = "Holat" if lng == 'uz' else "Статус"
+    parts = [f"{role_hdr}: {role_label}"]
+    if product_name:
+        parts.append(f"{prod_hdr}: {str(product_name)[:80]}")
+    if status:
+        parts.append(f"{stat_hdr}: {status}")
+    user_msg = "\n".join(parts)
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [
+            {"role": "system", "content": _CANCEL_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 160,
+        "temperature": 0.5,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"Bekor sabab API xatosi {resp.status_code}")
+                return []
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            parsed = json.loads(m.group(0) if m else content)
+            arr = parsed.get("reasons") or []
+            if isinstance(arr, str):
+                arr = [arr]
+            out, seen = [], set()
+            for r in arr:
+                s = str(r).strip().strip('.').strip()[:80]
+                if s and s.lower() not in seen:
+                    seen.add(s.lower())
+                    out.append(s)
+            return out[:4]
+    except Exception as e:
+        log.warning(f"Bekor sabab taklif xato: {e}")
+        return []
 
 
 # ============================================================

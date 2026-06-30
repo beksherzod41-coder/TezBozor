@@ -29,6 +29,7 @@ except Exception:  # Pillow o'rnatilmagan
 CANVAS = 1080                 # reklama kvadrati o'lchami (px)
 ACCENT = (255, 71, 51)       # asosiy urg'u rangi (yorqin qizil-to'q sariq)
 ACCENT_DARK = (200, 40, 25)
+OPTOM_COLOR = (22, 163, 74)  # optom rozetkasi — yashil (ulgurji/tejam belgisi)
 
 # Shrift nomzodlari — server (Linux/PythonAnywhere) va Windows dev uchun
 _BOLD_CANDIDATES = [
@@ -116,13 +117,15 @@ def _contain(img, size):
     return img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
 
 
-def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text=""):
+def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="", optom_text=""):
     """Reklama rasmini yasaydi va JPEG bytes qaytaradi. Xato bo'lsa — None.
 
     image_bytes — Telegram'dan yuklab olingan mahsulot rasmi (bytes).
     price_text  — masalan "250 000 so'm" (emojisiz).
     badge_text  — masalan "YANGI" yoki "ORIGINAL" (emojisiz, qisqa).
     shop_text   — do'kon nomi (emojisiz).
+    optom_text  — optom rozetkasi matni (masalan "OPTOM · 1 PACHKA = 6 DONA");
+                  bo'sh bo'lsa rozetka chizilmaydi. Yuqori O'NG burchakda, yashil.
     """
     if not _PIL_OK or not image_bytes:
         return None
@@ -130,6 +133,7 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text=""):
     price_text = _norm_spaces(price_text)
     badge_text = _norm_spaces(badge_text)
     shop_text = _norm_spaces(shop_text)
+    optom_text = _norm_spaces(optom_text)
     try:
         src = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
@@ -159,6 +163,22 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text=""):
             by1 = by0 + 52 + pad_y
             _rounded(draw, [bx0, by0, bx1, by1], 18, ACCENT)
             draw.text((bx0 + pad_x, by0 + pad_y // 2), bt, font=bfont, fill=(255, 255, 255))
+
+        # 3b) OPTOM rozetkasi — yuqori O'NG burchak (yashil; dona savdodan ajralib tursin)
+        ot = (optom_text or "").strip().upper()[:30]
+        if ot:
+            ofont = _fit_font(draw, ot, True, int(CANVAS * 0.62), 46, min_size=26)
+            pad_x, pad_y = 26, 15
+            tw = _text_w(draw, ot, ofont)
+            obbox = draw.textbbox((0, 0), ot, font=ofont)
+            oh = obbox[3] - obbox[1]
+            ox1 = CANVAS - margin
+            oy0 = margin
+            ox0 = ox1 - tw - pad_x * 2
+            oy1 = oy0 + oh + pad_y * 2
+            _rounded(draw, [ox0 + 5, oy0 + 7, ox1 + 5, oy1 + 7], 16, (0, 0, 0, 110))  # soya
+            _rounded(draw, [ox0, oy0, ox1, oy1], 16, OPTOM_COLOR)
+            draw.text((ox0 + pad_x, oy0 + pad_y - obbox[1]), ot, font=ofont, fill=(255, 255, 255))
 
         # 4) Narx yorlig'i — pastki chap burchak (eng yirik, urg'uli)
         pt = (price_text or "").strip()

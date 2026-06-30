@@ -409,6 +409,7 @@
         <div class="filterbar" id="filterbar">
           <div class="seg2" id="catMode">
             <div class="opt on" data-mode="products">🛍 Mahsulotlar</div>
+            <div class="opt" data-mode="optom">🏷 Optom</div>
             <div class="opt" data-mode="shops">🏪 Do'konlar</div>
           </div>
           <span class="fdiv"></span>
@@ -710,7 +711,7 @@ const I18N = {
   nav_shop:{uz:"Do'kon",ru:"Магазин"}, nav_profile:{uz:"Profil",ru:"Профиль"},
   search_products:{uz:"Mahsulot qidirish...",ru:"Поиск товаров..."},
   search_shops:{uz:"Do'kon qidirish...",ru:"Поиск магазинов..."},
-  tab_products:{uz:"🛍 Mahsulotlar",ru:"🛍 Товары"}, tab_shops:{uz:"🏪 Do'konlar",ru:"🏪 Магазины"},
+  tab_products:{uz:"🛍 Mahsulotlar",ru:"🛍 Товары"}, tab_optom:{uz:"🏷 Optom",ru:"🏷 Опт"}, tab_shops:{uz:"🏪 Do'konlar",ru:"🏪 Магазины"},
   all:{uz:"Hammasi",ru:"Все"}, loading:{uz:"Yuklanmoqda...",ru:"Загрузка..."},
   nothing_found:{uz:"Hech narsa topilmadi",ru:"Ничего не найдено"},
   try_other:{uz:"Boshqa so'rov yoki kategoriyani sinab ko'ring",ru:"Попробуйте другой запрос или категорию"},
@@ -839,6 +840,13 @@ const I18N = {
   cancel_order:{uz:"❌ Bekor qilish",ru:"❌ Отменить"}, rate_order:{uz:"⭐ Baholash",ru:"⭐ Оценить"},
   req_cancel:{uz:"❌ Bekor qilishni so'rash",ru:"❌ Запросить отмену"},
   cancel_reason_ph:{uz:"Bekor qilish sababi...",ru:"Причина отмены..."},
+  cancel_pick_title:{uz:"❌ Bekor qilish sababi",ru:"❌ Причина отмены"},
+  cancel_pick_sub:{uz:"Sababni tanlang yoki o'zingiz yozing",ru:"Выберите причину или напишите свою"},
+  cancel_ai_loading:{uz:"AI sabablarni tayyorlamoqda…",ru:"ИИ подбирает причины…"},
+  cancel_ai_title:{uz:"AI taklif qilgan sabablar",ru:"Причины от ИИ"},
+  cancel_send_own:{uz:"✓ Shu sabab bilan bekor qilish",ru:"✓ Отменить с этой причиной"},
+  cancel_need_text:{uz:"Iltimos, sababni yozing yoki ro'yxatdan tanlang.",ru:"Пожалуйста, напишите причину или выберите из списка."},
+  variant_lines:{uz:"Variantlar",ru:"Варианты"},
   cancel_wait:{uz:"⏳ Bekor so'rovingiz yuborildi — sotuvchi javobini kuting.",ru:"⏳ Запрос на отмену отправлен — ждите ответа продавца."},
   cancel_incoming:{uz:"🚫 Sotuvchi bekor qilishni so'radi:",ru:"🚫 Продавец запросил отмену:"},
   agree_cancel:{uz:"✅ Roziman (bekor)",ru:"✅ Согласен (отмена)"}, deny_cancel:{uz:"⚖️ Rozi emasman",ru:"⚖️ Не согласен"},
@@ -1212,7 +1220,7 @@ const I18N = {
   sp_deleted_at:{uz:"O'chirilgan",ru:"Удалён"},
   // mahsulot formasi
   sp_edit_product:{uz:"Mahsulotni tahrirlash",ru:"Редактировать товар"}, sp_new_product:{uz:"Yangi mahsulot",ru:"Новый товар"},
-  sp_images:{uz:"Rasmlar ({n}/4 — 1-chi asosiy)",ru:"Фото ({n}/4 — 1-е основное)"}, sp_main:{uz:"Asosiy",ru:"Основное"},
+  sp_images:{uz:"Rasmlar ({n}/{m} — 1-chi asosiy)",ru:"Фото ({n}/{m} — 1-е основное)"}, sp_main:{uz:"Asosiy",ru:"Основное"},
   sp_name:{uz:"Nomi",ru:"Название"}, sp_name_ph:{uz:"Mahsulot nomi",ru:"Название товара"},
   sp_price:{uz:"Narxi (so'm)",ru:"Цена (сум)"}, sp_category:{uz:"Kategoriya",ru:"Категория"},
   sp_stock:{uz:"Zahira (bo'sh = cheksiz)",ru:"Запас (пусто = безлимит)"}, sp_stock_ph:{uz:"Cheksiz",ru:"Безлимит"},
@@ -1232,6 +1240,10 @@ const I18N = {
   sp_pending_owner:{uz:"⏳ Mahsulot do'kon EGASI tasdig'ini kutmoqda. Tasdiqlangach sotuvga chiqadi.",ru:"⏳ Товар ожидает подтверждения ВЛАДЕЛЬЦА магазина. После одобрения он будет опубликован."},
   sp_min_price:{uz:"🤫 Maxfiy oxirgi narx (savdolashish)",ru:"🤫 Секретная мин. цена (торг)"},
   sp_min_price_hint:{uz:"Faqat siz ko'rasiz. AI shu narxdan pastga tushmay xaridor bilan savdolashadi. Bo'sh = savdolashish o'chiq.",ru:"Видите только вы. AI торгуется, не опускаясь ниже. Пусто = торг выключен."},
+  sp_min_order:{uz:"📦 Buyurtma uchun eng kam son (ixtiyoriy)",ru:"📦 Мин. количество для заказа (необязательно)"},
+  sp_min_order_hint:{uz:"Xaridordan TALAB qilinadigan eng kam JAMI son (buyurtma chegarasi). Optom zinalar bunga TA'SIR qilmaydi — ular faqat chegirma (kam olgan dona narxida). Bo'sh qoldiring — xaridor 1 donadan ham oladi.",ru:"Минимальное ИТОГО, которое требуется от покупателя (порог заказа). Оптовые ступени на это НЕ влияют — это только скидка. Оставьте пустым — покупатель сможет взять даже 1 шт."},
+  sp_min_order_none:{uz:"Hozir: minimal yo'q — xaridor 1 donadan ham oladi (optom = faqat chegirma)",ru:"Сейчас: без минимума — можно даже 1 шт (опт = только скидка)"},
+  sp_min_order_ph:{uz:"masalan 50",ru:"например 50"},
   sp_wholesale:{uz:"📦 Optom (ulgurji) narx — zinalar",ru:"📦 Оптовая цена — ступени"},
   sp_wholesale_hint:{uz:"Ko'p olganga arzonroq. Bir nechta zina qo'shing — masalan: 10+ dona → 21 000, 20+ → 19 000, 50+ → 18 000. Son ko'paygani sayin narx pasaysin. Bo'sh = optom yo'q.",ru:"Дешевле при большом объёме. Добавьте несколько ступеней — напр.: 10+ → 21 000, 20+ → 19 000, 50+ → 18 000. Чем больше, тем дешевле. Пусто = без опта."},
   sp_wholesale_price_lbl:{uz:"Dona narxi",ru:"Цена за ед."},
@@ -1242,6 +1254,40 @@ const I18N = {
   sp_wholesale_none:{uz:"Optom narx yo'q. Zina qo'shish uchun pastdagi tugmani bosing.",ru:"Опта нет. Нажмите кнопку ниже, чтобы добавить ступень."},
   sp_wholesale_max:{uz:"Ko'pi bilan 6 ta zina.",ru:"Максимум 6 ступеней."},
   sp_wholesale_err:{uz:"Har zina: narx dona narxidan past, min son ≥ 2; son oshgani sayin narx pasayishi shart.",ru:"Каждая ступень: цена ниже обычной, мин. кол-во ≥ 2; с ростом кол-ва цена должна падать."},
+  // ── Dona / Optom savdo turi ──
+  sp_mode_title:{uz:"Qanday sotasiz?",ru:"Как продаёте?"},
+  sp_mode_dona:{uz:"🛍 Donalab",ru:"🛍 Поштучно"},
+  sp_mode_dona_d:{uz:"Bittalab sotiladi. Xaridor rang/razmer va sonni tanlaydi. Savdolashish bo'ladi.",ru:"Продажа по штуке. Покупатель выбирает цвет/размер и количество. Возможен торг."},
+  sp_mode_optom:{uz:"📦 Optom (pachka)",ru:"📦 Опт (упаковка)"},
+  sp_mode_optom_d:{uz:"Pachkada sotiladi. Xaridor rang bo'yicha pachka soni tanlaydi. Razmer — yozma (aralash). Savdolashish yo'q.",ru:"Продажа упаковками. Покупатель выбирает кол-во упаковок по цвету. Размеры — текстом. Без торга."},
+  sp_mode_badge_dona:{uz:"🛍 Donalab",ru:"🛍 Поштучно"}, sp_mode_badge_optom:{uz:"📦 Optom",ru:"📦 Опт"},
+  // ── Optom forma maydonlari ──
+  sp_price_optom:{uz:"1 pachka narxi",ru:"Цена за 1 упаковку"},
+  sp_pack_size:{uz:"1 pachkada nechta dona?",ru:"Сколько штук в 1 упаковке?"},
+  sp_pack_size_hint:{uz:"Masalan: 1 pachka = 12 juft. Xaridor shu pachka soniga buyurtma beradi.",ru:"Например: 1 упаковка = 12 пар. Покупатель заказывает по упаковкам."},
+  sp_pack_size_ph:{uz:"masalan 12",ru:"например 12"},
+  sp_size_note:{uz:"Razmerlar (yozma, ixtiyoriy)",ru:"Размеры (текст, необязательно)"},
+  sp_size_note_hint:{uz:"Pachka ichidagi razmerlar aralash. Bir marta yozing — barcha ranglarga amal qiladi. Masalan: 36–41 standart.",ru:"Размеры в упаковке смешанные. Напишите один раз — для всех цветов. Напр.: 36–41 стандарт."},
+  sp_size_note_ph:{uz:"masalan: 36–41 standart, har pachkada aralash",ru:"напр.: 36–41 стандарт, в упаковке вперемешку"},
+  sp_colors_list:{uz:"Ranglar (vergul bilan)",ru:"Цвета (через запятую)"},
+  sp_colors_list_hint:{uz:"Pachkada mavjud ranglarni sanang — xaridor har rangdan necha pachka olishini tanlaydi. Bo'sh = rang tanlovsiz.",ru:"Перечислите цвета — покупатель выберет, сколько упаковок каждого цвета. Пусто = без выбора цвета."},
+  sp_colors_list_ph:{uz:"masalan: Oq, Qora, Sariq",ru:"напр.: Белый, Чёрный, Жёлтый"},
+  sp_packtier:{uz:"📦 Pachka-zina narx (ixtiyoriy)",ru:"📦 Ступенчатая цена упаковки (необязательно)"},
+  sp_packtier_hint:{uz:"Ko'p pachka olganga arzonroq. Masalan: 10+ pachka → 190 000, 20+ → 180 000. Bo'sh = bitta narx.",ru:"Дешевле при большом числе упаковок. Напр.: 10+ → 190 000, 20+ → 180 000. Пусто = одна цена."},
+  sp_packtier_min_lbl:{uz:"…dan (pachka soni)",ru:"от (кол-во упак.)"},
+  sp_packtier_price_lbl:{uz:"Pachka narxi",ru:"Цена упаковки"},
+  sp_packtier_none:{uz:"Pachka-zina yo'q — barcha pachkalar bir narxda.",ru:"Без ступеней — все упаковки по одной цене."},
+  sp_min_pack:{uz:"📦 Eng kam pachka soni (ixtiyoriy)",ru:"📦 Мин. число упаковок (необязательно)"},
+  sp_min_pack_hint:{uz:"Buyurtma uchun talab qilinadigan eng kam JAMI pachka. Bo'sh = 1 pachkadan.",ru:"Минимальное ИТОГО упаковок для заказа. Пусто = от 1 упаковки."},
+  sp_min_pack_none:{uz:"Hozir: minimal yo'q — 1 pachkadan ham oladi",ru:"Сейчас: без минимума — можно от 1 упаковки"},
+  sp_pack_size_req:{uz:"1 pachkada nechta dona borligini kiriting.",ru:"Укажите, сколько штук в 1 упаковке."},
+  // ── Optom checkout (xaridor) ──
+  co_pack_unit:{uz:"pachka",ru:"упак."},
+  co_pack_of:{uz:"1 pachka = {n} dona",ru:"1 упаковка = {n} шт"},
+  co_pick_packs:{uz:"Rang bo'yicha pachka sonini tanlang",ru:"Выберите кол-во упаковок по цвету"},
+  co_sizes_note:{uz:"📏 Razmerlar: {s}",ru:"📏 Размеры: {s}"},
+  co_total_pieces:{uz:"Jami: {n} dona",ru:"Итого: {n} шт"},
+  optom_order_btn:{uz:"📦 Optom olish",ru:"📦 Купить опт"},
   ws_offer:{uz:"📦 {n}+ {unit} — {p}/{unit}",ru:"📦 {n}+ {unit} — {p}/{unit}"},
   ws_applied:{uz:"✅ Optom narx qo'llandi · {p}/{unit}",ru:"✅ Применена оптовая цена · {p}/{unit}"},
   ws_nudge:{uz:"Yana {k} {unit} qo'shsangiz — {p}/{unit} (jami {s} tejaysiz)",ru:"Добавьте ещё {k} {unit} — {p}/{unit} (сэкономите {s})"},
@@ -1249,6 +1295,15 @@ const I18N = {
   ws_title:{uz:"Optom narxlar",ru:"Оптовые цены"},
   ws_next:{uz:"Yana {k} {unit} qo'shsangiz — {p}/{unit}",ru:"Добавьте ещё {k} {unit} — {p}/{unit}"},
   ws_unit_default:{uz:"dona",ru:"шт"},
+  vp_pick:{uz:"Hil va sonni tanlang",ru:"Выберите вид и количество"},
+  vp_size:{uz:"Razmer",ru:"Размер"},
+  vp_color:{uz:"Rang",ru:"Цвет"},
+  vp_add:{uz:"➕ Qo'shish",ru:"➕ Добавить"},
+  vp_stock_full:{uz:"Omborda shuncha mavjud emas",ru:"Столько нет в наличии"},
+  vp_min:{uz:"Optom: kamida {n} {unit}",ru:"Опт: минимум {n} {unit}"},
+  vp_need_more:{uz:"Buyurtma uchun yana {n} {unit} qo'shing",ru:"Добавьте ещё {n} {unit} для заказа"},
+  vp_size_needed:{uz:"Tanlangan har bir hil uchun razmerni belgilang",ru:"Укажите размер для каждого выбранного вида"},
+  vp_color_needed:{uz:"Tanlangan har bir hil uchun rangni belgilang",ru:"Укажите цвет для каждого выбранного вида"},
   hag_btn:{uz:"💬 Savdolashish",ru:"💬 Поторговаться"}, hag_title:{uz:"💬 Savdolashish",ru:"💬 Торг"},
   hag_intro:{uz:"Sotuvchining AI-yordamchisi bilan savdolashing. Narx aytib taklif qiling!",ru:"Торгуйтесь с AI-помощником продавца. Предложите свою цену!"},
   hag_ph:{uz:"Masalan: Aka, 150 mingga berasizmi?",ru:"Например: Брат, за 150 отдашь?"},
@@ -1503,6 +1558,7 @@ function activeCatModeShops(){ try{ return document.querySelector('#catMode .opt
 function applyStaticI18n(){
   try{ document.getElementById('search').placeholder = activeCatModeShops()?L('search_shops'):L('search_products'); }catch(e){}
   try{ document.querySelector('#catMode .opt[data-mode=products]').textContent = L('tab_products'); }catch(e){}
+  try{ document.querySelector('#catMode .opt[data-mode=optom]').textContent = L('tab_optom'); }catch(e){}
   try{ document.querySelector('#catMode .opt[data-mode=shops]').textContent = L('tab_shops'); }catch(e){}
   const navmap={catalog:'nav_catalog',orders:'nav_orders',seller:'nav_shop',admin:'nav_admin',profile:'nav_profile'};
   document.querySelectorAll('.navitem').forEach(n=>{ const s=n.querySelector('small'); if(s&&navmap[n.dataset.tab]) s.textContent=L(navmap[n.dataset.tab]); });
@@ -1638,16 +1694,20 @@ function cardHtml(p){
   const img = p.image_url
     ? `<img src="${imgUrl(p.image_url)}" loading="lazy" onerror="this.parentNode.innerHTML='<div class=ph>🖼️</div>'">`
     : `<div class="ph">🖼️</div>`;
+  const isOptom = (p.sale_mode==='optom');
   let tag = '';
-  if(op) tag = `<span class="tag sale">${L('sale_badge')}</span>`;
+  if(isOptom) tag = `<span class="tag new" style="background:var(--accent)">${L('sp_mode_badge_optom')}</span>`;
+  else if(op) tag = `<span class="tag sale">${L('sale_badge')}</span>`;
   else if(isNew(p)) tag = `<span class="tag new">${L('new_badge')}</span>`;
+  const uSuffix = isOptom ? `<span style="font-size:11px;color:var(--hint)">/${L('co_pack_unit')}</span>`
+                          : (p.unit?`<span style="font-size:11px;color:var(--hint)">/${esc(p.unit)}</span>`:'');
   return `<div class="card" data-id="${p.id}">
       <div class="imgwrap">${img}${tag}</div>
       <div class="body">
-        <div><span class="price">${money(p.price)}</span>${p.unit?`<span style="font-size:11px;color:var(--hint)">/${esc(p.unit)}</span>`:''}${op?`<span class="oldprice">${money(op)}</span>`:''}</div>
+        <div><span class="price">${money(p.price)}</span>${uSuffix}${op?`<span class="oldprice">${money(op)}</span>`:''}</div>
         <div class="name">${esc(p.name)}</div>
         <div class="meta">${starHtml(p)} <span class="shopname">${esc(p.shop_name||'')}</span>${distBadge(p)}</div>
-        <button class="buy" data-cart="${p.id}">${L('add_to_cart')}</button>
+        <button class="buy" data-cart="${p.id}">${isOptom?L('optom_order_btn'):L('add_to_cart')}</button>
       </div>
     </div>`;
 }
@@ -1698,10 +1758,12 @@ async function loadProducts(){
   const content = document.getElementById('content');
   content.innerHTML = skeleton();
   const q = document.getElementById('search').value.trim();
+  const optom = (catMode==='optom');
   let url = '/api/products?sort=rating';
   if(q) url += '&q=' + encodeURIComponent(q);
   if(activeCat) url += '&category_id=' + activeCat;
   if(REGION_ID) url += '&region_id=' + REGION_ID;
+  if(optom) url += '&wholesale=1';
   try{
     const items = byDistance(await api(url));
     CATALOG_ITEMS = items;
@@ -1718,8 +1780,8 @@ async function loadProducts(){
       const p = CATALOG_ITEMS.find(x=>String(x.id)===b.dataset.cart);
       if(p) cartAdd(p);
     });
-    // #15 — "uy" holatida (filtrsiz) kashfiyot lentalari tepada ko'rsatiladi
-    if(!q && !activeCat && !REGION_ID) renderDiscover();
+    // #15 — "uy" holatida (filtrsiz) kashfiyot lentalari tepada ko'rsatiladi (optom bo'limida emas)
+    if(!q && !activeCat && !REGION_ID && !optom) renderDiscover();
   }catch(e){
     content.innerHTML = `<div class="empty"><span class="big">⚠️</span>${L('err')}: ${esc(e.message)}<br><small>${L('open_in_tg')}</small></div>`;
   }
@@ -1828,6 +1890,8 @@ async function openDetail(id){
     const op = oldPrice(p);
     const r = rating(p), rv = reviews(p);
     const stockOk = p.stock_count==null || p.stock_count>0;
+    // Variantli mahsulot (>1 rasm yoki razmer/rang ro'yxati) — savatga emas, to'g'ridan-to'g'ri variant-buyurtma
+    const hasVariants = (imgs.length>1) || ((p.attributes||[]).some(a=>(a.attr_key==='size'||a.attr_key==='color') && (a.attr_value||'').trim()));
     const stockPill = p.stock_count!=null
       ? (p.stock_count>0
           ? `<span class="pill stock">${L('bp_in_stock').replace('{n}', p.stock_count)}</span>`
@@ -1866,14 +1930,16 @@ async function openDetail(id){
       </div>
       <div class="buybar">
         ${p.is_own?`<button disabled>${L('bp_own_product')}</button>`
-          :(stockOk?`<div style="display:flex;gap:10px">
+          :(stockOk?(hasVariants?`<button id="buyBtn" style="width:100%">${L('bp_order_btn')}</button>`
+          :`<div style="display:flex;gap:10px">
           <button id="cartBtn" style="flex:0 0 auto;width:56px;background:var(--accent-soft);color:var(--accent);box-shadow:none">➕</button>
           <button id="buyBtn" style="flex:1">${L('bp_order_btn')}</button>
-        </div>`:`<button disabled>${L('bp_not_available')}</button>`)}
+        </div>`):`<button disabled>${L('bp_not_available')}</button>`)}
       </div>`;
     if(stockOk && !p.is_own){
       document.getElementById('buyBtn').onclick = ()=>openCheckout(p.id);
-      document.getElementById('cartBtn').onclick = ()=>{ cartAdd(p); tg.showAlert && null; };
+      const _cb=document.getElementById('cartBtn');
+      if(_cb) _cb.onclick = ()=>{ cartAdd(p); tg.showAlert && null; };
     }
     const dtc=document.getElementById('dtContact');
     if(dtc) dtc.onclick=()=>{ try{ tg.openTelegramLink('https://t.me/'+dtc.dataset.un); }catch(e){ tg.showAlert('@'+dtc.dataset.un); } };
@@ -1974,9 +2040,52 @@ function wsTiers(p){
     arr=[{min:Number(p.wholesale_min_qty), price:Number(p.wholesale_price)}];
   return arr.filter(t=>t.min>=2 && t.price>0 && (listed<=0||t.price<listed)).sort((a,b)=>a.min-b.min);
 }
+// Variant yorlig'i (hil · rang · razmer) — takror qiymatlarni olib tashlaydi
+// (optomda label=rang bo'lgani uchun "Oq · Oq" emas "Oq" chiqsin).
+function variantTag(o){
+  const parts=[];
+  [o.variant_label,o.variant_color,o.variant_size].forEach(v=>{
+    v=(v==null?'':String(v)).trim();
+    if(v && !parts.includes(v)) parts.push(v);
+  });
+  return parts.join(' · ');
+}
 function wsUnitPrice(p, qty){ const ap=wsTiers(p).filter(t=>qty>=t.min).map(t=>t.price); return ap.length?Math.min(...ap):Number(p.price||0); }
 function wsNextTier(p, qty){ for(const t of wsTiers(p)){ if(qty<t.min) return t; } return null; }
 let coProduct=null, coQty=1, coDelivery='pickup', coPayment='cash', coAddrText='', coLat=null, coLon=null;
+let coIsVariant=false, coVariants=[], coSizeOpts=[], coColorOpts=[];   // variant-buyurtma (rasm/hil + razmer + rang + son)
+// Variant-buyurtma yordamchilari.
+// Rang YOKI razmer bo'lsa: har rasm ichida kombinatsiyalar (v.combos = [{color,size,qty}]) +
+// joriy tanlov (v.dColor/v.dSize/v.dQty) "Qo'shish" bilan qo'shiladi. Aks holda: bitta son (v.qty).
+function coHasAttrs(){ return coColorOpts.length>0 || coSizeOpts.length>0; }
+function coIsOptom(){ return !!(coProduct && coProduct.sale_mode==='optom'); }
+// Checkout o'lchov birligi: optom = "pachka", aks holda mahsulot birligi (yoki "dona").
+function coUnit(){ return coIsOptom() ? L('co_pack_unit') : (coProduct&&coProduct.unit) ? coProduct.unit : L('ws_unit_default'); }
+// Optom ma'lumot qutisi: 1 pachka = N dona + razmer matni (xaridor tanlamaydi).
+function coOptomInfoHtml(){
+  if(!coIsOptom()) return '';
+  const ps = Number(coProduct.pack_size||0);
+  const note = (coProduct.size_note||'').trim();
+  let rows = '';
+  if(ps>0) rows += `<div style="font-size:12px;font-weight:700;color:var(--accent)">📦 ${L('co_pack_of').replace('{n}', ps)}</div>`;
+  if(note) rows += `<div style="font-size:11.5px;color:var(--hint);margin-top:3px">${L('co_sizes_note').replace('{s}', esc(note))}</div>`;
+  if(!rows) return '';
+  return `<div style="margin:2px 0 4px;background:var(--accent-soft);border-radius:10px;padding:9px 11px">${rows}</div>`;
+}
+function coVariantOwnQty(v){
+  if(coHasAttrs()) return (v.combos||[]).reduce((s,c)=>s+(Number(c.qty)||0),0);
+  return Number(v.qty)||0;
+}
+function coVariantTotalQty(){ return coVariants.reduce((s,v)=>s+coVariantOwnQty(v),0); }
+function coMinQty(p){ const moq=Number(p&&p.min_order_qty||0); return moq>1?moq:1; }  // optom zina minimal MAJBURLAMAYDI (faqat chegirma)
+function comboLabel(c){ return [c.color,c.size].filter(Boolean).join(' · '); }
+// Atribut qiymatini variantlarga ajratadi: vergul/nuqtali vergul/slash/yangi qator bo'lsa shular bo'yicha,
+// aks holda bo'sh joy bo'yicha (AI ko'pincha "36 37 38" yoki "Qora Oq" deb saqlaydi). "S, M, L" ham, "36 37 38" ham ishlaydi.
+function splitOpts(s){
+  s = String(s||'').trim(); if(!s) return [];
+  const parts = /[,;/\n·|]/.test(s) ? s.split(/[,;/\n·|]+/) : s.split(/\s+/);
+  return parts.map(x=>x.trim()).filter(Boolean);
+}
 function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
 function payLabel(code){ const m=PAYMENTS().find(x=>x[0]===code); return m?m[1]:(code||'—'); }
 
@@ -1989,6 +2098,29 @@ async function openCheckout(id){
   try{
     coProduct = await api('/api/products/'+id);
     coQty=1; coDelivery='pickup'; coPayment='cash'; coAddrText=''; coLat=null; coLon=null;
+    // Variantlar (rasm/hil) + razmer ro'yxati
+    let vimgs = (coProduct.image_variants && coProduct.image_variants.length)
+      ? coProduct.image_variants.slice()
+      : ((coProduct.images||[]).map(f=>({file_id:f,label:null})));
+    const sizeAttr = (coProduct.attributes||[]).find(a=>a.attr_key==='size' && (a.attr_value||'').trim());
+    coSizeOpts = sizeAttr ? splitOpts(sizeAttr.attr_value) : [];
+    const colorAttr = (coProduct.attributes||[]).find(a=>a.attr_key==='color' && (a.attr_value||'').trim());
+    if(coIsOptom()){
+      // Optom — razmer YOZMA (size_note), rang RO'YXAT; har rang uchun pachka stepperi.
+      // Kombinatsiya quruvchi ishlatilmaydi (coSizeOpts/coColorOpts bo'sh).
+      coSizeOpts=[]; coColorOpts=[];
+      const optColors = colorAttr ? splitOpts(colorAttr.attr_value) : [];
+      const firstImg = (vimgs[0] && vimgs[0].file_id) || coProduct.image_url || null;
+      coIsVariant = true;   // optom doim pachka-checkout (min pachka serverda)
+      coVariants = optColors.length
+        ? optColors.map(c=>({file_id:firstImg, label:c, color:c, qty:0, combos:[], dColor:'', dSize:'', dQty:1}))
+        : [{file_id:firstImg, label:(coProduct.name||''), color:null, qty:0, combos:[], dColor:'', dSize:'', dQty:1}];
+    } else {
+      coColorOpts = colorAttr ? splitOpts(colorAttr.attr_value) : [];
+      coIsVariant = (vimgs.length>1) || (coSizeOpts.length>0) || (coColorOpts.length>0);
+      coVariants = vimgs.map((v,i)=>({file_id:v.file_id, label:(v.label&&v.label.trim())||('#'+(i+1)),
+                                      qty:0, combos:[], dColor:'', dSize:'', dQty:1}));
+    }
     renderCheckout();
   }catch(e){
     body.innerHTML = `<div class="empty"><span class="big">⚠️</span>${L('err')}: ${esc(e.message)}</div>`;
@@ -1997,12 +2129,13 @@ async function openCheckout(id){
 function coMaxStock(){ return (coProduct && coProduct.stock_count!=null) ? coProduct.stock_count : 999; }
 
 function renderCheckout(){
+  if(coIsVariant){ return renderVariantCheckout(); }
   const p = coProduct, body = document.getElementById('checkoutBody');
   const img = p.image_url
     ? `<img src="${imgUrl(p.image_url)}" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`
     : `<div class="ph">🖼️</div>`;
   const listed = Number(p.price||0);
-  const U = esc(p.unit || L('ws_unit_default'));
+  const U = esc(coUnit());
   // Optom zinalari: qty bo'yicha eng arzon amaldagi narx.
   const wsList = wsTiers(p);
   const wsOn = wsList.length>0;
@@ -2038,6 +2171,7 @@ function renderCheckout(){
   body.innerHTML = `
     <div class="cobody">
       <div class="coprod">${img}<div><div class="nm">${esc(p.name)}</div>${priceHtml}</div></div>
+      ${coOptomInfoHtml()}
       <div class="cosec">
         <div class="lbl">${L('qty')}</div>
         <div class="stepper">
@@ -2045,7 +2179,8 @@ function renderCheckout(){
           <div class="qv">${coQty}</div>
           <button class="stepbtn" id="qPlus" ${coQty>=max?'disabled':''}>+</button>
         </div>
-        ${p.stock_count!=null?`<div class="stockhint">${L('available_n')}: ${p.stock_count} ${L('pcs')}</div>`:''}
+        ${coIsOptom()&&Number(p.pack_size)>0?`<div class="stockhint" style="color:var(--accent);font-weight:600">${L('co_total_pieces').replace('{n}', coQty*Number(p.pack_size))}</div>`:''}
+        ${p.stock_count!=null?`<div class="stockhint">${L('available_n')}: ${p.stock_count} ${U}</div>`:''}
         ${wsBox}
       </div>
       <div class="cosec">
@@ -2068,7 +2203,7 @@ function renderCheckout(){
       </div>
     </div>
     <div class="cobar">
-      <div class="cototal"><span class="t1">${L('total')} (${coQty} ${L('pcs')})</span><span class="t2">${money(total)}</span></div>
+      <div class="cototal"><span class="t1">${L('total')} (${coQty} ${U})</span><span class="t2">${money(total)}</span></div>
       <button id="coSubmit">${L('confirm_order')}</button>
     </div>`;
   body.querySelector('#qMinus').onclick=()=>{ if(coQty>1){coQty--; renderCheckout();} };
@@ -2080,6 +2215,220 @@ function renderCheckout(){
   const locBtn = body.querySelector('#coLocBtn');
   if(locBtn) locBtn.onclick = async()=>{ await captureLocation(l=>{ coLat=l.lat; coLon=l.lon; }, 'coLocBtn'); renderCheckout(); };
   body.querySelector('#coSubmit').onclick = submitOrder;
+}
+
+// Variant-buyurtma checkout: har rasm (hil) + razmer + son; optom narx JAMI songa qarab.
+function renderVariantCheckout(){
+  const p = coProduct, body = document.getElementById('checkoutBody');
+  const listed = Number(p.price||0);
+  const U = esc(coUnit());
+  const totalQ = coVariantTotalQty();
+  const minQ = coMinQty(p);
+  const wsList = wsTiers(p), wsOn = wsList.length>0;
+  const base = wsUnitPrice(p, totalQ);
+  const wsActive = wsOn && base < listed && totalQ>0;
+  const total = totalQ * base;
+  const stockMax = (p.stock_count!=null) ? Number(p.stock_count) : null;
+  const belowMin = totalQ < minQ;
+
+  // Variant (hil) kartalari — rasm + (rang/razmer tanlash + "Qo'shish") yoki bitta son stepperi
+  const hasAttrs = coHasAttrs();
+  const cards = coVariants.map((v,i)=>{
+    const thumb = v.file_id
+      ? `<img src="${imgUrl(v.file_id)}" style="width:100%;height:100%;object-fit:cover;display:block" onerror="this.outerHTML='<div class=ph>🖼️</div>'">`
+      : `<div class="ph">🖼️</div>`;
+    const canPlus = (stockMax==null) || (totalQ < stockMax);
+    let qtyBlock;
+    if(hasAttrs){
+      // KOMBINATSIYA QURUVCHI: rang + razmer + son tanlab "Qo'shish" → bir nechta kombinatsiya
+      const colorPick = coColorOpts.length
+        ? `<div style="font-size:11px;color:var(--hint);margin:6px 0 4px">${L('vp_color')}</div>
+           <div class="chips" style="padding:0;flex-wrap:wrap">${coColorOpts.map(c=>
+             `<div class="chip ${v.dColor===c?'active':''}" data-dcolor="${i}" data-val="${esc(c)}">${esc(c)}</div>`).join('')}</div>`
+        : '';
+      const sizePick = coSizeOpts.length
+        ? `<div style="font-size:11px;color:var(--hint);margin:6px 0 4px">${L('vp_size')}</div>
+           <div class="chips" style="padding:0;flex-wrap:wrap">${coSizeOpts.map(s=>
+             `<div class="chip ${v.dSize===s?'active':''}" data-dsize="${i}" data-val="${esc(s)}">${esc(s)}</div>`).join('')}</div>`
+        : '';
+      const dQty = Number(v.dQty)||1;
+      const addReady = (!coColorOpts.length || v.dColor) && (!coSizeOpts.length || v.dSize) && canPlus;
+      const draftRow = `<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+         <div class="stepper">
+           <button class="stepbtn" data-dminus="${i}" ${dQty<=1?'disabled':''}>−</button>
+           <div class="qv">${dQty}</div>
+           <button class="stepbtn" data-dplus="${i}" ${canPlus?'':'disabled'}>+</button>
+         </div>
+         <button class="oact ok" data-addcombo="${i}" ${addReady?'':'disabled'} style="width:auto;padding:9px 14px;margin:0">${L('vp_add')}</button>
+       </div>`;
+      const combos = (v.combos||[]).length
+        ? `<div style="margin-top:8px">${v.combos.map((c,j)=>
+            `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--accent-soft);border-radius:9px;padding:6px 10px;margin-top:5px">
+               <span style="font-size:12.5px;font-weight:600">✓ ${esc(comboLabel(c))} — ${c.qty} ${U}</span>
+               <span data-rmcombo="${i}" data-ci="${j}" style="cursor:pointer;color:var(--sale);font-weight:700;padding:0 4px">✕</span>
+             </div>`).join('')}</div>`
+        : '';
+      qtyBlock = `${colorPick}${sizePick}${draftRow}${combos}`;
+    } else {
+      // Atribut yo'q (faqat ko'p rasm) — rasm uchun bitta son stepperi
+      qtyBlock = `<div class="stepper" style="margin-top:7px">
+          <button class="stepbtn" data-vminus="${i}" ${(Number(v.qty)||0)<=0?'disabled':''}>−</button>
+          <div class="qv">${Number(v.qty)||0}</div>
+          <button class="stepbtn" data-vplus="${i}" ${canPlus?'':'disabled'}>+</button>
+        </div>`;
+    }
+    return `<div class="vcard" style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
+      <div class="vthumb" style="flex:0 0 56px;width:56px;height:56px;border-radius:10px;overflow:hidden;background:var(--bg)">${thumb}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13.5px">${esc(v.label)}</div>
+        ${qtyBlock}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Optom narvoni (jami songa qarab)
+  let wsBox = '';
+  if(wsOn){
+    const ladder = wsList.map(t=>{ const on=totalQ>=t.min;
+      return `<div style="display:flex;justify-content:space-between;font-size:12px;margin-top:2px;${on?'color:var(--ok,#16a34a);font-weight:700':'color:var(--hint)'}">
+        <span>${on?'✅ ':''}${t.min}+ ${U}</span><span>${money(t.price)}/${U}</span></div>`; }).join('');
+    let foot='';
+    if(wsActive){ const saved=Math.round((listed-base)*totalQ);
+      foot += `<div style="font-size:11.5px;color:var(--ok,#16a34a);font-weight:700;margin-top:6px">💰 ${L('ws_saved').replace('{s}', money(saved))}</div>`; }
+    const nx=wsNextTier(p, totalQ);
+    if(nx){ const need=nx.min-totalQ;
+      foot += `<div style="font-size:11.5px;color:var(--accent);margin-top:4px">${L('ws_next').replace('{k}',need).replace(/\{unit\}/g,U).replace('{p}',money(nx.price))}</div>`; }
+    wsBox = `<div style="margin-top:9px;background:var(--accent-soft);border-radius:10px;padding:9px 11px">
+      <div style="font-size:11.5px;font-weight:700;color:var(--accent);margin-bottom:3px">📦 ${L('ws_title')}</div>${ladder}${foot}</div>`;
+  }
+
+  // Min indikatori
+  let minHint='';
+  if(minQ>1){
+    minHint = belowMin
+      ? `<div style="font-size:12px;color:var(--sale);font-weight:700;margin-top:8px">⚠️ ${L('vp_need_more').replace('{n}', (minQ-totalQ)).replace('{unit}', U)}</div>`
+      : `<div style="font-size:12px;color:var(--ok,#16a34a);font-weight:600;margin-top:8px">✅ ${L('vp_min').replace('{n}', minQ).replace('{unit}', U)}</div>`;
+  }
+  body.innerHTML = `
+    <div class="cobody">
+      <div class="coprod"><div><div class="nm">${esc(p.name)}</div>
+        <div class="pr">${money(base)}<span style="font-size:12px;color:var(--hint);margin-left:4px">/ ${U}</span></div></div></div>
+      ${coOptomInfoHtml()}
+      <div class="cosec">
+        <div class="lbl">${coIsOptom()?L('co_pick_packs'):L('vp_pick')}</div>
+        ${cards}
+        ${coIsOptom()&&Number(p.pack_size)>0&&totalQ>0?`<div class="stockhint" style="margin-top:7px;color:var(--accent);font-weight:600">${L('co_total_pieces').replace('{n}', totalQ*Number(p.pack_size))}</div>`:''}
+        ${p.stock_count!=null?`<div class="stockhint" style="margin-top:7px">${L('available_n')}: ${p.stock_count} ${U}</div>`:''}
+        ${wsBox}
+        ${minHint}
+      </div>
+      <div class="cosec">
+        <div class="lbl">${L('delivery')}</div>
+        <div class="seg">
+          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">${L('pickup')}</div>
+          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">${L('courier')}</div>
+        </div>
+        <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
+          <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;background:var(--accent-soft);color:${coLat?'var(--ok)':'var(--accent)'};box-shadow:none">${coLat?L('loc_got'):L('send_location')}</button>
+          ${!coLat?`<div style="font-size:11.5px;color:var(--sale);margin-top:6px;line-height:1.4">${L('loc_required_hint')}</div>`:''}
+          <textarea class="coaddr" id="coAddr" placeholder="${L('address_ph')}">${esc(coAddrText)}</textarea>
+        </div>
+      </div>
+      <div class="cosec">
+        <div class="lbl">${L('payment')}</div>
+        <div class="seg col">
+          ${PAYMENTS().map(([k,l])=>`<div class="opt ${coPayment===k?'on':''}" data-pay="${k}">${l}</div>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div class="cobar">
+      <div class="cototal"><span class="t1">${L('total')} (${totalQ} ${U})</span><span class="t2">${money(total)}</span></div>
+      <button id="coSubmit" ${(belowMin||totalQ<1)?'disabled':''}>${L('confirm_order')}</button>
+    </div>`;
+
+  body.querySelectorAll('[data-vminus]').forEach(b=>b.onclick=()=>{ const i=Number(b.dataset.vminus);
+    if((Number(coVariants[i].qty)||0)>0){ coVariants[i].qty--; renderCheckout(); } });
+  body.querySelectorAll('[data-vplus]').forEach(b=>b.onclick=()=>{ const i=Number(b.dataset.vplus);
+    if(stockMax!=null && coVariantTotalQty()>=stockMax) return;
+    coVariants[i].qty=(Number(coVariants[i].qty)||0)+1; renderCheckout(); });
+  // Kombinatsiya quruvchi: joriy rang/razmer tanlash (bitta), draft son, qo'shish, o'chirish
+  body.querySelectorAll('[data-dcolor]').forEach(c=>c.onclick=()=>{ const i=Number(c.dataset.dcolor);
+    coVariants[i].dColor = (coVariants[i].dColor===c.dataset.val) ? '' : c.dataset.val; renderCheckout(); });
+  body.querySelectorAll('[data-dsize]').forEach(c=>c.onclick=()=>{ const i=Number(c.dataset.dsize);
+    coVariants[i].dSize = (coVariants[i].dSize===c.dataset.val) ? '' : c.dataset.val; renderCheckout(); });
+  body.querySelectorAll('[data-dminus]').forEach(b=>b.onclick=()=>{ const i=Number(b.dataset.dminus);
+    coVariants[i].dQty = Math.max(1,(Number(coVariants[i].dQty)||1)-1); renderCheckout(); });
+  body.querySelectorAll('[data-dplus]').forEach(b=>b.onclick=()=>{ const i=Number(b.dataset.dplus);
+    if(stockMax!=null && coVariantTotalQty()>=stockMax) return;
+    coVariants[i].dQty = (Number(coVariants[i].dQty)||1)+1; renderCheckout(); });
+  body.querySelectorAll('[data-addcombo]').forEach(b=>b.onclick=()=>{ const i=Number(b.dataset.addcombo); const v=coVariants[i];
+    if(coColorOpts.length && !v.dColor) return;
+    if(coSizeOpts.length && !v.dSize) return;
+    let q=Number(v.dQty)||1;
+    if(stockMax!=null){ const room=stockMax-coVariantTotalQty(); if(room<=0){ tg.showAlert(L('vp_stock_full')); return; } if(q>room) q=room; }
+    const color=v.dColor||'', size=v.dSize||'';
+    const ex=(v.combos||[]).find(c=>(c.color||'')===color && (c.size||'')===size);
+    if(ex){ ex.qty=(Number(ex.qty)||0)+q; } else { (v.combos||(v.combos=[])).push({color,size,qty:q}); }
+    v.dSize=''; v.dQty=1;   // rangni qoldiramiz (bir rangdan ko'p razmer qo'shish qulay)
+    try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+    renderCheckout(); });
+  body.querySelectorAll('[data-rmcombo]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rmcombo), j=Number(x.dataset.ci);
+    coVariants[i].combos.splice(j,1); renderCheckout(); });
+  body.querySelectorAll('[data-dlv]').forEach(o=>o.onclick=()=>{ coDelivery=o.dataset.dlv; renderCheckout(); });
+  body.querySelectorAll('[data-pay]').forEach(o=>o.onclick=()=>{ coPayment=o.dataset.pay; renderCheckout(); });
+  const addr = body.querySelector('#coAddr');
+  if(addr) addr.oninput=()=>{ coAddrText = addr.value; };
+  const locBtn = body.querySelector('#coLocBtn');
+  if(locBtn) locBtn.onclick = async()=>{ await captureLocation(l=>{ coLat=l.lat; coLon=l.lon; }, 'coLocBtn'); renderCheckout(); };
+  body.querySelector('#coSubmit').onclick = submitVariantOrder;
+}
+
+async function submitVariantOrder(){
+  const btn = document.getElementById('coSubmit');
+  if(coDelivery==='delivery' && (coLat==null || coLon==null)){ tg.showAlert(L("need_location")); return; }
+  // Rang/razmer bo'lsa: har rasmning har kombinatsiyasi alohida qator; aks holda rasm uchun bitta qator.
+  let lines=[];
+  coVariants.forEach(v=>{
+    if(coHasAttrs()){
+      (v.combos||[]).forEach(c=>{ if((Number(c.qty)||0)>0)
+        lines.push({label:v.label, size:c.size||null, color:c.color||null, qty:Number(c.qty)}); });
+    } else if((Number(v.qty)||0)>0){
+      lines.push({label:v.label, size:null, color:v.color||null, qty:Number(v.qty)});
+    }
+  });
+  if(!lines.length){ tg.showAlert(L('vp_pick')); return; }
+  btn.disabled = true; btn.textContent = L('sending');
+  try{
+    const r = await fetch('/api/order/variants', {
+      method:'POST', headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body: JSON.stringify({
+        product_id: coProduct.id, lines,
+        delivery_type: coDelivery, payment_method: coPayment,
+        address: coDelivery==='delivery' ? coAddrText.trim() : null,
+        lat: coDelivery==='delivery' ? coLat : null,
+        lon: coDelivery==='delivery' ? coLon : null
+      })
+    });
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(vpErr(d.detail)||('HTTP '+r.status)); }
+    const res = await r.json();
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    showOrderSuccess(res.group_id);
+  }catch(e){
+    btn.disabled=false; btn.textContent=L('confirm_order');
+    tg.showAlert(L('bp_order_failed')+e.message);
+  }
+}
+
+// Server xato kodlarini o'qiladigan matnga aylantiradi (variant-buyurtma)
+function vpErr(detail){
+  if(!detail) return '';
+  const s=String(detail);
+  if(s.startsWith('below_min_')) return L('vp_need_more').replace('{n}', s.slice(10)).replace('{unit}', esc(coProduct&&coProduct.unit||L('ws_unit_default')));
+  if(s==='size_required'||s==='bad_size') return L('vp_size_needed');
+  if(s==='color_required'||s==='bad_color') return L('vp_color_needed');
+  if(s.startsWith('only_')) return s.replace('only_','').replace('_available','')+' '+L('pcs');
+  if(s==='empty_order') return L('vp_pick');
+  return s;
 }
 
 async function submitOrder(){
@@ -2144,6 +2493,8 @@ function _cartPut(p){
   try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
 }
 function cartAdd(p){
+  // Optom (pachka) — savatga emas, to'g'ridan-to'g'ri pachka/rang checkout'iga
+  if(p && p.sale_mode==='optom'){ openCheckout(p.id); return; }
   if(p.seller_id==null){ tg.showAlert(L('bp_prod_incomplete')); return; }
   if(CART.seller_id && CART.seller_id!==p.seller_id && cartCount()>0){
     const sw=()=>{ CART={seller_id:p.seller_id,seller_name:p.shop_name||'',items:{}}; _cartPut(p); };
@@ -2655,12 +3006,13 @@ document.getElementById('backBtn').onclick = closeDetail;
 let catMode='products', SHOP_ITEMS=[];
 document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
   catMode=o.dataset.mode;
+  const isProd = (catMode==='products' || catMode==='optom');  // optom — mahsulot rejimi (optom filtri bilan)
   document.querySelectorAll('#catMode .opt').forEach(x=>x.classList.toggle('on',x.dataset.mode===catMode));
-  document.getElementById('chips').style.display = catMode==='products'?'':'none';
+  document.getElementById('chips').style.display = isProd?'':'none';
   document.getElementById('search').value='';
-  document.getElementById('search').placeholder = L(catMode==='products'?'search_products':'search_shops');
-  document.getElementById('cartFab').style.display = catMode==='products'? (cartCount()>0?'flex':'none') : 'none';
-  if(catMode==='products') loadProducts(); else loadShops();
+  document.getElementById('search').placeholder = L(isProd?'search_products':'search_shops');
+  document.getElementById('cartFab').style.display = isProd? (cartCount()>0?'flex':'none') : 'none';
+  if(isProd) loadProducts(); else loadShops();
 });
 
 function shopCardHtml(s){
@@ -2710,7 +3062,7 @@ let REGION_ID=null, REGION_LABEL='';
 const _RGI='style="padding:13px 14px;border-bottom:1px solid var(--line);cursor:pointer;font-size:15px"';
 function updateRegionBtn(){ const el=document.getElementById('regionLbl'); if(el) el.textContent = REGION_LABEL || L('bp_all_regions'); }
 function closeRegion(){ document.getElementById('regionview').classList.remove('open'); }
-function afterRegionChange(){ updateRegionBtn(); (catMode==='products'?loadProducts():loadShops()); }
+function afterRegionChange(){ updateRegionBtn(); (catMode==='shops'?loadShops():loadProducts()); }
 // onPick(id,label) berilsa — qidiruv o'rniga shu callback chaqiriladi (shop settings hudud uchun). #2
 let _onRegionPick=null;
 async function openRegionPicker(onPick){ _onRegionPick=onPick||null; document.getElementById('regionview').classList.add('open'); document.getElementById('regionview').scrollTop=0; await renderRegionPicker(null,''); }
@@ -2779,7 +3131,7 @@ function updateFilterFades(){
   }, 400);
 })();
 
-document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='products'?loadProducts():loadShops(); },350); };
+document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='shops'?loadShops():loadProducts(); },350); };
 
 // ---------- TAB NAVIGATSIYA ----------
 function switchTab(tab){
@@ -2856,6 +3208,39 @@ function tickCountdowns(){
 }
 setInterval(tickCountdowns, 1000);
 
+// Variant/savat guruh buyurtmasini BITTA kartaga (1 shartnoma) jamlaydi.
+// Bir xil order_group_id li qatorlar -> vakil (eng kichik id) obyekt:
+//   _grp=true, _lines=[{label,color,size,quantity,total_price}], quantity/total_price = JAMI.
+// Backend amallar (bekor/tasdiq/berish) vakil id orqali butun guruhga qo'llanadi.
+function dedupOrderGroups(orders){
+  const out=[], seen={};
+  (orders||[]).forEach(o=>{
+    const gid=o.order_group_id;
+    if(!gid){ out.push(o); return; }
+    let g=seen[gid];
+    if(!g){
+      g=Object.assign({}, o); g._grp=true; g._lines=[]; g._gqty=0; g._gtotal=0;
+      seen[gid]=g; out.push(g);
+    }
+    g._lines.push({label:o.variant_label,color:o.variant_color,size:o.variant_size,quantity:o.quantity,total_price:o.total_price});
+    g._gqty += Number(o.quantity||0);
+    g._gtotal += Number(o.total_price||0);
+    if(Number(o.id) < Number(g.id)) g.id=o.id;   // vakil = eng kichik id (= group_id)
+  });
+  out.forEach(g=>{ if(g._grp){ g.quantity=g._gqty; g.total_price=g._gtotal; } });
+  return out;
+}
+function groupLinesHtml(o){
+  if(!o._lines||!o._lines.length) return '';
+  const rows=o._lines.map(ln=>{
+    const tag=[ln.label,ln.color,ln.size].map(v=>(v==null?'':String(v)).trim())
+      .filter((v,i,a)=>v&&a.indexOf(v)===i).join(' · ');
+    return `<div class="ometa" style="color:var(--accent)">🏷 ${esc(tag||'—')} · ${ln.quantity} ${L('pcs')}</div>`;
+  }).join('');
+  return `<div style="margin:4px 0;padding:6px 8px;background:var(--bg);border-radius:8px">
+    <div class="ometa" style="font-weight:600">📦 ${L('variant_lines')} (${o._lines.length})</div>${rows}</div>`;
+}
+
 function orderCardHtml(o){
   const st = ORDER_STATUS(o.status);
   let contact = '';
@@ -2866,6 +3251,7 @@ function orderCardHtml(o){
   return `<div class="ocard">
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
     <div class="oname">${esc(o.product_name||'')}</div>
+    ${o._grp?groupLinesHtml(o):((o.variant_label||o.variant_size||o.variant_color)?`<div class="ometa" style="color:var(--accent)">🏷 ${esc(variantTag(o))}</div>`:'')}
     <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     <div class="oshop">🏪 ${esc(o.shop_name||'')}</div>
     ${countdownHtml(o)}
@@ -2873,7 +3259,7 @@ function orderCardHtml(o){
     ${(o.amount_due && o.amount_due>0)?`<div class="odebt">${L('debt')}: ${money(o.amount_due)}</div>`:''}
     ${contact}
     <button class="ocontact" data-chat="${o.id}" style="margin-top:8px;background:var(--bg);color:var(--accent)">${L('write_msg')}</button>
-    ${(o.status==='pending' && !o.order_group_id)?`<button class="oact no" data-cancel="${o.id}" style="width:100%;margin-top:8px">${L('cancel_order')}</button>`:''}
+    ${(o.status==='pending')?`<button class="oact no" data-cancel="${o.id}" style="width:100%;margin-top:8px">${L('cancel_order')}</button>`:''}
     ${(o.status==='confirmed' && o.delivery_type==='delivery')?`<button class="oact ok" data-track="${o.id}" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('trk_track')}</button>`:''}
     ${(o.status==='confirmed' && o.delivery_type==='pickup' && !o.buyer_received)?`<button class="oact ok" data-pickup="${o.id}" style="width:100%;margin-top:8px">${L('bp_got_it')}</button>`:''}
     ${(o.status==='confirmed' && o.buyer_received)?`<div class="odebt" style="background:var(--bg);color:var(--ok)">${L('bp_got_waiting')}</div>`:''}
@@ -2907,7 +3293,7 @@ function cancelInfoHtml(o){
 }
 
 function cancelFlowHtml(o){
-  if(o.status!=='confirmed' || o.order_group_id) return '';
+  if(o.status!=='confirmed') return '';
   const cs=o.cancel_state||'';
   if(cs==='disputed') return `<div class="odebt" style="background:var(--accent-soft);color:var(--accent)">${L('dispute_note')}</div>`;
   if(cs==='requested'){
@@ -2927,7 +3313,7 @@ async function loadMyOrders(){
   v.innerHTML = head + `<div class="loading">${L('bp_loading')}</div>`;
   document.getElementById('debtsBtn').onclick = openDebts;
   try{
-    const orders = await api('/api/my/orders');
+    const orders = dedupOrderGroups(await api('/api/my/orders'));
     MY_ORDERS = orders;
     if(!orders.length){
       v.innerHTML = head + `<div class="empty"><span class="big">📦</span>${L('no_orders')}<br><small>${L('pick_from_catalog')}</small><br><button class="ecta" id="ordGoCat">${L('go_catalog')}</button></div>`; { const _oc=document.getElementById('ordGoCat'); if(_oc) _oc.onclick=()=>switchTab('catalog'); }
@@ -2953,17 +3339,57 @@ async function loadMyOrders(){
   }
 }
 
-function buyerCancelOrder(oid){
-  const doIt=async()=>{
+// ---------- BEKOR SABAB TANLASH (preset crsn_* + AI taklif + qo'lda yozish) ----------
+const BUYER_CRSN=['bchg','bprice','bfound','blate','bnoreach'];
+const SELLER_CRSN=['sstock','sprice','snoreach','snoaddr','snopay'];
+// party: 'buyer'|'seller'. onPick(reasonStr) chaqiriladi: 'code:<kod>' yoki 'text:<matn>'.
+// Sabab MAJBURIY — foydalanuvchi yopsa onPick chaqirilmaydi.
+function openCancelReasonPicker(orderId, party, onPick){
+  const old=document.getElementById('crsnPick'); if(old) old.remove();
+  const codes = party==='seller'?SELLER_CRSN:BUYER_CRSN;
+  const ov=document.createElement('div'); ov.id='crsnPick';
+  ov.style.cssText='position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end';
+  const presetBtns=codes.map(c=>`<div class="oact" data-rcode="${c}" style="width:100%;margin:5px 0;background:var(--bg);color:var(--text);text-align:left;box-shadow:none">${L('crsn_'+c)}</div>`).join('');
+  ov.innerHTML=`<div style="background:var(--card);width:100%;border-radius:16px 16px 0 0;padding:16px;max-height:84vh;overflow:auto">
+    <div style="font-weight:600;margin-bottom:4px">${L('cancel_pick_title')}</div>
+    <div class="ometa" style="color:var(--hint);margin-bottom:8px">${L('cancel_pick_sub')}</div>
+    <div id="crsnAi"><div class="ometa" style="color:var(--accent)">🤖 ${L('cancel_ai_loading')}</div></div>
+    ${presetBtns}
+    <div style="margin-top:10px">
+      <textarea id="crsnText" rows="2" placeholder="${L('cancel_reason_ph')}" style="width:100%;border:1px solid var(--line,#e2e2e2);border-radius:10px;padding:9px;font:inherit;resize:vertical;box-sizing:border-box"></textarea>
+      <button class="oact ok" id="crsnSend" style="width:100%;margin-top:6px">${L('cancel_send_own')}</button>
+    </div>
+    <div class="oact" id="crsnCancel" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent);box-shadow:none">${L('cr_cancel')}</div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close=()=>ov.remove();
+  const pick=(r)=>{ close(); onPick(r); };
+  ov.onclick=(e)=>{ if(e.target===ov) close(); };
+  ov.querySelectorAll('[data-rcode]').forEach(el=>el.onclick=()=>pick('code:'+el.dataset.rcode));
+  document.getElementById('crsnCancel').onclick=close;
+  document.getElementById('crsnSend').onclick=()=>{ const v=(document.getElementById('crsnText').value||'').trim(); if(!v){ tg.showAlert(L('cancel_need_text')); return; } pick('text:'+v.slice(0,300)); };
+  // AI taklif (kontekstli) — yuklangach tugmalar; xato/bo'sh bo'lsa jim presetga tushadi
+  (async()=>{
     try{
-      const r=await fetch('/api/order/'+oid+'/cancel',{method:'POST',headers:{Authorization:AUTH}});
-      if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+      const res=await apiSend('/api/order/'+orderId+'/cancel-suggest','POST',{});
+      const box=document.getElementById('crsnAi'); if(!box) return;
+      const rs=(res&&res.reasons)||[];
+      if(!rs.length){ box.innerHTML=''; return; }
+      box.innerHTML=`<div class="ometa" style="color:var(--accent);font-weight:600;margin:2px 0 4px">🤖 ${L('cancel_ai_title')}</div>`+
+        rs.map((r,i)=>`<div class="oact" data-rai="${i}" style="width:100%;margin:5px 0;background:var(--accent-soft);color:var(--accent);text-align:left;box-shadow:none">${esc(r)}</div>`).join('');
+      box.querySelectorAll('[data-rai]').forEach(el=>el.onclick=()=>pick('text:'+rs[Number(el.dataset.rai)].slice(0,300)));
+    }catch(e){ const box=document.getElementById('crsnAi'); if(box) box.innerHTML=''; }
+  })();
+}
+
+function buyerCancelOrder(oid){
+  openCancelReasonPicker(oid, 'buyer', async(reason)=>{
+    try{
+      await apiSend('/api/order/'+oid+'/cancel','POST',{reason});
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
       loadMyOrders();
-    }catch(e){ tg.showAlert(L('bp_cancel_failed')+e.message); }
-  };
-  if(tg.showConfirm) tg.showConfirm(L('bp_cancel_confirm'), ok=>{ if(ok) doIt(); });
-  else if(confirm(L('bp_cancel_q'))) doIt();
+    }catch(e){ tg.showAlert(L('bp_cancel_failed')+(e.message||e)); }
+  });
 }
 
 function confirmPickup(oid){
@@ -2979,20 +3405,14 @@ function confirmPickup(oid){
   else doIt();
 }
 
-// Tasdiqlangan buyurtma uchun bekor SO'RASH (nizo oqimi) — sabab so'raladi
+// Tasdiqlangan buyurtma uchun bekor SO'RASH (nizo oqimi) — sabab MAJBURIY (piker)
 function buyerRequestCancel(oid){
-  const send=async(reason)=>{
-    try{ await apiSend('/api/order/'+oid+'/request-cancel','POST',{reason:reason||''});
+  openCancelReasonPicker(oid, 'buyer', async(reason)=>{
+    try{ await apiSend('/api/order/'+oid+'/request-cancel','POST',{reason});
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
       tg.showAlert(L('cancel_sent_ok')); loadMyOrders();
-    }catch(e){ tg.showAlert(L('err')+': '+e.message); }
-  };
-  if(tg.showPopup){
-    // showPopup matn kiritishni qo'llamaydi — oddiy tasdiqlash, sabab ixtiyoriy
-    tg.showConfirm(L('req_cancel')+'?', ok=>{ if(ok) send(''); });
-  } else {
-    const reason=prompt(L('cancel_reason_ph')); if(reason!==null) send(reason);
-  }
+    }catch(e){ tg.showAlert(L('err')+': '+(e.message||e)); }
+  });
 }
 
 // Sotuvchi boshlagan bekor so'roviga javob (rozi -> bekor; rad -> nizo)
@@ -3439,6 +3859,7 @@ function goPendingTab(tab){
 
 // ---------- SOTUVCHI PANELI (Do'kon) ----------
 let ME = null, sellerSub = 'orders', CATS = [], SELLER_PRODUCTS = [], pf = {}, BOT_USERNAME = null, CHANNEL_URL = null, SELLER_ORDERS_LIST = [], COURIER_ORDERS = [], dState = {}, appMode = 'buyer';
+const MAX_IMAGES = 5;  // bir mahsulotga 5 tagacha rasm (har rasm = bir variant/hil) — db.MAX_PRODUCT_IMAGES pariteti
 let sellerProdTab = 'active';   // Mahsulot bo'limidagi ichki turkum: active|hidden|reserve|deleted
 // Mahsulotni turkumga ajratadi: Sotuvda / Yashirilgan(qo'lda) / Zaxirada(avto) / O'chirilgan.
 // purged/mod_blocked — hech bir tabda ko'rinmaydi (ataylab yashirin / moderatsiyada).
@@ -3461,7 +3882,7 @@ async function loadMe(){
   try{ if(!BOT_USERNAME){ const cfg=await api('/api/config'); BOT_USERNAME=cfg.bot_username; CHANNEL_URL=cfg.channel_url||null; } }catch(e){}
   if(needReg){ showRegistration(); return; }            // app ichida ro'yxatdan o'tish
   // Profil tili — eng ishonchli manba; o'zgarsa qayta chizamiz (kategoriya "Hammasi" ham!)
-  if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); loadCategories(); if(catMode==='products') loadProducts(); }
+  if(ME && ME.language && ME.language!==LANG){ LANG=ME.language; applyStaticI18n(); loadCategories(); if(catMode!=='shops') loadProducts(); }
   applyMode();
   applyStaticI18n();
   // Universal xabarnoma — top banner + davriy yangilash (kim bo'lishidan qat'i nazar)
@@ -4771,8 +5192,6 @@ function sellerOrderCard(o){
         <div class="oactions"><button class="oact ok" data-scragree="${o.id}" style="flex:1">${L('agree_cancel')}</button><button class="oact no" data-scrdeny="${o.id}" style="flex:1">${L('deny_cancel')}</button></div>`;
     else if(cs==='requested' && o.cancel_by==='seller')
       actions=`<div class="odebt" style="background:var(--bg);color:var(--hint)">${L('sp_cancel_wait')}</div>`;
-    else if(o.order_group_id)
-      actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">${L('sp_deliver_pay')}</button></div>`;
     else
       actions=`<div class="oactions"><button class="oact ok" data-deliver="${o.id}" style="width:100%">${L('sp_deliver_pay')}</button></div>
         <button class="oact no" data-screqcancel="${o.id}" style="width:100%;margin-top:7px;background:var(--bg);color:var(--sale)">${L('req_cancel')}</button>`;
@@ -4782,8 +5201,10 @@ function sellerOrderCard(o){
     <div class="orow1"><span class="ostatus ${st[1]}">${st[0]}</span><span class="odate">${fmtDate(o.created_at)}</span></div>
     <div style="display:flex;gap:10px;align-items:center">${thumb}<div style="flex:1;min-width:0">
       <div class="oname" style="margin:0">${esc(o.product_name||'')}</div>
+      ${o._grp?'':((o.variant_label||o.variant_size||o.variant_color)?`<div class="ometa" style="color:var(--accent)">🏷 ${esc(variantTag(o))}</div>`:'')}
       <div class="ometa">${o.quantity} ${L('pcs')} · <b>${money(o.total_price)}</b></div>
     </div></div>
+    ${o._grp?groupLinesHtml(o):''}
     ${(_ordHasStaff && o.creator_name)?`<div class="ometa" style="color:var(--accent)">🏷 ${L('sp_order_by')}: ${esc(o.creator_name)}</div>`:''}
     <div class="oshop">👤 ${esc(o.buyer_name||'')} · ${dlv}</div>
     <div class="oshop">${L('sp_pay_lbl')}: ${esc(payLabel(o.payment_method))}</div>
@@ -4841,7 +5262,7 @@ async function loadSellerOrders(){
   const b = document.getElementById('sellerBody');
   b.innerHTML = `<div class="loading">${L('sp_loading')}</div>`;
   try{
-    SELLER_ORDERS_LIST = await api('/api/seller/orders');
+    SELLER_ORDERS_LIST = dedupOrderGroups(await api('/api/seller/orders'));
     orderStaffFilter = null;
     renderSellerOrders();
   }catch(e){ b.innerHTML = `<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
@@ -4892,30 +5313,37 @@ async function shareCourierLocation(oid, btn){
 }
 
 async function sellerOrderAction(oid, action, btn){
+  // Rad etish (reject) — bekor sababi MAJBURIY (piker: preset + AI + qo'lda)
+  if(action==='reject'){
+    openCancelReasonPicker(oid, 'seller', (reason)=>_sellerActionSend(oid, 'reject', reason, btn));
+    return;
+  }
+  _sellerActionSend(oid, action, null, btn);
+}
+async function _sellerActionSend(oid, action, reason, btn){
   const card = btn.closest('.ocard');
-  card.querySelectorAll('.oact').forEach(x=>x.disabled=true);
-  btn.textContent = '...';
+  if(card) card.querySelectorAll('.oact').forEach(x=>x.disabled=true);
+  if(btn) btn.textContent = '...';
   try{
+    const body = reason!=null ? {action, reason} : {action};
     const r = await fetch(`/api/seller/order/${oid}/action`, {
       method:'POST', headers:{Authorization:AUTH,'Content-Type':'application/json'},
-      body: JSON.stringify({action})
+      body: JSON.stringify(body)
     });
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
-  }catch(e){ tg.showAlert(L('sp_error')+e.message); }
+  }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
   loadSellerOrders();
 }
 
 // ---------- SOTUVCHI: NIZO / BEKOR SO'RASH (botdagi cclagree/ccldeny pariteti) ----------
 function sellerRequestCancel(oid){
-  const send=async(reason)=>{
-    try{ await apiSend('/api/seller/order/'+oid+'/request-cancel','POST',{reason:reason||''});
+  openCancelReasonPicker(oid, 'seller', async(reason)=>{
+    try{ await apiSend('/api/seller/order/'+oid+'/request-cancel','POST',{reason});
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
       tg.showAlert(L('cancel_sent_ok')); loadSellerOrders();
     }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
-  };
-  if(tg.showPopup){ tg.showConfirm(L('req_cancel')+'?', ok=>{ if(ok) send(''); }); }
-  else { const reason=prompt(L('cancel_reason_ph')); if(reason!==null) send(reason); }
+  });
 }
 function sellerCancelRespond(oid, agree){
   const go=async()=>{ try{ await apiSend('/api/seller/order/'+oid+'/cancel-respond','POST',{agree});
@@ -5211,15 +5639,20 @@ function _loadTiers(prod){
     return [{min:Number(prod.wholesale_min_qty), price:Number(prod.wholesale_price)}];
   return [];
 }
-function openProductForm(prod){
+function openProductForm(prod, mode){
   const base = {mode:'classic', questions:[], attrs:{}, attrLabels:{}, qLoaded:false, qLoading:false};
   pf = prod ? Object.assign({
     id: prod.id, name: prod.name||'', price: prod.price||'', category_id: prod.category_id||null,
     description: prod.description||'', stock_count: (prod.stock_count==null?'':prod.stock_count),
     old_price: prod.old_price||'', unit: prod.unit||'', min_price: prod.min_price||'',
+    min_order_qty: prod.min_order_qty||'',
+    sale_mode: (prod.sale_mode==='optom'?'optom':'dona'), modeChosen: true,
+    pack_size: prod.pack_size||'', size_note: prod.size_note||'', imageLabels: [], optomColors: '',
     tiers: _loadTiers(prod),
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
-  }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', tiers:[], images:[] }, base);
+  }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', min_order_qty:'',
+    sale_mode: (mode==='optom'?'optom':'dona'), modeChosen: !!mode,
+    pack_size:'', size_note:'', imageLabels:[], optomColors:'', tiers:[], images:[] }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
@@ -5228,11 +5661,24 @@ function openProductForm(prod){
   if(prod){ loadPriceInsight(prod.id); api('/api/products/'+prod.id).then(d=>{
     if(d && d.unit!=null && !pf.unit){ pf.unit = d.unit||''; }
     if(d && d.min_price!=null && !pf.min_price){ pf.min_price = d.min_price||''; }
+    if(d && d.min_order_qty!=null && !pf.min_order_qty){ pf.min_order_qty = d.min_order_qty||''; }
     if(d && (!pf.tiers || !pf.tiers.length)){ const tt=_loadTiers(d); if(tt.length) pf.tiers=tt; }
-    if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,4); }
+    if(d && d.sale_mode){ pf.sale_mode = (d.sale_mode==='optom'?'optom':'dona'); }
+    if(d && d.pack_size!=null && !pf.pack_size){ pf.pack_size = d.pack_size||''; }
+    if(d && d.size_note!=null && !pf.size_note){ pf.size_note = d.size_note||''; }
+    if(d && pf.sale_mode==='optom' && !pf.optomColors){
+      const _c=(d.attributes||[]).find(a=>a.attr_key==='color' && (a.attr_value||'').trim());
+      if(_c) pf.optomColors = _c.attr_value||'';
+    }
+    if(d && Array.isArray(d.image_variants) && d.image_variants.length){
+      pf.images = d.image_variants.map(v=>v.file_id).slice(0,MAX_IMAGES);
+      pf.imageLabels = d.image_variants.map(v=>v.label||'').slice(0,MAX_IMAGES);
+    } else if(d && Array.isArray(d.images) && d.images.length){ pf.images = d.images.slice(0,MAX_IMAGES); }
     if(d && Array.isArray(d.attributes) && d.attributes.length){
-      pf.questions = d.attributes.map(a=>({key:a.attr_key, label:a.attr_label||a.attr_key, type:'text', required:false, options:[]}));
-      d.attributes.forEach(a=>{ pf.attrs[a.attr_key]=a.attr_value||''; pf.attrLabels[a.attr_key]=a.attr_label||a.attr_key; });
+      // Optomda 'size'/'color' atributlari formada ko'rsatilmaydi (maxsus: Ranglar + razmer matni)
+      const _atts = (pf.sale_mode==='optom') ? d.attributes.filter(a=>!OPTOM_HIDDEN_ATTRS.includes(a.attr_key)) : d.attributes;
+      pf.questions = _atts.map(a=>({key:a.attr_key, label:a.attr_label||a.attr_key, type:'text', required:false, options:[]}));
+      _atts.forEach(a=>{ pf.attrs[a.attr_key]=a.attr_value||''; pf.attrLabels[a.attr_key]=a.attr_label||a.attr_key; });
       pf.qLoaded = true;
     }
     renderProductForm();
@@ -5278,6 +5724,9 @@ function attrSectionHtml(){
   return h;
 }
 
+// Optomda bu atributlar formada SO'RALMAYDI — maxsus boshqariladi: 'color' → Ranglar maydoni,
+// 'size' → razmer matni (size_note). Boshqa kategoriya atributlari (material, brend...) so'raladi.
+const OPTOM_HIDDEN_ATTRS = ['size','color'];
 async function loadQuestions(){
   if(pf.mode!=='classic' && !(pf.name||'').trim()){ tg.showAlert(L('sp_q_need_name')); return; }
   if(pf.mode==='classic' && !pf.category_id){ tg.showAlert(L('sp_q_need_cat')); return; }
@@ -5286,10 +5735,12 @@ async function loadQuestions(){
     const qs = new URLSearchParams({mode:pf.mode, name:(pf.name||''), description:(pf.description||'')});
     if(pf.category_id) qs.set('category_id', pf.category_id);
     const d = await api('/api/seller/product-questions?'+qs.toString());
-    pf.questions = d.questions||[];
+    const optom = (pf.sale_mode==='optom');
+    pf.questions = (d.questions||[]).filter(q=>!optom || !OPTOM_HIDDEN_ATTRS.includes(q.key));
     pf.questions.forEach(q=>{ pf.attrLabels[q.key]=q.label; });
     const known = d.known||{};
     Object.keys(known).forEach(k=>{
+      if(optom && OPTOM_HIDDEN_ATTRS.includes(k)) return;   // optomda size/color maxsus
       pf.attrs[k] = known[k].value||'';
       pf.attrLabels[k] = known[k].label||k;
       if(!pf.questions.some(q=>q.key===k))
@@ -5300,63 +5751,120 @@ async function loadQuestions(){
   pf.qLoading=false; renderProductForm();
 }
 
-// Optom zina qatorlari (min son + dona narx) — dinamik qo'shiladi/o'chiriladi.
-function tierRowsHtml(){
+// Optom zina qatorlari (min son + narx) — dinamik qo'shiladi/o'chiriladi.
+// optom=true bo'lsa yorliqlar "pachka soni / pachka narxi" bo'ladi.
+function tierRowsHtml(optom){
+  const minLbl = optom ? L('sp_packtier_min_lbl') : L('sp_wholesale_min_lbl');
+  const prLbl  = optom ? L('sp_packtier_price_lbl') : L('sp_wholesale_price_lbl');
+  const noneLbl = optom ? L('sp_packtier_none') : L('sp_wholesale_none');
   const rows=(pf.tiers||[]).map((t,i)=>`<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:7px">
-    <div style="width:34%"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_min_lbl')}</div>
+    <div style="width:38%"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${minLbl}</div>
       <input class="coaddr" data-tiermin="${i}" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_min_ph')}" value="${t.min?String(t.min):''}"></div>
-    <div style="flex:1"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${L('sp_wholesale_price_lbl')}</div>
+    <div style="flex:1"><div style="font-size:11px;color:var(--hint);margin-bottom:3px">${prLbl}</div>
       <input class="coaddr" data-tierprice="${i}" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_wholesale_price_ph')}" value="${t.price?fmtThousands(t.price):''}"></div>
     <button class="oact no" type="button" data-tierrm="${i}" style="width:auto;padding:11px 13px;margin:0;background:#fdebef;color:var(--sale)">✕</button>
   </div>`).join('');
-  return rows || `<div style="font-size:12px;color:var(--hint);padding:2px 0 8px">${L('sp_wholesale_none')}</div>`;
+  return rows || `<div style="font-size:12px;color:var(--hint);padding:2px 0 8px">${noneLbl}</div>`;
+}
+// Jonli ko'rsatma — min_order bo'sh bo'lsa "minimal yo'q (1 donadan)" deydi.
+// Optom zinalar minimal MAJBURLAMAYDI — faqat chegirma (kod parite: webapp_server _min_order_qty).
+function updateMinOrderEff(){
+  const el=document.getElementById('minOrderEff'); if(!el) return;
+  el.textContent = pf.min_order_qty ? '' : (pf.sale_mode==='optom' ? L('sp_min_pack_none') : L('sp_min_order_none'));
+}
+// Yangi mahsulot uchun savdo turi tanlovi (Dona / Optom)
+function modeChooserHtml(){
+  const card=(m,t,d)=>`<div class="opt" data-smode="${m}" style="text-align:left;line-height:1.4;display:block;padding:16px 14px;margin-bottom:11px;border-radius:14px;border:1.5px solid var(--line)">
+      <b style="font-size:15px">${t}</b><div style="font-size:12px;color:var(--hint);font-weight:400;margin-top:5px">${d}</div></div>`;
+  return `<div class="cobody"><div class="cosec">
+      <div class="lbl" style="font-size:14px;margin-bottom:12px">${L('sp_mode_title')}</div>
+      ${card('dona',L('sp_mode_dona'),L('sp_mode_dona_d'))}
+      ${card('optom',L('sp_mode_optom'),L('sp_mode_optom_d'))}
+    </div></div>`;
 }
 function renderProductForm(){
   const body = document.getElementById('prodformBody');
   const isEdit = !!pf.id;
+  // Yangi mahsulot — avval savdo turini tanlash
+  if(!isEdit && !pf.modeChosen){
+    body.innerHTML = modeChooserHtml();
+    body.querySelectorAll('[data-smode]').forEach(o=>o.onclick=()=>{
+      pf.sale_mode = o.dataset.smode; pf.modeChosen = true;
+      if(pf.sale_mode==='optom'){ pf.min_price=''; }   // optomda savdolashish yo'q
+      renderProductForm();
+    });
+    return;
+  }
+  const optom = (pf.sale_mode==='optom');
+  const addTile = pf.images.length<MAX_IMAGES
+    ? `<label class="pfadd">＋<input type="file" id="pfFile" accept="image/*" style="display:none"></label>` : '';
+  // ── Rasmlar bo'limi (oddiy galereya — ikkala rejim uchun bir xil) ──
   const thumbs = pf.images.map((fid,i)=>
     `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
-  const addTile = pf.images.length<4
-    ? `<label class="pfadd">＋<input type="file" id="pfFile" accept="image/*" style="display:none"></label>` : '';
-  body.innerHTML = `<div class="cobody">
-    <div class="cosec"><div class="lbl">${L('sp_images').replace('{n}', pf.images.length)}</div>
-      <div class="pfimgs">${thumbs}${addTile}</div>
-    </div>
-    <div class="cosec"><div class="lbl">${L('sp_name')}</div>
-      <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
-    <div class="cosec"><div class="lbl">${L('sp_price')}</div>
-      <input class="coaddr" id="pfPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.price?fmtThousands(pf.price):''}">
-      <div id="priceInsight" style="margin-top:7px"></div></div>
-    <div class="cosec"><div class="lbl">${L('sp_old_price')}</div>
-      <input class="coaddr" id="pfOldPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_old_price_ph')}" value="${pf.old_price?fmtThousands(pf.old_price):''}"></div>
-    <div class="cosec"><div class="lbl">${L('sp_unit')}</div>
+  const imagesSec = `<div class="cosec"><div class="lbl">${L('sp_images').replace('{n}', pf.images.length).replace('{m}', MAX_IMAGES)}</div>
+    <div class="pfimgs">${thumbs}${addTile}</div></div>`;
+  // ── Optom: ranglar ro'yxati + pachka soni + razmer matni ──
+  const packSec = optom ? `<div class="cosec"><div class="lbl">${L('sp_colors_list')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_colors_list_hint')}</div>
+      <input class="coaddr" id="pfColors" style="min-height:auto" placeholder="${L('sp_colors_list_ph')}" value="${esc(pf.optomColors||'')}"></div>
+    <div class="cosec"><div class="lbl">${L('sp_pack_size')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_pack_size_hint')}</div>
+      <input class="coaddr" id="pfPackSize" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_pack_size_ph')}" value="${pf.pack_size?fmtThousands(pf.pack_size):''}"></div>
+    <div class="cosec"><div class="lbl">${L('sp_size_note')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_size_note_hint')}</div>
+      <input class="coaddr" id="pfSizeNote" style="min-height:auto" placeholder="${L('sp_size_note_ph')}" value="${esc(pf.size_note||'')}"></div>` : '';
+  // ── Dona: o'lchov birligi + savdolashish ──
+  const unitSec = optom ? '' : `<div class="cosec"><div class="lbl">${L('sp_unit')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_unit_hint')}</div>
       <div class="chips" id="pfUnits" style="padding:0;flex-wrap:wrap">${unitPresets().map(u=>`<div class="chip ${pf.unit===u?'active':''}" data-unit="${esc(u)}">${esc(u)}</div>`).join('')}</div>
-      <input class="coaddr" id="pfUnitCustom" style="min-height:auto;margin-top:8px" placeholder="${L('sp_unit_custom_ph')}" value="${unitPresets().includes(pf.unit)?'':esc(pf.unit||'')}"></div>
-    <div class="cosec"><div class="lbl">${L('sp_min_price')}</div>
+      <input class="coaddr" id="pfUnitCustom" style="min-height:auto;margin-top:8px" placeholder="${L('sp_unit_custom_ph')}" value="${unitPresets().includes(pf.unit)?'':esc(pf.unit||'')}"></div>`;
+  const minPriceSec = optom ? '' : `<div class="cosec"><div class="lbl">${L('sp_min_price')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_min_price_hint')}</div>
-      <input class="coaddr" id="pfMinPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.min_price?fmtThousands(pf.min_price):''}"></div>
-    <div class="cosec"><div class="lbl">${L('sp_wholesale')}</div>
-      <div style="font-size:11.5px;color:var(--hint);margin-bottom:8px">${L('sp_wholesale_hint')}</div>
-      <div id="pfTiers">${tierRowsHtml()}</div>
+      <input class="coaddr" id="pfMinPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.min_price?fmtThousands(pf.min_price):''}"></div>`;
+  // ── Optom: pachka-zina + eng kam pachka ──
+  const tierSec = optom ? `<div class="cosec"><div class="lbl">${L('sp_packtier')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:8px">${L('sp_packtier_hint')}</div>
+      <div id="pfTiers">${tierRowsHtml(true)}</div>
       <button class="oact soft full" id="pfTierAdd" type="button" style="margin-top:2px">${L('sp_wholesale_add')}</button></div>
+    <div class="cosec"><div class="lbl">${L('sp_min_pack')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_min_pack_hint')}</div>
+      <input class="coaddr" id="pfMinOrder" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_min_order_ph')}" value="${pf.min_order_qty?fmtThousands(pf.min_order_qty):''}">
+      <div id="minOrderEff" style="font-size:11.5px;font-weight:600;color:#1a8a5a;margin-top:5px;min-height:14px"></div></div>` : '';
+  // ── Kategoriya atributlari (savollar) — ikkala rejimda ham (kategoriyaga moslashadi).
+  // Optomda 'size'/'color' bundan chiqarib tashlanadi: ular maxsus (Ranglar maydoni + razmer matni).
+  const attrSec = attrSectionHtml();
+
+  body.innerHTML = `<div class="cobody">
+    ${imagesSec}
+    <div class="cosec"><div class="lbl">${L('sp_name')}</div>
+      <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
+    <div class="cosec"><div class="lbl">${optom?L('sp_price_optom'):L('sp_price')}</div>
+      <input class="coaddr" id="pfPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.price?fmtThousands(pf.price):''}">
+      <div id="priceInsight" style="margin-top:7px"></div></div>
+    ${packSec}
+    <div class="cosec"><div class="lbl">${L('sp_old_price')}</div>
+      <input class="coaddr" id="pfOldPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_old_price_ph')}" value="${pf.old_price?fmtThousands(pf.old_price):''}"></div>
+    ${unitSec}
+    ${minPriceSec}
+    ${tierSec}
     <div class="cosec"><div class="lbl">${L('sp_category')}</div>
       <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>
     <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
       <input class="coaddr" id="pfStock" type="number" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_stock_ph')}" value="${esc(String(pf.stock_count))}"></div>
     <div class="cosec"><div class="lbl">${L('sp_desc')}</div>
       <textarea class="coaddr" id="pfDesc" placeholder="${L('sp_desc_ph')}">${esc(pf.description)}</textarea></div>
-    ${attrSectionHtml()}
+    ${attrSec}
     ${isEdit?`<button class="oact ok" id="pfAd" style="width:100%">${L('sp_ad_btn')}</button>
-              <button class="oact no" id="pfDynPrice" style="width:100%">${L('dynp_btn')}</button>
-              <button class="oact no" id="pfReels" style="width:100%">${L('reels_btn')}</button>
+              ${optom?'':`<button class="oact no" id="pfDynPrice" style="width:100%">${L('dynp_btn')}</button>
+              <button class="oact no" id="pfReels" style="width:100%">${L('reels_btn')}</button>`}
               <button class="oact no" id="pfToggle" style="width:100%">${pf.in_stock?L('sp_hide'):L('sp_unhide')}</button>
               <button class="oact no" id="pfDelete" style="width:100%;background:#fdebef;color:var(--sale)">${L('sp_delete')}</button>`:''}
   </div>
   <div class="cobar"><button id="pfSave">${isEdit?L('s_save'):L('sp_add_ad')}</button></div>`;
 
   const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
-  body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ pf.images.splice(Number(x.dataset.rm),1); renderProductForm(); });
+  body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
+  const pcol=document.getElementById('pfColors'); if(pcol) pcol.oninput=e=>{ pf.optomColors=e.target.value; };
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
   document.getElementById('pfPrice').oninput = e=>{
     const digits = e.target.value.replace(/\D/g,'');
@@ -5370,13 +5878,17 @@ function renderProductForm(){
   };
   document.getElementById('pfStock').oninput = e=>pf.stock_count=e.target.value;
   document.getElementById('pfDesc').oninput = e=>pf.description=e.target.value;
+  const psz=document.getElementById('pfPackSize'); if(psz) psz.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.pack_size=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; };
+  const sno=document.getElementById('pfSizeNote'); if(sno) sno.oninput=e=>{ pf.size_note=e.target.value; };
   body.querySelectorAll('[data-unit]').forEach(ch=>ch.onclick=()=>{
     pf.unit = (pf.unit===ch.dataset.unit) ? '' : ch.dataset.unit;   // qayta bosilsa bekor
     renderProductForm();
   });
   const uc=document.getElementById('pfUnitCustom'); if(uc) uc.oninput=e=>{ pf.unit=e.target.value; body.querySelectorAll('#pfUnits .chip').forEach(x=>x.classList.remove('active')); };
   const mp=document.getElementById('pfMinPrice'); if(mp) mp.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.min_price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; };
-  body.querySelectorAll('[data-tiermin]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tiermin; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].min=dg?Number(dg):''; e.target.value=dg||''; });
+  const moq=document.getElementById('pfMinOrder'); if(moq) moq.oninput=e=>{ const dg=e.target.value.replace(/\D/g,''); pf.min_order_qty=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; updateMinOrderEff(); };
+  body.querySelectorAll('[data-tiermin]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tiermin; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].min=dg?Number(dg):''; e.target.value=dg||''; updateMinOrderEff(); });
+  updateMinOrderEff();
   body.querySelectorAll('[data-tierprice]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tierprice; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; });
   body.querySelectorAll('[data-tierrm]').forEach(b=>b.onclick=()=>{ pf.tiers.splice(+b.dataset.tierrm,1); renderProductForm(); });
   const tadd=document.getElementById('pfTierAdd'); if(tadd) tadd.onclick=()=>{ if((pf.tiers||[]).length>=6){ tg.showAlert(L('sp_wholesale_max')); return; } pf.tiers.push({min:'',price:''}); renderProductForm(); };
@@ -5390,7 +5902,7 @@ function renderProductForm(){
   const adb = document.getElementById('pfAd'); if(adb) adb.onclick = ()=>openAdView(pf.id);
   const rlb = document.getElementById('pfReels'); if(rlb) rlb.onclick = ()=>openReelsView(pf.id);
   const dpb = document.getElementById('pfDynPrice'); if(dpb) dpb.onclick = ()=>openDynPriceView(pf.id);
-  // Savol rejimi + atribut maydonlari
+  // Savol rejimi + atribut maydonlari (faqat dona)
   body.querySelectorAll('[data-qmode]').forEach(o=>o.onclick=()=>{ pf.mode=o.dataset.qmode; renderProductForm(); });
   const ql=document.getElementById('qLoad'); if(ql) ql.onclick=loadQuestions;
   body.querySelectorAll('[data-qkey]').forEach(inp=>inp.oninput=e=>{ pf.attrs[e.target.dataset.qkey]=e.target.value; });
@@ -5435,6 +5947,8 @@ async function onPhotoPick(e){
     const r = await fetch('/api/seller/product/photo', {method:'POST', headers:{Authorization:AUTH}, body:fd});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     pf.images.push((await r.json()).file_id);
+    if(!pf.imageLabels) pf.imageLabels=[];
+    pf.imageLabels.push('');   // rasm bilan parallel rang nomi (optom)
   }catch(err){ tg.showAlert(L('sp_img_failed')+err.message); }
   renderProductForm();
 }
@@ -5444,6 +5958,8 @@ async function saveProduct(){
   if(!(pf.name||'').trim()){ tg.showAlert(L('sp_name_req')); return; }
   const price = Number(pf.price);
   if(!price || price<=0){ tg.showAlert(L('sp_price_req')); return; }
+  const optom = (pf.sale_mode==='optom');
+  if(optom && !(Number(pf.pack_size)>0)){ tg.showAlert(L('sp_pack_size_req')); return; }
   // Optom zinalari: har zina min≥2, 0<narx<dona narx; min qat'iy o'sib, narx qat'iy kamayib borsin.
   const tiersOut=[]; let prevMin=0, prevPrice=Infinity;
   const rows=(pf.tiers||[]).filter(t=>Number(t.min)>0||Number(t.price)>0)
@@ -5457,7 +5973,13 @@ async function saveProduct(){
   if(missing.length){ tg.showAlert(L('sp_q_required').replace('{f}', missing[0].label)); return; }
   const attributes = Object.keys(pf.attrs||{})
     .filter(k=>pf.attrs[k] && String(pf.attrs[k]).trim())
+    .filter(k=>!optom || !OPTOM_HIDDEN_ATTRS.includes(k))   // optomda size/color maxsus — bu yerdan chiqmaydi
     .map(k=>({key:k, value:String(pf.attrs[k]).trim(), label:(pf.attrLabels&&pf.attrLabels[k])||k}));
+  if(optom){
+    // Optom ranglar ro'yxati 'color' atributi sifatida — xaridor checkout shundan rang tanlaydi
+    const cstr=(pf.optomColors||'').trim();
+    if(cstr) attributes.push({key:'color', value:cstr, label:LANG==='ru'?'Цвет':'Rang'});
+  }
   btn.disabled = true; btn.textContent = L('sp_saving');
   const payload = {
     name: pf.name.trim(), price: price,
@@ -5467,9 +5989,14 @@ async function saveProduct(){
     old_price: (pf.old_price===''||pf.old_price==null) ? 0 : Number(pf.old_price),
     unit: (pf.unit||'').trim(),
     min_price: (pf.min_price===''||pf.min_price==null) ? 0 : Number(pf.min_price),
+    min_order_qty: (pf.min_order_qty===''||pf.min_order_qty==null) ? 0 : Number(pf.min_order_qty),
     wholesale_tiers: tiersOut,
     images: pf.images || [],
+    image_labels: (pf.imageLabels||[]).map(x=>(x||'').trim()),
     attributes: attributes,
+    sale_mode: optom ? 'optom' : 'dona',
+    pack_size: optom ? Number(pf.pack_size) : 0,
+    size_note: optom ? (pf.size_note||'').trim() : '',
   };
   try{
     const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';

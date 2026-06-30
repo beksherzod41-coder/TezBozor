@@ -307,3 +307,22 @@ def test_order_reminders_tolerance_late_tick():
     bosqich o'sha tikda ishga tushadi — 60s kechikmaydi (+3s tolerance)."""
     assert main._due_order_reminders(362, []) == [6]   # 362 <= 363 → ishlaydi
     assert main._due_order_reminders(364, []) == []    # 364 > 363 → hali emas
+
+
+def test_reminder_thresholds_optom_every_5_min():
+    """Optom (30 daqiqa) — har 5 daqiqa eslatma: 25,20,15,10,5 + oxirgi 1."""
+    assert main._reminder_thresholds(30 * 60) == [25, 20, 15, 10, 5, 1]
+
+
+def test_reminder_thresholds_short_keeps_legacy():
+    """Qisqa (oddiy 10 daqiqa) buyurtma eski xulqni saqlaydi: [6, 3, 1]."""
+    assert main._reminder_thresholds(10 * 60) == [6, 3, 1]
+    assert main._reminder_thresholds(None) == [6, 3, 1]
+
+
+def test_reminder_thresholds_no_burst_at_start():
+    """30 daqiqalik buyurtma boshlanishida (29 daqiqa qoldi) hali HECH bosqich yo'q
+    — eng yuqorisi 25 daqiqada ishga tushadi (boshlanishda birato'la yubormaydi)."""
+    thr = main._reminder_thresholds(30 * 60)
+    assert main._due_order_reminders(29 * 60, [], thr) == []
+    assert main._due_order_reminders(25 * 60, [], thr) == [25]

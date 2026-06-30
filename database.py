@@ -462,6 +462,14 @@ class Database:
             ("reviews",  "seller_reply",   "TEXT"),               # sotuvchining ochiq javobi (NULL = javob yo'q)
             ("reviews",  "replied_at",     "TIMESTAMP"),          # javob yozilgan vaqt
             ("product_attributes", "attr_label", "TEXT"),         # ko'rsatish uchun yorliq (AI savollar uchun — shablon yo'q)
+            ("orders",   "variant_label",   "TEXT"),               # variant-buyurtma: qaysi rasm/hil (masalan "#1" yoki "Qora") — NULL = oddiy buyurtma
+            ("orders",   "variant_size",    "TEXT"),               # variant-buyurtma: tanlangan razmer (NULL = razmer yo'q)
+            ("orders",   "variant_color",   "TEXT"),               # variant-buyurtma: tanlangan rang (NULL = rang yo'q)
+            ("product_images", "label",      "TEXT"),              # har rasmga (variant/hil) ixtiyoriy nom ("Qora", "Oq"); NULL = "#N"
+            ("products", "min_order_qty",   "INTEGER"),            # variant-buyurtma JAMI minimal son (NULL = eng past optom zina mini, u ham yo'q = 1)
+            ("products", "sale_mode",       "TEXT DEFAULT 'dona'"), # 'dona' (donalab) | 'optom' (pachka). Eski mahsulotlar = 'dona'
+            ("products", "pack_size",       "INTEGER"),            # optom: 1 pachkadagi dona soni (NULL = dona rejimi)
+            ("products", "size_note",       "TEXT"),               # optom: razmer matni (butun mahsulotga; xaridor tanlamaydi)
         ]
         for _tbl, _col, _defn in _migrations:
             try:
@@ -585,15 +593,17 @@ class Database:
             except Exception as e:
                 logging.error(f"seller_requests eski ma'lumotni ko'chirish xatosi: {e}")
 
-        # Bitta mahsulot uchun bir nechta rasm (4 tagacha).
+        # Bitta mahsulot uchun bir nechta rasm (5 tagacha — har rasm = bir variant/hil).
         # Birinchi rasm (position=0) products.image_url bilan ham sinxron saqlanadi —
         # shunda eski kod (ro'yxat, havola) ham ishlayveradi.
+        # label — har rasmga (variant) ixtiyoriy nom; eski bazalarda migratsiya qo'shadi.
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS product_images (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 product_id INTEGER NOT NULL,
                 file_id TEXT NOT NULL,
                 position INTEGER DEFAULT 0,
+                label TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
             )
@@ -2004,17 +2014,19 @@ class Database:
     # ===== ORDERS =====
     def create_order(self, buyer_id, seller_id, product_id, quantity, total_price,
                      delivery_address=None, buyer_lat=None, buyer_lon=None,
-                     payment_method=None, delivery_type=None, order_group_id=None):
+                     payment_method=None, delivery_type=None, order_group_id=None,
+                     variant_label=None, variant_size=None, variant_color=None):
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO orders (buyer_id, seller_id, product_id, quantity,
                                 total_price, delivery_address, buyer_lat, buyer_lon,
-                                payment_method, delivery_type, order_group_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                                payment_method, delivery_type, order_group_id,
+                                variant_label, variant_size, variant_color)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (buyer_id, seller_id, product_id, quantity, total_price,
               delivery_address, buyer_lat, buyer_lon, payment_method, delivery_type,
-              order_group_id))
+              order_group_id, variant_label, variant_size, variant_color))
         oid = cursor.lastrowid
         conn.commit()
         return oid
@@ -2376,6 +2388,36 @@ class Database:
         conn.commit()
         return cursor.rowcount > 0
 
+    def transition_group_status(self, group_id, new_status, expected_status='pending',
+                                cancel_by=None, cancel_reason=None):
+        """Guruh (variant/savat) buyurtmasidagi BARCHA `expected_status` qatorlarni atomik
+        o'tkazadi. O'tgan (yutgan) qator id'lar ro'yxatini qaytaradi — chaqiruvchi zahira/
+        xabarni FAQAT shu id'lar uchun bajaradi (ikki marta kamaymasin). cancel_by/
+        cancel_reason — bekor qilishda saqlanadi (COALESCE bilan mavjudini o'chirmaydi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM orders WHERE order_group_id=? AND status=? ORDER BY id ASC",
+            (str(group_id), expected_status))
+        ids = [r[0] for r in cursor.fetchall()]
+        if not ids:
+            return []
+        if new_status == 'cancelled' and (cancel_by is not None or cancel_reason is not None):
+            cursor.execute(
+                "UPDATE orders SET status=?, "
+                "cancel_by=COALESCE(?, cancel_by), "
+                "cancel_reason=COALESCE(?, cancel_reason), "
+                "updated_at=CURRENT_TIMESTAMP "
+                "WHERE order_group_id=? AND status=?",
+                (new_status, cancel_by, cancel_reason, str(group_id), expected_status))
+        else:
+            cursor.execute(
+                "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE order_group_id=? AND status=?",
+                (new_status, str(group_id), expected_status))
+        conn.commit()
+        return ids if cursor.rowcount > 0 else []
+
     def set_buyer_received(self, order_id):
         """Xaridor «oldim» bosdi — buyurtma YOPILMAYDI (status 'confirmed' qoladi).
         Sotuvchi to'lov holatini (to'liq/qarz/bo'lib) belgilab, yakunlashi kerak."""
@@ -2443,6 +2485,49 @@ class Database:
                WHERE id=? AND cancel_state='requested'""",
             (order_id,)
         )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def request_group_cancel(self, group_id, by, reason):
+        """Guruh (variant/savat) buyurtmasini bir tomon bekor qilishni so'raydi —
+        barcha 'confirmed' va cancel_state bo'sh qatorlarga. rowcount>0 bo'lsa True."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE orders
+               SET cancel_state='requested', cancel_by=?, cancel_reason=?,
+                   updated_at=CURRENT_TIMESTAMP
+               WHERE order_group_id=? AND status='confirmed' AND COALESCE(cancel_state,'')=''""",
+            (by, reason, str(group_id)))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def agree_group_cancel(self, group_id):
+        """Guruh: ikkinchi tomon roziligi -> barcha 'requested' qatorlar bekor qilinadi.
+        Bekor qilingan qator id'lar ro'yxatini qaytaradi (zahira qaytarish uchun)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id FROM orders WHERE order_group_id=? AND cancel_state='requested'",
+            (str(group_id),))
+        ids = [r[0] for r in cursor.fetchall()]
+        cursor.execute(
+            """UPDATE orders
+               SET status='cancelled', cancel_state=NULL, updated_at=CURRENT_TIMESTAMP
+               WHERE order_group_id=? AND cancel_state='requested'""",
+            (str(group_id),))
+        conn.commit()
+        return ids if cursor.rowcount > 0 else []
+
+    def dispute_group_cancel(self, group_id):
+        """Guruh: ikkinchi tomon rozi emas -> barcha 'requested' qatorlar admin hakamligiga."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """UPDATE orders
+               SET cancel_state='disputed', updated_at=CURRENT_TIMESTAMP
+               WHERE order_group_id=? AND cancel_state='requested'""",
+            (str(group_id),))
         conn.commit()
         return cursor.rowcount > 0
 
@@ -3849,8 +3934,8 @@ class Database:
         cursor.execute(f"UPDATE products SET {set_clause} WHERE id=?", values)
         conn.commit()
 
-    # ===== MAHSULOT RASMLARI (bir mahsulotga 4 tagacha) =====
-    MAX_PRODUCT_IMAGES = 4
+    # ===== MAHSULOT RASMLARI (bir mahsulotga 5 tagacha — har rasm = bir variant/hil) =====
+    MAX_PRODUCT_IMAGES = 5
 
     def get_product_images(self, product_id):
         """Mahsulot rasmlari (file_id) ro'yxati, tartib bo'yicha.
@@ -3883,22 +3968,46 @@ class Database:
         row = cursor.fetchone()
         return 1 if (row and row[0]) else 0
 
-    def set_product_images(self, product_id, file_ids):
-        """Mahsulotning barcha rasmlarini almashtiradi (eng ko'pi 4 ta).
-        Birinchi rasm products.image_url ga ham yoziladi (NULL bo'lishi mumkin)."""
-        file_ids = [f for f in (file_ids or []) if f][: self.MAX_PRODUCT_IMAGES]
+    def set_product_images(self, product_id, file_ids, labels=None):
+        """Mahsulotning barcha rasmlarini almashtiradi (eng ko'pi MAX_PRODUCT_IMAGES ta).
+        Birinchi rasm products.image_url ga ham yoziladi (NULL bo'lishi mumkin).
+        labels — har rasm uchun ixtiyoriy nom (variant/hil); file_ids bilan bir tartibda,
+        qisqa bo'lsa qolganlari NULL."""
+        clean = [f for f in (file_ids or []) if f][: self.MAX_PRODUCT_IMAGES]
+        labels = list(labels or [])
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("DELETE FROM product_images WHERE product_id=?", (product_id,))
-        for pos, fid in enumerate(file_ids):
+        for pos, fid in enumerate(clean):
+            lbl = (str(labels[pos]).strip() or None) if pos < len(labels) and labels[pos] is not None else None
             cursor.execute(
-                "INSERT INTO product_images (product_id, file_id, position) VALUES (?,?,?)",
-                (product_id, fid, pos)
+                "INSERT INTO product_images (product_id, file_id, position, label) VALUES (?,?,?,?)",
+                (product_id, fid, pos, lbl)
             )
         # Birinchi rasmni eski image_url ustuniga ham sinxronlaymiz
-        primary = file_ids[0] if file_ids else None
+        primary = clean[0] if clean else None
         cursor.execute("UPDATE products SET image_url=? WHERE id=?", (primary, product_id))
         conn.commit()
+
+    def get_product_image_variants(self, product_id):
+        """Mahsulot rasmlari + nomlari (variant/hil): [{file_id, label, position}], tartib bo'yicha.
+        product_images bo'sh bo'lsa eski yagona image_url'ga qaytadi (label=None)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_id, label, position FROM product_images "
+            "WHERE product_id=? ORDER BY position ASC, id ASC",
+            (product_id,)
+        )
+        out = [{"file_id": r[0], "label": r[1], "position": r[2]}
+               for r in cursor.fetchall() if r[0]]
+        if out:
+            return out
+        cursor.execute("SELECT image_url FROM products WHERE id=?", (product_id,))
+        row = cursor.fetchone()
+        if row and row[0]:
+            return [{"file_id": row[0], "label": None, "position": 0}]
+        return []
 
     def add_product_image(self, product_id, file_id):
         """Mahsulotga bitta rasm qo'shadi (limitni hisobga oladi). True — qo'shildi."""

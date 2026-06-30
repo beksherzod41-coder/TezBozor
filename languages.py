@@ -2123,6 +2123,10 @@ _TEXTS = {
         'uz': "• {name} — {qty} × {price} = {total}",
         'ru': "• {name} — {qty} × {price} = {total}",
     },
+    'seller_group_item_variant': {
+        'uz': "• {name} · {variant} — {qty} × {price} = {total}",
+        'ru': "• {name} · {variant} — {qty} × {price} = {total}",
+    },
     'seller_group_total': {'uz': "💰 Jami: <b>{total}</b>", 'ru': "💰 Итого: <b>{total}</b>"},
     'seller_group_buyer': {'uz': "👤 Xaridor: {buyer}", 'ru': "👤 Покупатель: {buyer}"},
     'grp_dist_from_shop': {'uz': "📏 Do'kondan masofa: ~{km} km", 'ru': "📏 Расстояние от магазина: ~{km} км"},
@@ -2472,9 +2476,9 @@ _TEXTS = {
     },
     'desc_too_long': {'uz': "❌ Tavsif juda uzun (maksimal 500 belgi). Qisqartiring:", 'ru': "❌ Описание слишком длинное (макс. 500 символов). Сократите:"},
     'add_photo_ask': {
-        'uz': ("📷 Mahsulot rasm(lar)ini yuboring — 4 tagacha qo'shsangiz bo'ladi.\n"
+        'uz': ("📷 Mahsulot rasm(lar)ini yuboring — 5 tagacha qo'shsangiz bo'ladi.\n"
                "Birinchi rasmni yuboring, yoki rasmsiz saqlash uchun '-' yozing."),
-        'ru': ("📷 Отправьте фото товара — можно до 4 штук.\n"
+        'ru': ("📷 Отправьте фото товара — можно до 5 штук.\n"
                "Отправьте первое фото или напишите '-', чтобы сохранить без фото."),
     },
     'photo_too_big': {
@@ -2711,9 +2715,9 @@ _TEXTS = {
     'edit_desc_long': {'uz': "❌ Tavsif juda uzun (maks. 500 belgi):", 'ru': "❌ Описание слишком длинное (макс. 500 символов):"},
     'desc_updated': {'uz': "✅ Tavsif yangilandi.", 'ru': "✅ Описание обновлено."},
     'edit_photos_ask': {
-        'uz': ("🖼 Mahsulotning yangi rasm(lar)ini yuboring — 4 tagacha.\n"
+        'uz': ("🖼 Mahsulotning yangi rasm(lar)ini yuboring — 5 tagacha.\n"
                "Birinchi rasmni yuboring.\nBarcha rasmlarni o'chirish uchun '-' yozing."),
-        'ru': ("🖼 Отправьте новые фото товара — до 4 штук.\n"
+        'ru': ("🖼 Отправьте новые фото товара — до 5 штук.\n"
                "Отправьте первое фото.\nЧтобы удалить все фото, напишите '-'."),
     },
     'edit_photo_too_big': {'uz': "❌ Rasm juda katta (maks. 5 MB). Boshqa rasm yuboring:", 'ru': "❌ Фото слишком большое (макс. 5 МБ). Отправьте другое:"},
@@ -3663,9 +3667,9 @@ _TEXTS = {
         'ru': "🚀 Опубликовать без фото",
     },
     'ai_send_photos': {
-        'uz': ("📷 Mahsulot rasm(lar)ini yuboring (4 tagacha).\n"
+        'uz': ("📷 Mahsulot rasm(lar)ini yuboring (5 tagacha).\n"
                "Har bir rasmni alohida yuboring. Tugatgach «✅ Joylash» tugmasini bosing."),
-        'ru': ("📷 Отправьте фото товара (до 4 шт).\n"
+        'ru': ("📷 Отправьте фото товара (до 5 шт).\n"
                "Каждое фото отдельным сообщением. По готовности нажмите «✅ Опубликовать»."),
     },
     'ai_photos_added': {

@@ -2332,3 +2332,441 @@ def test_payment_done_notifies_seller_final(client, monkeypatch, purpose):
     assert any(n["kind"] == "payment" for n in db.get_user_notifications(sid)), purpose
     # Telegram push sotuvchining chat_id'siga ketdi
     assert any(c[0] == "sendMessage" and c[1].get("chat_id") == 5002 for c in calls), (purpose, calls)
+
+
+# ============================================================
+# VARIANT-BUYURTMA (/api/order/variants) — bitta listing ichida bir nechta
+# rasm/hil + razmer; optom narx JAMI songa qarab; JAMI min nazorati.
+# ============================================================
+import json as _json
+
+
+def _mk_variant_product(client, *, price=1000, tiers=None, min_order_qty=None,
+                        sizes=None, colors=None, stock=None):
+    """Optom zinali (ixtiyoriy razmer/rangli) mahsulot yaratadi va id qaytaradi."""
+    db = webapp_server.db
+    sid = db.get_user_by_telegram_id(5002)["id"]
+    pid = db.create_product(seller_id=sid, name="Krossovka", price=price, stock_count=stock)
+    fields = {"in_stock": 1, "status": "active"}
+    if tiers is not None:
+        fields["wholesale_tiers"] = _json.dumps(tiers)
+    if min_order_qty is not None:
+        fields["min_order_qty"] = min_order_qty
+    db.update_product_fields(pid, **fields)
+    attrs = {}
+    if sizes:
+        attrs["size"] = sizes
+    if colors:
+        attrs["color"] = colors
+    if attrs:
+        db.save_product_attributes(pid, attrs)
+    return pid
+
+
+def test_variant_order_below_min_400(client):
+    """JAMI son sotuvchi qo'ygan min_order_qty dan kam — rad etiladi (below_min)."""
+    pid = _mk_variant_product(client, min_order_qty=50, stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 20}, {"label": "#2", "qty": 10}],  # jami 30 < 50
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"].startswith("below_min_50")
+
+
+def test_variant_order_wholesale_no_min_gate(client):
+    """Optom zinalar minimal MAJBURLAMAYDI: min_order_qty qo'yilmagan bo'lsa, zina 20+ bo'lsa ham
+    xaridor 1 dona oladi (oddiy narx); 25 ga ham "30 ol" deb taqiq qo'yilmaydi (20+ zinasi qo'llanadi)."""
+    pid = _mk_variant_product(client, price=60000,
+                              tiers=[{"min": 20, "price": 58000}, {"min": 30, "price": 56000}],
+                              stock=999)  # min_order_qty BERILMAGAN
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 1}],  # 1 dona — o'tadi
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["unit_price"] == 60000   # zinaga yetmadi → oddiy narx
+    r2 = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 25}],  # 25 dona — o'tadi, 30 ga majburlamaydi
+    })
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["unit_price"] == 58000   # 20+ zinasi
+    assert r2.json()["total_qty"] == 25
+
+
+def test_variant_order_mixed_group_wholesale(client):
+    """3 ta hil aralashtirilib JAMI 50 ga yetadi → BITTA guruh; optom narx JAMIga qarab."""
+    pid = _mk_variant_product(client, price=1000, tiers=[{"min": 50, "price": 800}],
+                              min_order_qty=50, stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 20}, {"label": "#3", "qty": 20},
+                  {"label": "#4", "qty": 10}],  # jami 50
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["count"] == 3
+    assert data["total_qty"] == 50
+    assert data["unit_price"] == 800       # 50+ zinasi qo'llandi
+    assert data["total"] == 50 * 800
+    # Guruhdagi qatorlar variant_label saqladi
+    db = webapp_server.db
+    orders = db.get_orders_in_group(data["group_id"])
+    assert len(orders) == 3
+    assert {o["variant_label"] for o in orders} == {"#1", "#3", "#4"}
+
+
+def test_variant_order_size_required_400(client):
+    """Razmer ro'yxati bor mahsulotda razmersiz qator — rad etiladi (size_required)."""
+    pid = _mk_variant_product(client, min_order_qty=2, sizes="40, 41, 42", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 2}],  # razmer yo'q
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"] == "size_required"
+
+
+def test_variant_order_with_size_ok(client):
+    """Razmer berilgan bo'lsa o'tadi va variant_size saqlanadi."""
+    pid = _mk_variant_product(client, min_order_qty=2, sizes="40, 41, 42", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "size": "41", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    assert orders[0]["variant_size"] == "41"
+
+
+def test_variant_order_per_size_qty_ok(client):
+    """Bitta rasm (hil) ichida har razmer uchun alohida son — 36 dan 3, 38 dan 5 →
+    bir guruhda 2 qator; JAMI 8 ga optom narx qo'llanadi."""
+    pid = _mk_variant_product(client, price=1000, tiers=[{"min": 8, "price": 700}],
+                              min_order_qty=8, sizes="36, 37, 38", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "size": "36", "qty": 3},
+                  {"label": "#1", "size": "38", "qty": 5}],  # jami 8
+    })
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["total_qty"] == 8
+    assert data["unit_price"] == 700        # 8+ zinasi
+    db = webapp_server.db
+    orders = db.get_orders_in_group(data["group_id"])
+    by_size = {o["variant_size"]: o["quantity"] for o in orders}
+    assert by_size == {"36": 3, "38": 5}
+    assert all(o["variant_label"] == "#1" for o in orders)
+
+
+def test_variant_order_space_separated_sizes_ok(client):
+    """AI atributni BO'SH JOY bilan saqlasa ham ("36 37 38 39 40") razmer to'g'ri ajratiladi
+    va buyurtma o'tadi (vergul shart emas)."""
+    pid = _mk_variant_product(client, min_order_qty=2, sizes="36 37 38 39 40", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "size": "37", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    assert orders[0]["variant_size"] == "37"
+
+
+def test_variant_order_space_separated_colors_ok(client):
+    """Rang ham bo'sh joy bilan saqlangan bo'lsa ("Qora Oq Ko'k") to'g'ri ajratiladi."""
+    pid = _mk_variant_product(client, min_order_qty=2, colors="Qora Oq Ko'k", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "color": "Oq", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    assert orders[0]["variant_color"] == "Oq"
+
+
+def test_variant_order_same_image_multi_color_size(client):
+    """Bitta rasm (#1) ichida turli rang+razmer kombinatsiyasi:
+    Oq·36·2 + Qora·38·5 → bir guruhda 2 qator, har biri o'z rang/razmeri bilan."""
+    pid = _mk_variant_product(client, min_order_qty=2, sizes="36 37 38",
+                              colors="Oq Qora", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "color": "Oq", "size": "36", "qty": 2},
+                  {"label": "#1", "color": "Qora", "size": "38", "qty": 5}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["total_qty"] == 7
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    got = {(o["variant_color"], o["variant_size"]): o["quantity"] for o in orders}
+    assert got == {("Oq", "36"): 2, ("Qora", "38"): 5}
+    assert all(o["variant_label"] == "#1" for o in orders)
+
+
+def test_variant_order_color_required_400(client):
+    """Rang ro'yxati bor mahsulotda rangsiz qator — rad etiladi (color_required)."""
+    pid = _mk_variant_product(client, min_order_qty=2, colors="Qora, Oq, Ko'k", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "qty": 2}],  # rang yo'q
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"] == "color_required"
+
+
+def test_variant_order_bad_color_400(client):
+    """Ro'yxatda yo'q rang — rad etiladi (bad_color)."""
+    pid = _mk_variant_product(client, min_order_qty=2, colors="Qora, Oq", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "color": "Yashil", "qty": 2}],
+    })
+    assert r.status_code == 400
+    assert r.json()["detail"] == "bad_color"
+
+
+def test_variant_order_with_color_ok(client):
+    """Rang berilgan bo'lsa o'tadi va variant_color saqlanadi."""
+    pid = _mk_variant_product(client, min_order_qty=2, colors="Qora, Oq, Ko'k", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "color": "Oq", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    assert orders[0]["variant_color"] == "Oq"
+
+
+def test_variant_order_color_and_size_ok(client):
+    """Rang + razmer birga — ikkalasi ham saqlanadi."""
+    pid = _mk_variant_product(client, min_order_qty=2, sizes="40, 41",
+                              colors="Qora, Oq", stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "#1", "size": "41", "color": "Qora", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    orders = db.get_orders_in_group(r.json()["group_id"])
+    assert orders[0]["variant_size"] == "41"
+    assert orders[0]["variant_color"] == "Qora"
+
+
+def test_variant_order_own_product_400(client):
+    """Sotuvchi o'z mahsulotini variant-buyurtma qila olmaydi."""
+    pid = _mk_variant_product(client, min_order_qty=2, stock=999)
+    r = client.post("/api/order/variants", headers=hdr(5002), json={
+        "product_id": pid, "lines": [{"label": "#1", "qty": 5}]})
+    assert r.status_code == 400
+
+
+# ========================= OPTOM (pachka) savdo turi =========================
+
+def _create_optom(client, *, price=190000, pack_size=12, size_note="36-41 standart",
+                  colors="Qora, Oq", tiers=None, min_packs=None):
+    """Endpoint orqali optom mahsulot yaratadi (ranglar RO'YXATI 'color' atributi + pachka maydonlari)."""
+    body = {
+        "name": "Tapichka optom", "price": price, "sale_mode": "optom",
+        "pack_size": pack_size, "size_note": size_note,
+        "images": ["file_a", "file_b"],
+        "min_price": 150000,   # optomda E'TIBORSIZ qoldirilishi kerak (savdolashish yo'q)
+        "stock_count": 999,
+    }
+    if colors:
+        body["attributes"] = [{"key": "color", "value": colors, "label": "Rang"}]
+    if tiers is not None:
+        body["wholesale_tiers"] = tiers
+    if min_packs is not None:
+        body["min_order_qty"] = min_packs
+    r = client.post("/api/seller/product", headers=hdr(5002), json=body)
+    assert r.status_code == 200, r.text
+    return r.json()["product_id"]
+
+
+def test_optom_create_fields_and_no_haggle(client):
+    """Optom mahsulot: pack_size/size_note/ranglar ro'yxati saqlanadi; min_price (savdolashish) E'TIBORSIZ."""
+    pid = _create_optom(client, colors="Qora, Oq")
+    d = client.get(f"/api/products/{pid}", headers=hdr(5001)).json()
+    assert d["sale_mode"] == "optom"
+    assert d["pack_size"] == 12
+    assert "36-41" in (d.get("size_note") or "")
+    color = next((a["attr_value"] for a in d.get("attributes", []) if a["attr_key"] == "color"), None)
+    assert color == "Qora, Oq"
+    # Optomda savdolashish yo'q — min_price saqlanmaydi, haggle o'chiq
+    assert not d.get("haggle_on")
+    assert d.get("min_price") in (None, 0)
+
+
+def test_optom_section_filter(client):
+    """Optom mahsulot faqat ?wholesale=1 da; dona (oddiy) mahsulot faqat default ro'yxatda."""
+    # Katalog ro'yxatida ko'rinishi uchun sotuvchi tasdiqlangan bo'lishi shart
+    db = webapp_server.db
+    db.update_user(db.get_user_by_telegram_id(5002)["id"], is_approved=1)
+    opt_pid = _create_optom(client)
+    dona_r = client.post("/api/seller/product", headers=hdr(5002),
+                         json={"name": "Oddiy dona", "price": 5000, "stock_count": 9})
+    dona_pid = dona_r.json()["product_id"]
+    opt_ids = [p["id"] for p in client.get("/api/products?wholesale=1", headers=hdr(5001)).json()]
+    def_ids = [p["id"] for p in client.get("/api/products", headers=hdr(5001)).json()]
+    assert opt_pid in opt_ids and opt_pid not in def_ids
+    assert dona_pid in def_ids and dona_pid not in opt_ids
+
+
+def test_optom_pack_order_by_color(client):
+    """Xaridor RANG bo'yicha pachka soni buyuradi (razmersiz); rang saqlanadi; JAMI pachka min'ga yetadi."""
+    pid = _create_optom(client, price=190000, min_packs=3, colors="Qora, Oq")
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "Qora", "color": "Qora", "qty": 2},
+                  {"label": "Oq", "color": "Oq", "qty": 2}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["total_qty"] == 4          # 4 pachka
+    assert r.json()["total"] == 4 * 190000     # razmer yo'q, bitta pachka narxi
+    db = webapp_server.db
+    got = {o["variant_color"]: o["quantity"] for o in db.get_orders_in_group(r.json()["group_id"])}
+    assert got == {"Qora": 2, "Oq": 2}
+    # Ro'yxatda yo'q rang — rad etiladi (server color_opts'ni tekshiradi)
+    rb = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "Yashil", "color": "Yashil", "qty": 5}]})
+    assert rb.status_code == 400
+    # JAMI pachka min'dan kam — rad etiladi
+    r2 = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "Qora", "color": "Qora", "qty": 2}],
+    })
+    assert r2.status_code == 400 and r2.json()["detail"].startswith("below_min")
+
+
+def test_optom_order_deadline_30min(client):
+    """Optom buyurtma tasdiqlash muddati 30 daqiqa (oddiy 10 emas)."""
+    import datetime as _d
+    pid = _create_optom(client, colors=None)   # rangsiz — bitta pachka stepperi
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "Tapichka optom", "qty": 1}],
+    })
+    assert r.status_code == 200, r.text
+    db = webapp_server.db
+    o = db.get_orders_in_group(r.json()["group_id"])[0]
+    dl = _d.datetime.strptime(str(o["auto_cancel_at"])[:19], "%Y-%m-%d %H:%M:%S")
+    rem = (dl.replace(tzinfo=_d.timezone.utc) - _d.datetime.now(_d.timezone.utc)).total_seconds()
+    assert 1500 < rem <= 1800   # ~30 daqiqa (oddiy 600 emas)
+
+
+def test_optom_ad_caption_has_pack_colors_size(client):
+    """Optom reklama matni: '1 pachka = N dona', ranglar, razmer va pachka birligi bo'lsin."""
+    pid = _create_optom(client, pack_size=6, size_note="36-41 standart", colors="Oq, Qora")
+    r = client.get(f"/api/products/{pid}/ad-caption", headers=hdr(5001))
+    assert r.status_code == 200, r.text
+    cap = r.json()["caption"]
+    assert "1 pachka = 6 dona" in cap
+    assert "Oq, Qora" in cap
+    assert "36-41" in cap
+    assert "pachka" in cap   # narx birligi / optom belgisi
+
+
+def test_optom_pack_tier_discount(client):
+    """Pachka-zina: 10+ pachka olganda pachka narxi pasayadi (effective_unit_price pachkaga)."""
+    pid = _create_optom(client, price=190000, colors="Qora",
+                        tiers=[{"min_qty": 10, "price": 180000}])
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": [{"label": "Qora", "color": "Qora", "qty": 10}],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["unit_price"] == 180000
+    assert r.json()["total"] == 10 * 180000
+
+
+# ============================================================
+# VARIANT GURUH = BITTA SHARTNOMA — bekor/tasdiq/sabab butun guruhga.
+# (3 rang × o'lcham = 3 qator, lekin BITTA amal hammasini boshqaradi.)
+# ============================================================
+def _mk_variant_group(client, *, lines=None):
+    """3 variantli (Qora/Oq/Qizil) guruh buyurtma yaratadi; (gid, rep_id) qaytaradi."""
+    pid = _mk_variant_product(client, price=1000, min_order_qty=3, stock=999)
+    lines = lines or [{"label": "Qora", "qty": 1}, {"label": "Oq", "qty": 1},
+                      {"label": "Qizil", "qty": 1}]
+    r = client.post("/api/order/variants", headers=hdr(5001), json={
+        "product_id": pid, "delivery_type": "pickup", "payment_method": "cash",
+        "lines": lines})
+    assert r.status_code == 200, r.text
+    gid = r.json()["group_id"]
+    rows = webapp_server.db.get_orders_in_group(gid)
+    rep = min(int(o["id"]) for o in rows)
+    return gid, rep
+
+
+def test_variant_group_buyer_cancel_cancels_whole_group(client, monkeypatch):
+    """Xaridor PENDING variant-guruhni bitta amal bilan (sabab bilan) bekor qiladi —
+    barcha 3 qator 'cancelled', cancel_by='buyer', cancel_reason saqlanadi."""
+    monkeypatch.setattr(webapp_server, "_tg_call", _ok_tg_call)
+    db = webapp_server.db
+    gid, rep = _mk_variant_group(client)
+    rc = client.post(f"/api/order/{rep}/cancel", headers=hdr(5001),
+                     json={"reason": "code:bchg"})
+    assert rc.status_code == 200, rc.text
+    rows = db.get_orders_in_group(gid)
+    assert len(rows) == 3
+    assert all(o["status"] == "cancelled" for o in rows)
+    assert all(o["cancel_by"] == "buyer" for o in rows)
+    assert all(o["cancel_reason"] == "code:bchg" for o in rows)
+
+
+def test_variant_group_seller_reject_with_reason(client, monkeypatch):
+    """Sotuvchi PENDING variant-guruhni rad etadi (erkin matn sabab) — butun guruh
+    bekor; erkin matn 'text:' bilan normallashtiriladi."""
+    monkeypatch.setattr(webapp_server, "_tg_call", _ok_tg_call)
+    db = webapp_server.db
+    gid, rep = _mk_variant_group(client)
+    rr = client.post(f"/api/seller/order/{rep}/action", headers=hdr(5002),
+                     json={"action": "reject", "reason": "Mahsulot tugadi"})
+    assert rr.status_code == 200, rr.text
+    rows = db.get_orders_in_group(gid)
+    assert all(o["status"] == "cancelled" for o in rows)
+    assert all(o["cancel_by"] == "seller" for o in rows)
+    assert all(o["cancel_reason"] == "text:Mahsulot tugadi" for o in rows)
+
+
+def test_variant_group_confirm_then_seller_request_cancel_buyer_agree(client, monkeypatch):
+    """Sotuvchi guruhni TASDIQLAYDI (hammasi confirmed), keyin bekor SO'RAYDI (sabab),
+    xaridor ROZI bo'ladi → butun guruh bekor."""
+    monkeypatch.setattr(webapp_server, "_tg_call", _ok_tg_call)
+    db = webapp_server.db
+    gid, rep = _mk_variant_group(client)
+    assert client.post(f"/api/seller/order/{rep}/action", headers=hdr(5002),
+                       json={"action": "confirm"}).status_code == 200
+    assert all(o["status"] == "confirmed" for o in db.get_orders_in_group(gid))
+    rq = client.post(f"/api/seller/order/{rep}/request-cancel", headers=hdr(5002),
+                     json={"reason": "code:sstock"})
+    assert rq.status_code == 200, rq.text
+    rows = db.get_orders_in_group(gid)
+    assert all(o["cancel_state"] == "requested" and o["cancel_by"] == "seller" for o in rows)
+    # Xaridor SOTUVCHI so'roviga javob beradi → /api/order/.../cancel-respond (rozi)
+    ra = client.post(f"/api/order/{rep}/cancel-respond", headers=hdr(5001),
+                     json={"agree": True})
+    assert ra.status_code == 200, ra.text
+    assert all(o["status"] == "cancelled" for o in db.get_orders_in_group(gid))
+
+
+def test_cancel_suggest_returns_list(client):
+    """AI taklif endpointi — har doim {reasons: [...]} (AI o'chiq bo'lsa bo'sh ro'yxat)."""
+    db = webapp_server.db
+    db.create_shop(db.get_user_by_telegram_id(5002)["id"])
+    ro = client.post("/api/order", headers=hdr(5001),
+                     json={"product_id": client.pid, "quantity": 1,
+                           "delivery_type": "pickup", "payment_method": "cash"})
+    oid = ro.json()["order_id"]
+    r = client.post(f"/api/order/{oid}/cancel-suggest", headers=hdr(5001))
+    assert r.status_code == 200, r.text
+    assert isinstance(r.json()["reasons"], list)
+    # Sotuvchi ham o'z buyurtmasiga taklif so'ray oladi (party='seller')
+    assert client.post(f"/api/order/{oid}/cancel-suggest", headers=hdr(5002)).status_code == 200

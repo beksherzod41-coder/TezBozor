@@ -76,6 +76,8 @@ def price_with_unit(product):
     Birlik bo'lmasa oddiy narx qaytadi (eski mahsulotlar buzilmaydi)."""
     s = fmt_price(product.get('price'))
     unit = (product.get('unit') or '').strip() if isinstance(product, dict) else ''
+    if not unit and isinstance(product, dict) and product.get('sale_mode') == 'optom':
+        unit = 'pachka'   # optom: 1 pachka narxi
     return f"{s} / {unit}" if unit else s
 
 # ===== LOGGING + (ixtiyoriy) MONITORING =====
@@ -1705,14 +1707,14 @@ async def buyer_category_products(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def _send_product_card(context, chat_id, images, text, keyboard):
-    """Mahsulot kartochkasini yuboradi. images — file_id ro'yxati (0..4 ta).
+    """Mahsulot kartochkasini yuboradi. images — file_id ro'yxati (0..5 ta).
     • 0 rasm  → faqat matn
     • 1 rasm  → rasm + caption (eski xatti-harakat)
-    • 2-4 rasm → albom (media group) + alohida tugmali xabar.
+    • 2-5 rasm → albom (media group) + alohida tugmali xabar.
       (Albomga tugma biriktirib bo'lmaydi va caption 1024 belgidan oshmasligi kerak,
        shuning uchun matn alohida xabarda yuboriladi.)"""
     markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-    images = [i for i in (images or []) if i][:4]
+    images = [i for i in (images or []) if i][:db.MAX_PRODUCT_IMAGES]
     if len(images) <= 1:
         if images:
             try:
@@ -3108,11 +3110,10 @@ async def buyer_order_detail(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if status == 'pending' and order.get('created_at'):
         from datetime import datetime, timezone
         try:
-            created = datetime.strptime(str(order['created_at'])[:19], "%Y-%m-%d %H:%M:%S")
-            created = created.replace(tzinfo=timezone.utc)
             now = datetime.now(timezone.utc)
-            elapsed = (now - created).total_seconds()
-            remaining = max(0, 600 - elapsed)  # 10 daqiqa = 600 sekund
+            # Real muddat DB'dagi auto_cancel_at'dan (optom=30 daq, oddiy=10 daq); yo'q bo'lsa created_at+TTL
+            _dl = _order_deadline(order)
+            remaining = max(0, (_dl - now).total_seconds()) if _dl else 0
             if remaining > 0:
                 mins = int(remaining // 60)
                 secs = int(remaining % 60)
@@ -3385,9 +3386,22 @@ async def cancel_request_start(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['cancel_order_id'] = order_id
     context.user_data['cancel_party'] = party
 
+    keyboard = []
+    # AI taklif qilgan kontekstli sabablar (matn callback_data'ga sig'maydi → indeks bilan)
+    try:
+        ai_reasons = await ai_assistant.suggest_cancel_reasons(
+            party=party, product_name=order.get('product_name') or '',
+            status=order.get('status') or '', lang=lang)
+    except Exception as e:
+        logging.warning(f"AI bekor sabab taklif xato: {e}")
+        ai_reasons = []
+    context.user_data['cancel_ai_reasons'] = ai_reasons
+    for i, r in enumerate(ai_reasons):
+        keyboard.append([InlineKeyboardButton(f"🤖 {r}"[:60], callback_data=f"ccl_air_{i}")])
+
     codes = BUYER_CANCEL_REASONS if party == 'buyer' else SELLER_CANCEL_REASONS
-    keyboard = [[InlineKeyboardButton(t(lang, 'crsn_' + c), callback_data=f"ccl_rsn_{c}")]
-                for c in codes]
+    keyboard += [[InlineKeyboardButton(t(lang, 'crsn_' + c), callback_data=f"ccl_rsn_{c}")]
+                 for c in codes]
     keyboard.append([InlineKeyboardButton(t(lang, 'crsn_other'), callback_data="ccl_rsn_other")])
     keyboard.append([InlineKeyboardButton(t(lang, 'btn_cancel'), callback_data="ccl_abort")])
 
@@ -3408,6 +3422,20 @@ async def cancel_reason_pick(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await query.edit_message_text(t(lang, 'cancel_aborted'))
         context.user_data.pop('cancel_order_id', None)
         context.user_data.pop('cancel_party', None)
+        context.user_data.pop('cancel_ai_reasons', None)
+        return ConversationHandler.END
+
+    # AI taklif qilgan sabab (indeks bo'yicha) → erkin matn sifatida saqlanadi
+    if query.data.startswith("ccl_air_"):
+        try:
+            idx = int(query.data.rsplit("_", 1)[1])
+            ai_reasons = context.user_data.get('cancel_ai_reasons') or []
+            chosen = ai_reasons[idx]
+        except (ValueError, IndexError):
+            await query.edit_message_text(t(lang, 'cancel_not_available'))
+            return ConversationHandler.END
+        await _finalize_cancel_request(update, context, 'text:' + chosen[:300], via_query=True)
+        context.user_data.pop('cancel_ai_reasons', None)
         return ConversationHandler.END
 
     code = query.data.split("_", 2)[2]
@@ -3447,7 +3475,12 @@ async def _finalize_cancel_request(update, context, reason, via_query):
         await _reply(t(lang, 'order_not_found'))
         return
 
-    if not db.request_order_cancel(order_id, party, reason):
+    gid = order.get('order_group_id')
+    if gid:
+        ok = db.request_group_cancel(gid, party, reason)
+    else:
+        ok = db.request_order_cancel(order_id, party, reason)
+    if not ok:
         await _reply(t(lang, 'cancel_not_available'))
         return
 
@@ -3509,8 +3542,15 @@ async def cancel_respond(update: Update, context: ContextTypes.DEFAULT_TYPE):
     oid = fmt_order_id(order_id)
     pname = html.escape(order.get('product_name') or '')
 
+    gid = order.get('order_group_id')
     if action == "cclagree":
-        if db.agree_order_cancel(order_id):
+        if gid:
+            # Variant/savat guruh — butun guruh bekor bo'ladi, har biriga zahira qaytadi
+            for o in db.agree_group_cancel(gid):
+                od = db.get_order_by_id(o)
+                if od:
+                    await _maybe_restock_on_cancel(context, od)
+        elif db.agree_order_cancel(order_id):
             await _maybe_restock_on_cancel(context, order)
         await query.edit_message_text(t(lang, 'cancel_agreed_done', oid=oid), parse_mode='HTML')
         if req_tg:
@@ -3522,7 +3562,10 @@ async def cancel_respond(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logging.error(f"Bekor roziligi bildirishnomasi ketmadi: {e}")
     else:  # ccldeny
-        db.dispute_order_cancel(order_id)
+        if gid:
+            db.dispute_group_cancel(gid)
+        else:
+            db.dispute_order_cancel(order_id)
         await query.edit_message_text(t(lang, 'cancel_denied_done', oid=oid), parse_mode='HTML')
         if req_tg:
             try:
@@ -4432,13 +4475,30 @@ ORDER_TTL_SECONDS = 600  # buyurtma tasdiqlash muddati (10 daqiqa)
 ORDER_REMINDER_MINUTES = [6, 3, 1]
 
 
-def _due_order_reminders(remaining_sec, fired):
+def _reminder_thresholds(total_window_sec):
+    """Eslatma bosqichlari (daqiqa). UZUN muddatli buyurtmalar (optom — 30 daqiqa) uchun
+    HAR 5 DAQIQA eslatiladi: 25, 20, 15, 10, 5 va oxirgi 1 daqiqa. Qisqa (oddiy — 10 daqiqa)
+    buyurtmalar eski xulqni saqlaydi: [6, 3, 1]. Bosqichlar muddatdan KICHIK bo'ladi —
+    aks holda boshlanishidayoq hammasi birdan yuborilardi."""
+    try:
+        mins = int(round(float(total_window_sec) / 60))
+    except (ValueError, TypeError):
+        return list(ORDER_REMINDER_MINUTES)
+    if mins >= 20:
+        thr = [m for m in range(5, mins, 5)]   # 5,10,...,(muddatdan kichik): 30→[5..25]
+        return sorted(set(thr + [1]), reverse=True)
+    return list(ORDER_REMINDER_MINUTES)
+
+
+def _due_order_reminders(remaining_sec, fired, thresholds=None):
     """Hozir yuborilishi kerak bo'lgan eslatma bosqichlari (vaqti kelgan + hali
     yuborilmagan). `fired` — allaqachon yuborilgan bosqichlar ro'yxati.
+    thresholds — bosqichlar ro'yxati (None bo'lsa standart ORDER_REMINDER_MINUTES).
 
     +3s tolerance: tik daqiqa chegarasidan bir oz kech (yoki erta) tushsa ham bosqich
     o'sha tikda ishga tushsin — aks holda butun bir daqiqa (60s) kechikardi."""
-    return [thr for thr in ORDER_REMINDER_MINUTES
+    thresholds = thresholds if thresholds is not None else ORDER_REMINDER_MINUTES
+    return [thr for thr in thresholds
             if remaining_sec <= thr * 60 + 3 and thr not in fired]
 
 
@@ -4682,11 +4742,15 @@ async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
             context.job.schedule_removal()
             return
 
-        # ⏰ Push eslatmalar (5/3/1 daqiqa qoldi) — har bosqich BIR marta. job.data'da
-        # kuzatiladi; restartda 'fired' tozalanadi (kamdan-kam — bir martalik takror mumkin).
+        # ⏰ Push eslatmalar — har bosqich BIR marta. job.data'da kuzatiladi; restartda
+        # 'fired' tozalanadi (kamdan-kam — bir martalik takror mumkin). Bosqichlar
+        # buyurtma MUDDATIGA bog'liq: optom (30 daq) — har 5 daqiqa; oddiy (10 daq) — 6/3/1.
         remaining_sec = (deadline - now).total_seconds()
+        _created = _parse_utc(order.get('created_at'))
+        _window = (deadline - _created).total_seconds() if _created else None
+        _thresholds = _reminder_thresholds(_window) if _window else None
         fired = d.setdefault('reminders_fired', [])
-        for thr in _due_order_reminders(remaining_sec, fired):
+        for thr in _due_order_reminders(remaining_sec, fired, _thresholds):
             fired.append(thr)
             await _push_order_reminder(context, order, gid, oid, slang, thr)
 
@@ -5298,8 +5362,25 @@ async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat
         t(slang, 'seller_group_header', oid=fmt_order_id(int(group_id)), count=len(orders)),
     ]
     for o in orders:
-        lines.append(t(slang, 'seller_group_item', name=html.escape(o['product_name'] or ''),
-                       qty=o['quantity'], price=fmt_price(o['product_price']), total=fmt_price(o['total_price'])))
+        # Variant-buyurtma qatori (rasm/hil + rang + razmer) — variant_label bo'lsa alohida ko'rsatamiz
+        _vlabel = (o.get('variant_label') or '').strip()
+        _vsize = (o.get('variant_size') or '').strip()
+        _vcolor = (o.get('variant_color') or '').strip()
+        if _vlabel or _vsize or _vcolor:
+            # Takror qiymatlarni olib tashlaymiz (optomda label=rang=color → "Oq · Oq" bo'lmasin)
+            _vseen = []
+            for _x in (_vlabel, _vcolor, _vsize):
+                if _x and _x not in _vseen:
+                    _vseen.append(_x)
+            _vtxt = " · ".join(_vseen)
+            # dona narx: total/qty (optom narx jamiga qarab hisoblangan)
+            _unit = (float(o['total_price']) / o['quantity']) if o.get('quantity') else float(o['product_price'])
+            lines.append(t(slang, 'seller_group_item_variant', name=html.escape(o['product_name'] or ''),
+                           variant=html.escape(_vtxt), qty=o['quantity'],
+                           price=fmt_price(_unit), total=fmt_price(o['total_price'])))
+        else:
+            lines.append(t(slang, 'seller_group_item', name=html.escape(o['product_name'] or ''),
+                           qty=o['quantity'], price=fmt_price(o['product_price']), total=fmt_price(o['total_price'])))
     lines.append("")
     lines.append(t(slang, 'seller_group_total', total=fmt_price(grand)))
     lines.append(t(slang, 'seller_group_buyer', buyer=html.escape(first.get('buyer_name') or '')))
@@ -5367,6 +5448,171 @@ async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat
 
 
 # --- Guruh (savat) buyurtma — SOTUVCHI tomoni ---
+
+def _seller_manages_group(seller_user, orders):
+    """Foydalanuvchi guruh buyurtmasini boshqara oladimi: ega, admin, yoki guruhdagi
+    mahsulotni joylagan (ruxsatli, faol) xodim. group_status_action bilan bir xil mantiq."""
+    if not orders:
+        return False
+    is_owner = bool(seller_user and seller_user.get('id') == orders[0].get('seller_id'))
+    is_admin = bool(seller_user and seller_user.get('role') == 'admin')
+    if is_owner or is_admin:
+        return True
+    if seller_user:
+        staff_rec = db.get_staff_by_user(seller_user['id'])
+        if staff_rec and staff_rec.get('perm_confirm_orders', 1) and staff_rec.get('is_active', 1):
+            for o in orders:
+                prod = db.get_product_basic(o.get('product_id')) if o.get('product_id') else None
+                if prod and prod.get('created_by') == seller_user['id']:
+                    return True
+    return False
+
+
+async def seller_reject_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sotuvchi PENDING buyurtmani rad etmoqchi — avval bekor SABABINI so'raymiz
+    (AI taklif + preset). Kirish: cancel_order_<oid> yoki gcancel_<gid>."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    data = query.data
+    if data.startswith("gcancel_"):
+        scope, key = "g", data.split("_", 1)[1]
+        orders = db.get_orders_in_group(key)
+        if not orders:
+            await query.edit_message_text(t(lang, 'order_not_found'))
+            return
+        seller_user = db.get_user_by_telegram_id(update.effective_user.id)
+        if (update.effective_user.id != ADMIN_ID) and not _seller_manages_group(seller_user, orders):
+            await query.answer(t(lang, 'not_your_order_toast'), show_alert=True)
+            return
+        if orders[0].get('status') != 'pending':
+            await seller_group_order_detail(update, context, group_id=key)
+            return
+        prod_name = orders[0].get('product_name') or ''
+    else:  # cancel_order_<oid>
+        oid = int(data.split("_")[2])
+        scope, key = "o", str(oid)
+        if not await _ensure_order_seller(update, context, oid):
+            return
+        order = db.get_order_by_id(oid)
+        if not order or order.get('status') != 'pending':
+            await seller_order_detail(update, context)
+            return
+        prod_name = order.get('product_name') or ''
+
+    try:
+        ai = await ai_assistant.suggest_cancel_reasons(
+            party='seller', product_name=prod_name, status='pending', lang=lang)
+    except Exception as e:
+        logging.warning(f"AI reject sabab taklif xato: {e}")
+        ai = []
+    context.user_data[f'rjai_{scope}_{key}'] = ai
+    kb = [[InlineKeyboardButton(f"🤖 {r}"[:60], callback_data=f"rjok_{scope}_{key}_a{i}")]
+          for i, r in enumerate(ai)]
+    kb += [[InlineKeyboardButton(t(lang, 'crsn_' + c), callback_data=f"rjok_{scope}_{key}_{c}")]
+           for c in SELLER_CANCEL_REASONS]
+    kb.append([InlineKeyboardButton(t(lang, 'btn_cancel'), callback_data=f"rjback_{scope}_{key}")])
+    await query.edit_message_text(
+        t(lang, 'cancel_pick_reason', oid=fmt_order_id(int(key))),
+        reply_markup=InlineKeyboardMarkup(kb), parse_mode='HTML')
+
+
+async def seller_reject_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """rjok_<scope>_<key>_<choice> — tanlangan sabab bilan PENDING buyurtmani rad etadi.
+    rjback_<scope>_<key> — sababsiz orqaga (detalga). 'other' → erkin matn so'raydi."""
+    query = update.callback_query
+    await query.answer()
+    lang = get_lang(update, context)
+    data = query.data
+
+    if data.startswith("rjback_"):
+        _, scope, key = data.split("_", 2)
+        context.user_data.pop(f'rjai_{scope}_{key}', None)
+        if scope == "g":
+            await seller_group_order_detail(update, context, group_id=key)
+        else:
+            await seller_order_detail(update, context)
+        return
+
+    # rjok_<scope>_<key>_<choice>
+    body = data[len("rjok_"):]
+    scope, key, choice = body.split("_", 2)
+
+    if choice.startswith("a"):
+        try:
+            idx = int(choice[1:])
+            reason = 'text:' + (context.user_data.get(f'rjai_{scope}_{key}') or [])[idx][:300]
+        except (ValueError, IndexError):
+            reason = None
+    else:
+        reason = 'code:' + choice
+    context.user_data.pop(f'rjai_{scope}_{key}', None)
+    await _perform_seller_reject(update, context, scope, key, reason)
+
+
+async def _perform_seller_reject(update, context, scope, key, reason):
+    """PENDING buyurtmani (yakka yoki guruh) sabab bilan rad etadi: atomik o'tkazish,
+    taymerlarni o'chirish, xaridorga xabar, detalni yangilash. Pending → zahira tegilmaydi."""
+    query = update.callback_query
+    lang = get_lang(update, context)
+    jq = context.application.job_queue
+    if scope == "g":
+        orders = db.get_orders_in_group(key)
+        if not orders:
+            await query.edit_message_text(t(lang, 'order_not_found'))
+            return
+        seller_user = db.get_user_by_telegram_id(update.effective_user.id)
+        if (update.effective_user.id != ADMIN_ID) and not _seller_manages_group(seller_user, orders):
+            await query.answer(t(lang, 'not_your_order_toast'), show_alert=True)
+            return
+        if jq:
+            for nm in (f"countdown_group_{key}", f"auto_cancel_group_{key}", f"reminder_group_{key}"):
+                for job in jq.get_jobs_by_name(nm):
+                    job.schedule_removal()
+        won = db.transition_group_status(key, 'cancelled', 'pending',
+                                         cancel_by='seller', cancel_reason=reason)
+        if not won:
+            await seller_group_order_detail(update, context, group_id=key)
+            return
+        try:
+            buyer_tg = orders[0].get('buyer_tg')
+            if buyer_tg:
+                buyer = db.get_user_by_id(orders[0]['buyer_id'])
+                blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+                await context.bot.send_message(
+                    chat_id=buyer_tg,
+                    text=t(blang, 'grp_cancelled_notify', oid=fmt_order_id(int(key)), n=len(orders)),
+                    parse_mode='HTML')
+        except Exception as e:
+            logging.error(f"Xaridorga guruh bekor bildirishnomasi ketmadi: {e}")
+        await seller_group_order_detail(update, context, group_id=key)
+    else:
+        oid = int(key)
+        if not await _ensure_order_seller(update, context, oid):
+            return
+        if jq:
+            for jn in (f"countdown_order_{oid}", f"auto_cancel_{oid}", f"reminder_{oid}"):
+                for job in jq.get_jobs_by_name(jn):
+                    job.schedule_removal()
+        won = db.transition_order_status(oid, 'cancelled', 'pending',
+                                         cancel_by='seller', cancel_reason=reason)
+        if not won:
+            await seller_order_detail(update, context)
+            return
+        try:
+            order = db.get_order_by_id(oid)
+            if order and order.get('buyer_tg'):
+                buyer = db.get_user_by_id(order['buyer_id'])
+                blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+                await context.bot.send_message(
+                    chat_id=order['buyer_tg'],
+                    text=t(blang, 'order_cancelled_notify', oid=fmt_order_id(oid),
+                           pname=html.escape(order.get('product_name') or '')),
+                    parse_mode='HTML')
+        except Exception as e:
+            logging.error(f"Xaridorga bekor bildirishnomasi ketmadi: {e}")
+        await seller_order_detail(update, context)
+
 
 async def group_status_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """gconfirm_/gcancel_/gdeliver_ — butun guruh holatini o'zgartiradi."""
@@ -7461,7 +7707,7 @@ async def seller_add_product_start(update: Update, context: ContextTypes.DEFAULT
               'product_desc', 'product_photo', 'product_photos', 'question_mode',
               'attr_templates', 'attr_index', 'product_attrs'):
         context.user_data.pop(k, None)
-    context.user_data['product_photos'] = []   # 4 tagacha rasm shu yerda yig'iladi
+    context.user_data['product_photos'] = []   # 5 tagacha rasm shu yerda yig'iladi
 
     # Joylash usulini tanlash. AI o'chiq bo'lsa — to'g'ridan-to'g'ri klassikka o'tamiz
     # (sotuvchini ishlamaydigan tugmalar bilan chalkashtirmaymiz).
@@ -7920,20 +8166,44 @@ async def _build_ad_caption(product, length="long"):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
-    # Optom (ulgurji) taklifi — yoqilgan bo'lsa reklamada zinalarni ko'rsatamiz.
+    # Optom (ulgurji/pachka) taklifi — yoqilgan bo'lsa reklamada zinalarni ko'rsatamiz.
+    _is_optom = product.get('sale_mode') == 'optom'
     _w = wholesale_info(product)
-    _unit = product.get('unit') or 'dona'
+    _unit = 'pachka' if _is_optom else (product.get('unit') or 'dona')
     _u_esc = html.escape(str(_unit))
     if _w['enabled']:
         _tier_txt = ", ".join(f"{t['min']}+ {_u_esc} — {html.escape(fmt_price(t['price']))}"
                               for t in _w['tiers'])
-        wholesale_line = f"\n📦 Optom: {_tier_txt}"
+        wholesale_line = f"\n📦 Optom narx: {_tier_txt}"
     else:
         wholesale_line = ""
 
+    # Optom (pachka) maxsus qatorlari: pachka belgisi, 1 pachka = N dona, ranglar, razmer.
+    optom_lines, extra_facts = "", {}
+    if _is_optom:
+        _ps = product.get('pack_size')
+        try:
+            _colors = [a['attr_value'] for a in (db.get_product_attributes(product['id']) or [])
+                       if a['attr_key'] == 'color' and (a['attr_value'] or '').strip()]
+            _colors = _colors[0] if _colors else ""
+        except Exception:
+            _colors = ""
+        _sn = (product.get('size_note') or "").strip()
+        _pack_line = f"\n📦 1 pachka = {int(_ps)} dona" if _ps else ""
+        _colors_line = f"\n🎨 Ranglar: {html.escape(_colors)}" if _colors else ""
+        _size_line = f"\n📏 Razmer: {html.escape(_sn)}" if _sn else ""
+        optom_lines = f"\n🏷 Optom (pachkada sotiladi){_pack_line}{_colors_line}{_size_line}"
+        extra_facts = {"savdo turi": "optom (ulgurji, pachkada sotiladi)"}
+        if _ps:
+            extra_facts["bitta pachka"] = f"{int(_ps)} dona"
+        if _colors:
+            extra_facts["mavjud ranglar"] = _colors
+        if _sn:
+            extra_facts["razmerlar"] = _sn
+
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
-        f"\n💵 {price_with_unit(product)}{wholesale_line}"
+        f"\n💵 {price_with_unit(product)}{wholesale_line}{optom_lines}"
         f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}"
     )
     parse_mode = 'HTML'
@@ -7950,15 +8220,27 @@ async def _build_ad_caption(product, length="long"):
             location=loc or '',
             lang=DEFAULT_LANG,
             length=length,
+            extra=extra_facts,
         )
     except Exception as e:
         logging.warning(f"Reklama matni olinmadi: {e}")
         ad_text = None
     if ad_text:
         # AI matni — oddiy matn (emoji + bezak). HTML parse qilinmaydi (xavfsiz).
-        caption = ad_text
+        caption = ad_text.rstrip()
         parse_mode = None
-        # Optom taklifini AI matniga ham kafolatli qo'shamiz (oddiy matn).
+        # Optom: pachka/ranglar/razmer faktlarini AI matniga ham KAFOLATLI qo'shamiz.
+        if _is_optom:
+            _plain = []
+            if product.get('pack_size'):
+                _plain.append(f"📦 1 pachka = {int(product['pack_size'])} dona")
+            if extra_facts.get('mavjud ranglar'):
+                _plain.append(f"🎨 Ranglar: {extra_facts['mavjud ranglar']}")
+            if extra_facts.get('razmerlar'):
+                _plain.append(f"📏 Razmer: {extra_facts['razmerlar']}")
+            if _plain:
+                caption += "\n\n" + "\n".join(_plain)
+        # Optom zina narxlarini AI matniga ham kafolatli qo'shamiz (oddiy matn).
         if _w['enabled']:
             _tiers_plain = ", ".join(f"{t['min']}+ {_unit} — {fmt_price(t['price'])}" for t in _w['tiers'])
             caption = caption.rstrip() + f"\n\n📦 Optom narx: {_tiers_plain}"
@@ -7977,11 +8259,17 @@ async def _build_ad_design_bytes(context, product):
         badge = badges[(product.get('id') or 0) % len(badges)]
         shop_name = product.get('shop_name')
         region_lbl = region_label_l(product.get('seller_region_id'), DEFAULT_LANG)
+        # Optom rozetkasi — pachka belgisi (rasm ustida)
+        optom_txt = ''
+        if product.get('sale_mode') == 'optom':
+            _ps = product.get('pack_size')
+            optom_txt = f"OPTOM · 1 PACHKA = {int(_ps)} DONA" if _ps else "OPTOM"
         return await asyncio.to_thread(
             ad_design.build_ad_image, raw,
             price_text=fmt_price(product.get('price')),
             badge_text=badge,
             shop_text=(str(shop_name) if shop_name else (region_lbl or '')),
+            optom_text=optom_txt,
         )
     except Exception as e:
         logging.warning(f"Reklama dizayni yasalmadi: {e}")
@@ -9805,7 +10093,7 @@ async def edit_field_desc_save(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 
-# ---------- RASMLAR (barchasini almashtirish, 4 tagacha) ----------
+# ---------- RASMLAR (barchasini almashtirish, 5 tagacha) ----------
 async def edit_field_photos_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -14083,8 +14371,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await cart_view_dec(update, context)
     elif data.startswith("cvrm_"):
         await cart_view_remove(update, context)
-    elif data.startswith(("gconfirm_", "gcancel_", "gdeliver_")):
+    elif data.startswith("gcancel_"):
+        await seller_reject_prompt(update, context)   # avval bekor sababini so'raymiz
+    elif data.startswith(("gconfirm_", "gdeliver_")):
         await group_status_action(update, context)
+    elif data.startswith(("rjok_", "rjback_")):
+        await seller_reject_do(update, context)
     elif data.startswith("gcrfwd_"):
         await seller_forward_courier_group(update, context)
     elif data.startswith("seller_gorder_"):
@@ -14190,7 +14482,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await buyer_confirm_pickup(update, context)
     elif data.startswith("seller_order_"):
         await seller_order_detail(update, context)
-    elif data.startswith(("confirm_order_", "cancel_order_", "deliver_order_")):
+    elif data.startswith("cancel_order_"):
+        await seller_reject_prompt(update, context)   # avval bekor sababini so'raymiz
+    elif data.startswith(("confirm_order_", "deliver_order_")):
         await update_order_status(update, context)
     elif data.startswith(("setl_paid_", "setl_debt_", "setl_inst_")):
         await settle_choice(update, context)
@@ -15363,7 +15657,7 @@ def main():
     cancel_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(_go_to_app, pattern=r"^ccl_req_\d+$")],
         states={
-            CANCEL_PICK_REASON: [CallbackQueryHandler(cancel_reason_pick, pattern=r"^ccl_rsn_|^ccl_abort$")],
+            CANCEL_PICK_REASON: [CallbackQueryHandler(cancel_reason_pick, pattern=r"^ccl_rsn_|^ccl_air_|^ccl_abort$")],
             CANCEL_REASON_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, cancel_reason_text)],
         },
         fallbacks=global_fallbacks,

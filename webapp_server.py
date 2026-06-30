@@ -13,6 +13,7 @@ Ishga tushirish (lokal/sinov):
 Kerakli paketlar:  fastapi  uvicorn[standard]  httpx
 """
 import os
+import re
 import html
 import json
 import hashlib
@@ -144,14 +145,21 @@ def api_products(
     sort: str = Query("rating"),
     region_id: int = Query(None),
     seller_id: int = Query(None),
+    wholesale: bool = Query(False),
 ):
     require_auth(authorization)
     items = db.search_products(
         query=q, category_id=category_id, sort_by=sort, region_id=region_id,
         seller_id=seller_id,
     )
-    # O'z do'koni mahsulotlarini buyer katalogda yashiramiz (own_product chalkashligi yo'q)
-    return _hide_own(_rows(items), _own_shop_seller_id(authorization))
+    rows = _hide_own(_rows(items), _own_shop_seller_id(authorization))
+    # Savdo turi bo'yicha ajratish: "Optom" bo'limi faqat optom (pachka) mahsulotlar;
+    # "Mahsulotlar" (dona) bo'limi optomni ko'rsatmaydi.
+    if wholesale:
+        rows = [r for r in rows if (r.get("sale_mode") == "optom")]
+    else:
+        rows = [r for r in rows if (r.get("sale_mode") != "optom")]
+    return rows
 
 
 @app.get("/api/products/{product_id}/related")
@@ -970,6 +978,7 @@ def api_product_detail(product_id: int, authorization: str = Header(None)):
     product = dict(product)
     product["seller_is_pro"] = _is_pro(product.get("seller_id"))   # #18 Pro nishon (do'kon)
     product["images"] = db.get_product_images(product_id)  # file_id ro'yxati
+    product["image_variants"] = db.get_product_image_variants(product_id)  # [{file_id,label,position}] — variant tanlash uchun
     # #19 — hudud yorlig'i (kanal e'loni pariteti: app'da ham "Viloyat → Tuman" ko'rinsin)
     product["region_label"] = db.get_region_label(product.get("seller_region_id")) or ""
     # #16 — joriy xaridor uchun sevimli holati (yurakcha tugmasi uchun)
@@ -1026,7 +1035,8 @@ async def api_product_ad_caption(product_id: int, authorization: str = Header(No
 # ============================================================
 # BUYURTMA YARATISH (to'liq app ichida — sotuvchiga xabarni bot fon job'i yuboradi)
 # ============================================================
-ORDER_TTL_SECONDS = 600
+ORDER_TTL_SECONDS = 600          # oddiy buyurtma: sotuvchi tasdig'i 10 daqiqa
+ORDER_TTL_OPTOM_SECONDS = 1800   # optom (pachka) buyurtma: 30 daqiqa (ko'proq o'ylab ko'rish)
 _VALID_DELIVERY = {"delivery", "pickup"}
 _VALID_PAYMENT = {"cash", "terminal", "p2p"}
 
@@ -1173,6 +1183,171 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
     for oid in created:
         db.mark_order_notify_pending(oid)
     return {"ok": True, "group_id": group_id, "count": len(created), "total": grand}
+
+
+def _min_order_qty(product):
+    """Variant-buyurtma uchun JAMI minimal son: FAQAT sotuvchi aniq qo'ygan min_order_qty (>1).
+    Optom (ulgurji) zinalar minimal MAJBURLAMAYDI — ular faqat chegirma: kam olgan dona narxida,
+    hatto 1 dona ham olishi mumkin; zina mini'ga yetganda narx optomga tushadi."""
+    try:
+        moq = int(product.get("min_order_qty") or 0)
+    except (ValueError, TypeError):
+        moq = 0
+    return moq if moq > 1 else 1
+
+
+def _split_opts(s):
+    """Atribut qiymatini variantlarga ajratadi. Vergul/nuqtali vergul/slash/yangi qator/'|'/'·'
+    bo'lsa shular bo'yicha, aks holda bo'sh joy bo'yicha (AI ko'pincha "36 37 38" deb saqlaydi).
+    Frontend `splitOpts` bilan AYNAN bir xil — validatsiya rad etmasligi uchun."""
+    s = str(s or "").strip()
+    if not s:
+        return []
+    parts = re.split(r"[,;/\n·|]+", s) if re.search(r"[,;/\n·|]", s) else re.split(r"\s+", s)
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _product_attr_options(product_id, key):
+    """Mahsulot atributlaridagi `key` ro'yxati (vergul yoki bo'sh joy bilan), aks holda []."""
+    try:
+        attrs = db.get_product_attributes(product_id) or []
+    except Exception:
+        return []
+    for a in attrs:
+        a = dict(a)
+        if a.get("attr_key") == key and (a.get("attr_value") or "").strip():
+            return _split_opts(a["attr_value"])
+    return []
+
+
+def _product_size_options(product_id):
+    """Mahsulot atributlaridagi razmer ro'yxati."""
+    return _product_attr_options(product_id, "size")
+
+
+def _product_color_options(product_id):
+    """Mahsulot atributlaridagi rang ro'yxati."""
+    return _product_attr_options(product_id, "color")
+
+
+class VariantLineIn(BaseModel):
+    label: Optional[str] = None    # variant nomi yoki "#N"
+    size: Optional[str] = None
+    color: Optional[str] = None
+    qty: int = 0
+
+
+class VariantOrderIn(BaseModel):
+    product_id: int
+    lines: List[VariantLineIn]
+    delivery_type: str = "pickup"
+    payment_method: str = "cash"
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
+@app.post("/api/order/variants")
+def api_variant_order(vo: VariantOrderIn, authorization: str = Header(None)):
+    """Bitta listing ichidagi bir nechta variant (rasm/hil) bo'yicha BITTA guruh buyurtma.
+    Optom narx JAMI songa qarab qo'llanadi; JAMI son minimumdan kam bo'lsa rad etiladi.
+    Sotuvchiga bitta guruh bildirishnomasi (variant taqsimoti bilan) ketadi (bot fon job)."""
+    buyer = dict(_buyer_from_auth(authorization))
+    _rate_limit("order", buyer["id"], 15, 60)
+    if vo.delivery_type not in _VALID_DELIVERY:
+        raise HTTPException(status_code=400, detail="bad_delivery_type")
+    if vo.payment_method not in _VALID_PAYMENT:
+        raise HTTPException(status_code=400, detail="bad_payment_method")
+
+    product = db.get_product_by_id(vo.product_id)
+    if not product or not product.get("in_stock") or product.get("status") == "deleted":
+        raise HTTPException(status_code=404, detail="product_unavailable")
+    product = dict(product)
+    if buyer["id"] == product["seller_id"]:
+        raise HTTPException(status_code=400, detail="own_product")
+
+    # Faqat son > 0 bo'lgan qatorlar
+    lines = [ln for ln in (vo.lines or []) if (ln.qty or 0) > 0]
+    if not lines:
+        raise HTTPException(status_code=400, detail="empty_order")
+
+    total_qty = sum(int(ln.qty) for ln in lines)
+    if total_qty > 9999:
+        raise HTTPException(status_code=400, detail="bad_quantity")
+
+    # Razmer ro'yxati bor mahsulotda har qatorda razmer MAJBURIY
+    size_opts = _product_size_options(vo.product_id)
+    if size_opts:
+        for ln in lines:
+            if not (ln.size or "").strip():
+                raise HTTPException(status_code=400, detail="size_required")
+            if ln.size.strip() not in size_opts:
+                raise HTTPException(status_code=400, detail="bad_size")
+
+    # Rang ro'yxati bor mahsulotda har qatorda rang MAJBURIY
+    color_opts = _product_color_options(vo.product_id)
+    if color_opts:
+        for ln in lines:
+            if not (ln.color or "").strip():
+                raise HTTPException(status_code=400, detail="color_required")
+            if ln.color.strip() not in color_opts:
+                raise HTTPException(status_code=400, detail="bad_color")
+
+    # JAMI minimal son (optom)
+    min_qty = _min_order_qty(product)
+    if total_qty < min_qty:
+        raise HTTPException(status_code=400, detail=f"below_min_{min_qty}")
+
+    # Ombor (jami)
+    stock = product.get("stock_count")
+    if stock is not None and total_qty > int(stock):
+        raise HTTPException(status_code=409, detail=f"only_{int(stock)}_available")
+
+    if vo.delivery_type == "delivery":
+        address = (vo.address or "").strip() or None
+        lat, lon = vo.lat, vo.lon
+        if lat is None or lon is None:
+            raise HTTPException(status_code=400, detail="location_required")
+    else:
+        address, lat, lon = None, None, None
+
+    # Optom narx JAMI songa qarab (har variant qatoriga bir xil dona narx)
+    unit_price = effective_unit_price(product, total_qty)
+    created, grand = [], 0.0
+    for idx, ln in enumerate(lines):
+        qty = int(ln.qty)
+        line_total = qty * unit_price
+        grand += line_total
+        label = (ln.label or "").strip() or f"#{idx + 1}"
+        size = (ln.size or "").strip() or None
+        color = (ln.color or "").strip() or None
+        oid = db.create_order(
+            buyer_id=buyer["id"], seller_id=product["seller_id"], product_id=vo.product_id,
+            quantity=qty, total_price=line_total, delivery_address=address,
+            buyer_lat=lat, buyer_lon=lon, payment_method=vo.payment_method,
+            delivery_type=vo.delivery_type, variant_label=label, variant_size=size,
+            variant_color=color,
+        )
+        created.append(oid)
+
+    if not created:
+        raise HTTPException(status_code=409, detail="nothing_available")
+    group_id = str(created[0])
+    db.set_orders_group(created, group_id)
+    _is_optom = (product.get("sale_mode") == "optom")
+    _ttl = ORDER_TTL_OPTOM_SECONDS if _is_optom else ORDER_TTL_SECONDS  # optom = 30 daqiqa
+    deadline = datetime.now(timezone.utc) + timedelta(seconds=_ttl)
+    db.set_group_deadline(group_id, deadline)
+    for oid in created:
+        db.mark_order_notify_pending(oid)
+    # App-banner: sotuvchiga yangi buyurtma (bot Telegram push'ini fon-job yuboradi)
+    pname = product.get("name") or ""
+    _u_uz = "pachka" if _is_optom else "dona"
+    _u_ru = "упак." if _is_optom else "шт"
+    _notify_db(product["seller_id"], "order", ("🛒 Yangi buyurtma", "🛒 Новый заказ"),
+               (f"{pname} · {total_qty} {_u_uz}", f"{pname} · {total_qty} {_u_ru}"), ref_id=int(group_id))
+    return {"ok": True, "group_id": group_id, "count": len(created),
+            "total": grand, "unit_price": unit_price, "total_qty": total_qty}
 
 
 import time as _time
@@ -1525,8 +1700,60 @@ async def api_review(order_id: int, body: ReviewIn, authorization: str = Header(
     return {"ok": True}
 
 
+def _norm_cancel_reason(raw):
+    """Mijozdan kelgan bekor sababini normallashtiradi: 'code:<kod>'/'text:<matn>' —
+    bot va app cancelReasonText/cancel_reason_display bilan AYNAN bir xil format.
+    Prefiks bo'lmasa erkin matn deb 'text:' qo'shiladi. Bo'sh bo'lsa None."""
+    s = (raw or "").strip()
+    if not s:
+        return None
+    if s.startswith("code:") or s.startswith("text:"):
+        return s[:520]
+    return ("text:" + s)[:520]
+
+
+def _cancel_reason_display(reason, lang):
+    """Saqlangan 'code:<kod>'/'text:<matn>' sababini o'qiladigan, til-aware matnga
+    aylantiradi (bot cancel_reason_display pariteti). Bo'sh/auto bo'lsa '—'."""
+    s = (reason or "").strip()
+    if not s or s in ("—", "auto_timeout"):
+        return "—"
+    if s.startswith("code:"):
+        return t(lang, "crsn_" + s[5:])
+    if s.startswith("text:"):
+        return s[5:]
+    return s
+
+
+class BuyerCancelIn(BaseModel):
+    reason: Optional[str] = None
+
+
+@app.post("/api/order/{order_id}/cancel-suggest")
+async def api_cancel_suggest(order_id: int, authorization: str = Header(None)):
+    """AI bekor qilish sabablarini taklif qiladi (kontekstli). Foydalanuvchining shu
+    buyurtmadagi o'rni (xaridor/sotuvchi) va mahsulot/holatga qarab 4 ta qisqa sabab.
+    AI o'chiq/xato bo'lsa bo'sh ro'yxat — app/bot oldindan tayyor presetlarga tushadi."""
+    user = dict(_buyer_from_auth(authorization))
+    order = db.get_order_by_id(order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="not_found")
+    if user.get("id") == order.get("buyer_id"):
+        party = "buyer"
+    elif order.get("seller_id") == _owner_id(user) or user.get("role") == "admin":
+        party = "seller"
+    else:
+        raise HTTPException(status_code=403, detail="not_your_order")
+    _rate_limit("cancel_suggest", user["id"], 12, 60)
+    lang = get_user_lang(user) or DEFAULT_LANG
+    reasons = await ai_assistant.suggest_cancel_reasons(
+        party=party, product_name=order.get("product_name") or "",
+        status=order.get("status") or "", lang=lang)
+    return {"reasons": reasons}
+
+
 @app.post("/api/order/{order_id}/cancel")
-async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
+async def api_buyer_cancel(order_id: int, body: BuyerCancelIn = None, authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     order = db.get_order_by_id(order_id)
     if not order:
@@ -1535,12 +1762,17 @@ async def api_buyer_cancel(order_id: int, authorization: str = Header(None)):
         raise HTTPException(status_code=403, detail="not_your_order")
     if order.get("status") != "pending":
         raise HTTPException(status_code=409, detail="not_pending")
-    if order.get("order_group_id"):
-        # Guruh (savat) buyurtmasini app'dan yakka bekor qilish hozircha qo'llanmaydi
-        raise HTTPException(status_code=409, detail="group_cancel_unsupported")
+    reason = _norm_cancel_reason(body.reason if body else None)
+    gid = order.get("order_group_id")
     # ATOMIK: faqat hali 'pending' bo'lsa bekor qilamiz. Sotuvchi ayni damda tasdiqlab
     # ulgursa, eski bekor 'confirmed'ni bosib o'tkazib zahirani yo'qotmasin.
-    if not db.transition_order_status(order_id, "cancelled", "pending", cancel_by="buyer"):
+    # Variant/savat guruh buyurtmasi — bitta amal bilan butun guruh bekor bo'ladi.
+    if gid:
+        if not db.transition_group_status(gid, "cancelled", "pending",
+                                          cancel_by="buyer", cancel_reason=reason):
+            raise HTTPException(status_code=409, detail="not_pending")
+    elif not db.transition_order_status(order_id, "cancelled", "pending",
+                                        cancel_by="buyer", cancel_reason=reason):
         raise HTTPException(status_code=409, detail="not_pending")
     try:
         seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
@@ -1591,7 +1823,11 @@ async def api_request_cancel(order_id: int, body: CancelReqIn, authorization: st
         raise HTTPException(status_code=403, detail="not_your_order")
     if order.get("status") != "confirmed" or (order.get("cancel_state") or ""):
         raise HTTPException(status_code=409, detail="cancel_not_available")
-    if not db.request_order_cancel(order_id, "buyer", reason):
+    gid = order.get("order_group_id")
+    if gid:
+        if not db.request_group_cancel(gid, "buyer", reason):
+            raise HTTPException(status_code=409, detail="cancel_not_available")
+    elif not db.request_order_cancel(order_id, "buyer", reason):
         raise HTTPException(status_code=409, detail="cancel_not_available")
     try:
         seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
@@ -1601,7 +1837,7 @@ async def api_request_cancel(order_id: int, body: CancelReqIn, authorization: st
                 "chat_id": order["seller_tg"],
                 "text": t(slang, "cancel_request_notify", oid=fmt_order_id(order_id),
                           pname=html.escape(order.get("product_name") or ""),
-                          reason=html.escape(reason)),
+                          reason=html.escape(_cancel_reason_display(reason, slang))),
                 "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": [
                     [{"text": t(slang, "btn_cancel_agree"), "callback_data": f"cclagree_{order_id}"}],
@@ -1808,8 +2044,16 @@ async def api_cancel_respond(order_id: int, body: CancelRespondIn, authorization
     pname = html.escape(order.get("product_name") or "")
     seller = db.get_user_by_id(order["seller_id"]) if order.get("seller_id") else None
     slang = get_user_lang(seller) if seller else DEFAULT_LANG
+    gid = order.get("order_group_id")
     if body.agree:
-        if db.agree_order_cancel(order_id):
+        if gid:
+            for o in db.agree_group_cancel(gid):
+                try:
+                    od = db.get_order_by_id(o)
+                    db.restock_on_cancel(od["product_id"], od.get("quantity") or 1)
+                except Exception as e:
+                    logging.warning(f"cancel-respond restock xato (order {o}): {e}")
+        elif db.agree_order_cancel(order_id):
             try:
                 db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
             except Exception as e:
@@ -1820,7 +2064,10 @@ async def api_cancel_respond(order_id: int, body: CancelRespondIn, authorization
                            "parse_mode": "HTML"})
         return {"ok": True, "cancelled": True}
     # rad — admin hakamligiga
-    db.dispute_order_cancel(order_id)
+    if gid:
+        db.dispute_group_cancel(gid)
+    else:
+        db.dispute_order_cancel(order_id)
     _pn = order.get("product_name") or ""
     _notify_admins_db("dispute", ("⚖️ Yangi nizo — hal kutyapti", "⚖️ Новый спор — ждёт решения"),
                       (_pn, _pn), ref_id=order_id)
@@ -3036,9 +3283,12 @@ def _region_label(product):
 
 
 def _price_unit(product):
-    """Narx + (mavjud bo'lsa) o'lchov birligi — bot price_with_unit pariteti. #20"""
+    """Narx + (mavjud bo'lsa) o'lchov birligi — bot price_with_unit pariteti. #20
+    Optom mahsulotda birlik = 'pachka' (1 pachka narxi)."""
     s = fmt_price(product.get("price"))
     unit = (product.get("unit") or "").strip()
+    if not unit and product.get("sale_mode") == "optom":
+        unit = "pachka"
     return f"{s} / {unit}" if unit else s
 
 
@@ -3064,9 +3314,42 @@ async def _build_ad_caption_web(product, length, lang, use_ai=True):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
+    # Optom (ulgurji/pachka) taklifi — yoqilgan bo'lsa zinalarni ko'rsatamiz (bot pariteti).
+    _is_optom = product.get("sale_mode") == "optom"
+    _w = wholesale_info(product)
+    _unit = "pachka" if _is_optom else (product.get("unit") or "dona")
+    _u_esc = html.escape(str(_unit))
+    if _w["enabled"]:
+        _tier_txt = ", ".join(f"{t['min']}+ {_u_esc} — {html.escape(fmt_price(t['price']))}"
+                              for t in _w["tiers"])
+        wholesale_line = f"\n📦 Optom narx: {_tier_txt}"
+    else:
+        wholesale_line = ""
+
+    # Optom (pachka) maxsus qatorlari: pachka belgisi, 1 pachka = N dona, ranglar, razmer.
+    optom_lines, extra_facts = "", {}
+    if _is_optom:
+        _ps = product.get("pack_size")
+        try:
+            _colors = _product_color_options(product.get("id")) if product.get("id") else []
+        except Exception:
+            _colors = []
+        _sn = (product.get("size_note") or "").strip()
+        _pack_line = f"\n📦 1 pachka = {int(_ps)} dona" if _ps else ""
+        _colors_line = f"\n🎨 Ranglar: {html.escape(', '.join(_colors))}" if _colors else ""
+        _size_line = f"\n📏 Razmer: {html.escape(_sn)}" if _sn else ""
+        optom_lines = f"\n🏷 Optom (pachkada sotiladi){_pack_line}{_colors_line}{_size_line}"
+        extra_facts = {"savdo turi": "optom (ulgurji, pachkada sotiladi)"}
+        if _ps:
+            extra_facts["bitta pachka"] = f"{int(_ps)} dona"
+        if _colors:
+            extra_facts["mavjud ranglar"] = ", ".join(_colors)
+        if _sn:
+            extra_facts["razmerlar"] = _sn
+
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
-        f"\n💵 {_price_unit(product)}"
+        f"\n💵 {_price_unit(product)}{wholesale_line}{optom_lines}"
         f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}")
     parse_mode = "HTML"
     if not use_ai:
@@ -3081,11 +3364,28 @@ async def _build_ad_caption_web(product, length, lang, use_ai=True):
             region=region_lbl or "",
             location=loc or "",
             lang=lang,
-            length=length)
+            length=length,
+            extra=extra_facts)
     except Exception as e:
         logging.warning(f"reklama matni (web) olinmadi: {e}")
         ad_text = None
     if ad_text:
+        ad_text = ad_text.rstrip()
+        # Optom: pachka/ranglar/razmer faktlarini AI matniga ham KAFOLATLI qo'shamiz (oddiy matn).
+        if _is_optom:
+            _plain = []
+            if product.get("pack_size"):
+                _plain.append(f"📦 1 pachka = {int(product['pack_size'])} dona")
+            if extra_facts.get("mavjud ranglar"):
+                _plain.append(f"🎨 Ranglar: {extra_facts['mavjud ranglar']}")
+            if extra_facts.get("razmerlar"):
+                _plain.append(f"📏 Razmer: {extra_facts['razmerlar']}")
+            if _plain:
+                ad_text += "\n\n" + "\n".join(_plain)
+        # Optom taklifini (zina narxlari) AI matniga ham kafolatli qo'shamiz (oddiy matn).
+        if _w["enabled"]:
+            _tiers_plain = ", ".join(f"{t['min']}+ {_unit} — {fmt_price(t['price'])}" for t in _w["tiers"])
+            ad_text = ad_text.rstrip() + f"\n\n📦 Optom narx: {_tiers_plain}"
         return ad_text, None  # AI matni oddiy matn (HTML emas)
     return caption, parse_mode
 
@@ -3101,12 +3401,18 @@ async def _build_ad_design_web(product):
     badge = _AD_BADGES[(product.get("id") or 0) % len(_AD_BADGES)]
     shop_name = product.get("shop_name")
     region_lbl = _region_label(product)
+    # Optom rozetkasi — pachka belgisi (rasm ustida ko'rinadi)
+    optom_txt = ""
+    if product.get("sale_mode") == "optom":
+        _ps = product.get("pack_size")
+        optom_txt = f"OPTOM · 1 PACHKA = {int(_ps)} DONA" if _ps else "OPTOM"
     try:
         return await asyncio.to_thread(
             ad_design.build_ad_image, raw,
             price_text=fmt_price(product.get("price")),
             badge_text=badge,
-            shop_text=(str(shop_name) if shop_name else (region_lbl or "")))
+            shop_text=(str(shop_name) if shop_name else (region_lbl or "")),
+            optom_text=optom_txt)
     except Exception as e:
         logging.warning(f"reklama dizayni (web) yasalmadi: {e}")
         return None
@@ -3518,6 +3824,7 @@ def api_my_card_set(p: MyCardIn, authorization: str = Header(None)):
 
 class OrderAction(BaseModel):
     action: str  # 'confirm' | 'reject'
+    reason: Optional[str] = None  # 'reject' uchun bekor sababi (code:/text:)
 
 
 @app.post("/api/seller/order/{order_id}/action")
@@ -3536,18 +3843,34 @@ async def api_seller_order_action(order_id: int, body: OrderAction,
     if not _staff_perm(user, "perm_confirm_orders"):
         raise HTTPException(status_code=403, detail="no_perm_confirm")
     new_status = "confirmed" if body.action == "confirm" else "cancelled"
+    reason = _norm_cancel_reason(body.reason) if new_status == "cancelled" else None
+    gid = order.get("order_group_id")
     # HIMOYA (ATOMIK): faqat 'pending' holatdan o'tkazamiz. Bot va Mini App AYNAN bir
     # buyurtmani bir vaqtda tasdiqlasa/bekor qilsa, faqat BITTA chaqiruv yutadi
     # (rowcount=1) → zahira ikki marta kamaymaydi, takroriy xabar ketmaydi. Yutmagan
     # chaqiruv 409 oladi (ilgari read-then-check atomik emas edi).
-    if not db.transition_order_status(order_id, new_status, "pending",
-                                      cancel_by="seller" if new_status == "cancelled" else None):
-        raise HTTPException(status_code=409, detail="already_processed")
+    # Variant/savat guruh buyurtmasi — bitta amal butun guruhga (1 shartnoma).
+    if gid:
+        won_ids = db.transition_group_status(
+            gid, new_status, "pending",
+            cancel_by="seller" if new_status == "cancelled" else None,
+            cancel_reason=reason)
+        if not won_ids:
+            raise HTTPException(status_code=409, detail="already_processed")
+    else:
+        if not db.transition_order_status(
+                order_id, new_status, "pending",
+                cancel_by="seller" if new_status == "cancelled" else None,
+                cancel_reason=reason):
+            raise HTTPException(status_code=409, detail="already_processed")
+        won_ids = [order_id]
     if new_status == "confirmed":
-        try:
-            db.decrement_stock_on_confirm(order["product_id"], order["quantity"])
-        except Exception as e:
-            logging.error(f"stock kamaytirish xato (order {order_id}): {e}")
+        for wid in won_ids:
+            try:
+                wo = order if wid == order_id else db.get_order_by_id(wid)
+                db.decrement_stock_on_confirm(wo["product_id"], wo["quantity"])
+            except Exception as e:
+                logging.error(f"stock kamaytirish xato (order {wid}): {e}")
 
     # Xaridorga bildirishnoma (xaridor tilida) — bot order_confirm bilan bir xil matn
     try:
@@ -3615,7 +3938,11 @@ async def api_seller_request_cancel(order_id: int, body: CancelReqIn2, authoriza
         raise HTTPException(status_code=403, detail="not_your_order")
     if order.get("status") != "confirmed" or (order.get("cancel_state") or ""):
         raise HTTPException(status_code=409, detail="cancel_not_available")
-    if not db.request_order_cancel(order_id, "seller", reason):
+    gid = order.get("order_group_id")
+    if gid:
+        if not db.request_group_cancel(gid, "seller", reason):
+            raise HTTPException(status_code=409, detail="cancel_not_available")
+    elif not db.request_order_cancel(order_id, "seller", reason):
         raise HTTPException(status_code=409, detail="cancel_not_available")
     try:
         buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
@@ -3625,7 +3952,7 @@ async def api_seller_request_cancel(order_id: int, body: CancelReqIn2, authoriza
                 "chat_id": order["buyer_tg"],
                 "text": t(blang, "cancel_request_notify", oid=fmt_order_id(order_id),
                           pname=html.escape(order.get("product_name") or ""),
-                          reason=html.escape(reason)),
+                          reason=html.escape(_cancel_reason_display(reason, blang))),
                 "parse_mode": "HTML",
                 "reply_markup": {"inline_keyboard": [
                     [{"text": t(blang, "btn_cancel_agree"), "callback_data": f"cclagree_{order_id}"}],
@@ -3652,8 +3979,16 @@ async def api_seller_cancel_respond(order_id: int, body: CancelRespondIn, author
     pname = html.escape(order.get("product_name") or "")
     buyer = db.get_user_by_id(order["buyer_id"]) if order.get("buyer_id") else None
     blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+    gid = order.get("order_group_id")
     if body.agree:
-        if db.agree_order_cancel(order_id):
+        if gid:
+            for o in db.agree_group_cancel(gid):
+                try:
+                    od = db.get_order_by_id(o)
+                    db.restock_on_cancel(od["product_id"], od.get("quantity") or 1)
+                except Exception as e:
+                    logging.warning(f"seller cancel-respond restock xato (order {o}): {e}")
+        elif db.agree_order_cancel(order_id):
             try:
                 db.restock_on_cancel(order["product_id"], order.get("quantity") or 1)
             except Exception as e:
@@ -3664,7 +3999,10 @@ async def api_seller_cancel_respond(order_id: int, body: CancelRespondIn, author
                            "parse_mode": "HTML"})
         return {"ok": True, "cancelled": True}
     # rad — admin hakamligiga
-    db.dispute_order_cancel(order_id)
+    if gid:
+        db.dispute_group_cancel(gid)
+    else:
+        db.dispute_order_cancel(order_id)
     _pn = order.get("product_name") or ""
     _notify_admins_db("dispute", ("⚖️ Yangi nizo — hal kutyapti", "⚖️ Новый спор — ждёт решения"),
                       (_pn, _pn), ref_id=order_id)
@@ -3853,12 +4191,17 @@ class ProductIn(BaseModel):
     old_price: Optional[float] = None  # chegirma: eski (chizilgan) narx
     unit: Optional[str] = None  # #20 — o'lchov birligi (dona/kg/litr/metr...)
     min_price: Optional[float] = None  # #8 — MAXFIY oxirgi narx (savdolashish floor'i)
+    min_order_qty: Optional[int] = None  # variant-buyurtma JAMI minimal son (optom)
     wholesale_price: Optional[float] = None  # eski yagona zina (moslik)
     wholesale_min_qty: Optional[int] = None  # eski yagona zina (moslik)
-    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom zinalari (bir nechta)
+    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom: pachka-zina (bir nechta); dona: ishlatilmaydi
     image_url: Optional[str] = None  # eski: bitta file_id (moslik uchun)
     images: Optional[List[str]] = None  # galereya: file_id ro'yxati (1-chi = asosiy)
+    image_labels: Optional[List[str]] = None  # har rasm uchun nom (optom: rang nomi); images bilan bir tartibda
     attributes: Optional[List[AttrItem]] = None  # mahsulot atributlari (klassik/AI)
+    sale_mode: Optional[str] = None  # 'dona' (donalab) | 'optom' (pachka). None/noma'lum = 'dona'
+    pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
+    size_note: Optional[str] = None  # optom: razmer matni (butun mahsulotga)
 
 
 def _save_attrs(product_id, attributes):
@@ -3884,10 +4227,33 @@ def _save_attrs(product_id, attributes):
 def _images_list(p):
     """ProductIn/ProductEdit'dan rasm ro'yxatini chiqaradi (images ustun, bo'lmasa image_url)."""
     if p.images is not None:
-        return [f for f in p.images if f][:4]
+        return [f for f in p.images if f][:db.MAX_PRODUCT_IMAGES]
     if p.image_url:
         return [p.image_url]
     return None
+
+
+def _image_labels_for(p, imgs):
+    """ProductIn/Edit'dan rasm yorliqlari (optom: rang nomlari) ro'yxatini imgs tartibida
+    qaytaradi. Yorliqlar berilmagan bo'lsa None (set_product_images barchasini NULL qiladi).
+    Faqat NULL bo'lmagan, file_id bor rasmlarga mos yorliq olinadi (images filtridan keyin)."""
+    if p.images is None or not p.image_labels:
+        return None
+    raw = p.image_labels
+    out, j = [], 0
+    for f in p.images:           # _images_list bilan bir xil filtr (bo'sh file_id tashlanadi)
+        if not f:
+            j += 1
+            continue
+        lbl = raw[j] if j < len(raw) else None
+        out.append((str(lbl).strip()[:40] or None) if lbl is not None else None)
+        j += 1
+    return out[:db.MAX_PRODUCT_IMAGES]
+
+
+def _norm_sale_mode(val):
+    """Savdo turini normallashtiradi: 'optom' bo'lsa shu, aks holda 'dona' (default)."""
+    return "optom" if (str(val or "").strip().lower() == "optom") else "dona"
 
 
 _MAX_WHOLESALE_TIERS = 6
@@ -4011,6 +4377,7 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
         mod = None
     blocked = bool(mod and mod.get("flagged"))
     imgs = _images_list(p)
+    sale_mode = _norm_sale_mode(p.sale_mode)
     pid = db.create_product(
         seller_id=owner_id, name=name, price=float(p.price),
         category_id=p.category_id, description=(p.description or "").strip() or None,
@@ -4018,7 +4385,7 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
     )
     if imgs:
         try:
-            db.set_product_images(pid, imgs)
+            db.set_product_images(pid, imgs, labels=_image_labels_for(p, imgs))
         except Exception as e:
             logging.warning(f"set_product_images xato (pid {pid}): {e}")
     # Status ustuvorligi: bloklangan (xavfsizlik) > ega tasdig'i kutilmoqda > faol
@@ -4038,8 +4405,19 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
         fields["old_price"] = float(p.old_price)
     if p.unit is not None and p.unit.strip():
         fields["unit"] = p.unit.strip()[:20]
-    if p.min_price is not None:
-        fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    # Savdo turi: optom (pachka) yoki dona. Optomda savdolashish (min_price) YO'Q.
+    fields["sale_mode"] = sale_mode
+    if sale_mode == "optom":
+        fields["min_price"] = None   # optomda savdolashish yo'q
+        fields["pack_size"] = int(p.pack_size) if p.pack_size and p.pack_size > 0 else None
+        fields["size_note"] = (p.size_note or "").strip()[:200] or None
+    else:
+        fields["pack_size"] = None
+        fields["size_note"] = None
+        if p.min_price is not None:
+            fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    if p.min_order_qty is not None:
+        fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
     fields.update(_wholesale_fields(p.price, p.wholesale_tiers, p.wholesale_price, p.wholesale_min_qty))
     try:
         db.update_product_fields(pid, **fields)
@@ -4061,12 +4439,17 @@ class ProductEdit(BaseModel):
     old_price: Optional[float] = None
     unit: Optional[str] = None   # #20 — o'lchov birligi
     min_price: Optional[float] = None   # #8 — maxfiy oxirgi narx
+    min_order_qty: Optional[int] = None  # variant-buyurtma JAMI minimal son (optom)
     wholesale_price: Optional[float] = None   # eski yagona zina (moslik)
     wholesale_min_qty: Optional[int] = None   # eski yagona zina (moslik)
-    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom zinalari (bir nechta)
+    wholesale_tiers: Optional[List[WholesaleTier]] = None  # optom: pachka-zina (bir nechta)
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
+    image_labels: Optional[List[str]] = None  # har rasm uchun nom (optom: rang nomi)
     attributes: Optional[List[AttrItem]] = None
+    sale_mode: Optional[str] = None  # 'dona' | 'optom'
+    pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
+    size_note: Optional[str] = None  # optom: razmer matni
 
 
 @app.patch("/api/seller/product/{product_id}")
@@ -4097,8 +4480,26 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
         fields["old_price"] = float(p.old_price) if p.old_price and p.old_price > 0 else None
     if p.unit is not None:
         fields["unit"] = p.unit.strip()[:20] or None
-    if p.min_price is not None:
-        fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    # Savdo turi (dona/optom). Partial patch: berilmasa mavjud tur saqlanadi.
+    mode_provided = p.sale_mode is not None
+    eff_mode = _norm_sale_mode(p.sale_mode) if mode_provided else _norm_sale_mode(prod.get("sale_mode"))
+    if mode_provided:
+        fields["sale_mode"] = eff_mode
+    if eff_mode == "optom":
+        # Optomda savdolashish yo'q — min_price doim NULL.
+        fields["min_price"] = None
+        if p.pack_size is not None:
+            fields["pack_size"] = int(p.pack_size) if p.pack_size and p.pack_size > 0 else None
+        if p.size_note is not None:
+            fields["size_note"] = (p.size_note or "").strip()[:200] or None
+    else:
+        if mode_provided:   # optomdan donaga o'tkazilsa — pachka maydonlarini tozalaymiz
+            fields["pack_size"] = None
+            fields["size_note"] = None
+        if p.min_price is not None:
+            fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    if p.min_order_qty is not None:
+        fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
     # Optom narx — berilgan bo'lsa (zinalar yoki eski yagona) validatsiya bilan yangilaymiz.
     # Amaldagi dona narx = yangi narx (berilgan bo'lsa) yoki mavjud narx.
     if p.wholesale_tiers is not None or p.wholesale_price is not None or p.wholesale_min_qty is not None:
@@ -4127,7 +4528,8 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
         db.update_product_fields(product_id, **fields)
     # Rasmlar (galereya) — berilgan bo'lsa to'liq almashtiramiz (image_url ham sinxronlanadi)
     if p.images is not None:
-        db.set_product_images(product_id, [f for f in p.images if f][:4])
+        imgs = [f for f in p.images if f][:db.MAX_PRODUCT_IMAGES]
+        db.set_product_images(product_id, imgs, labels=_image_labels_for(p, imgs))
     elif p.image_url is not None:
         db.update_product_fields(product_id, image_url=p.image_url)
     _save_attrs(product_id, p.attributes)
