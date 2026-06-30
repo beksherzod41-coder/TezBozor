@@ -64,7 +64,8 @@ from database import Database
 from languages import t, LANGS, DEFAULT_LANG, get_user_lang, region_name, category_name, all_labels as _lang_labels
 from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt_rating,
                              fmt_datetime, is_shop_open_now, M, TZ_TASHKENT,
-                             human_address, best_location_text, maps_link, looks_like_coords)
+                             human_address, best_location_text, maps_link, looks_like_coords,
+                             effective_unit_price, wholesale_info)
 import ai_assistant
 import ad_design
 from telegram.constants import ChatAction
@@ -4030,7 +4031,7 @@ async def order_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ORDER_QUANTITY
 
     context.user_data['order_qty'] = qty
-    total = qty * float(product['price'])
+    total = qty * effective_unit_price(product, qty)   # optom narx (qty >= min bo'lsa)
 
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(dlv_label('delivery', lang), callback_data="ord_dlv_delivery")],
@@ -4182,7 +4183,7 @@ async def order_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Tasdiq ekrani
     product = context.user_data['order_product']
     qty = context.user_data['order_qty']
-    total = qty * float(product['price'])
+    total = qty * effective_unit_price(product, qty)   # optom narx (qty >= min bo'lsa)
     dlv = context.user_data['order_delivery_type']
 
     address_frag = ""
@@ -4355,7 +4356,7 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buyer = db.get_user_by_telegram_id(update.effective_user.id)
     product = context.user_data['order_product']
     qty = context.user_data['order_qty']
-    total = qty * float(product['price'])
+    total = qty * effective_unit_price(product, qty)   # optom narx (qty >= min bo'lsa)
     dlv = context.user_data['order_delivery_type']
 
     order_id = db.create_order(
@@ -5217,7 +5218,7 @@ async def cart_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if qty <= 0:
             skipped.append(item['name'])
             continue
-        price = float(product['price'])
+        price = effective_unit_price(product, qty)   # optom narx (qator soni minimumga yetsa)
         line_total = qty * price
         grand_total += line_total
         oid = db.create_order(
@@ -7919,9 +7920,15 @@ async def _build_ad_caption(product, length="long"):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
+    # Optom (ulgurji) taklifi — yoqilgan bo'lsa reklamada alohida ko'rsatamiz.
+    _w = wholesale_info(product)
+    _unit = product.get('unit') or 'dona'
+    wholesale_line = (f"\n📦 Optom: {_w['min_qty']}+ {html.escape(str(_unit))} — "
+                      f"{html.escape(fmt_price(_w['price']))}") if _w['enabled'] else ""
+
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
-        f"\n💵 {price_with_unit(product)}"
+        f"\n💵 {price_with_unit(product)}{wholesale_line}"
         f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}"
     )
     parse_mode = 'HTML'
@@ -7946,6 +7953,10 @@ async def _build_ad_caption(product, length="long"):
         # AI matni — oddiy matn (emoji + bezak). HTML parse qilinmaydi (xavfsiz).
         caption = ad_text
         parse_mode = None
+        # Optom taklifini AI matniga ham kafolatli qo'shamiz (oddiy matn).
+        if _w['enabled']:
+            caption = caption.rstrip() + (f"\n\n📦 Optom narx: {_w['min_qty']}+ {_unit} olsangiz — "
+                                          f"{fmt_price(_w['price'])}")
     return caption, parse_mode
 
 

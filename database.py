@@ -448,6 +448,8 @@ class Database:
             ("products", "status",         "TEXT DEFAULT 'active'"),  # active|reserve|deleted|mod_blocked
             ("products", "mod_reason",      "TEXT"),                   # #5 avto-moderatsiya bloklash sababi
             ("products", "min_price",       "REAL"),                   # #8 MAXFIY oxirgi narx (savdolashish floor'i; xaridorga ko'rinmaydi)
+            ("products", "wholesale_price",   "REAL"),                  # optom (ulgurji) dona narxi; NULL/0 = optom o'chiq
+            ("products", "wholesale_min_qty", "INTEGER"),               # optom narx amal qiladigan minimal son (>=2)
             ("products", "boosted_until",   "TIMESTAMP"),              # #18 boost (pullik ko'tarish) tugash vaqti (UTC); NULL/o'tgan = boost yo'q
             ("products", "ad_caption",      "TEXT"),                   # kanalga e'lon qilingan AYNAN reklama matni (App buyer sahifasi shuni ko'rsatadi — kanal pariteti)
             ("products", "ad_caption_pm",   "TEXT"),                   # ↑ reklama matni parse_mode: 'HTML' (tuzilgan) yoki NULL (AI oddiy matn)

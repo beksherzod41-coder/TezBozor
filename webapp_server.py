@@ -37,7 +37,7 @@ import httpx
 from database import Database
 from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
-from tezbozor_design import fmt_order_id, fmt_price, best_location_text
+from tezbozor_design import fmt_order_id, fmt_price, best_location_text, effective_unit_price, wholesale_info
 import ai_assistant
 import ad_design
 
@@ -1067,9 +1067,11 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
     if stock is not None and order.quantity > stock:
         raise HTTPException(status_code=409, detail=f"only_{stock}_available")
 
+    # Optom (ulgurji) narx: buyurtma soni minimumga yetsa, dona narxi optomga tushadi.
+    unit_price = effective_unit_price(product, order.quantity)
     # #8 — AI bilan savdolashib kelishilgan narx bo'lsa, shuni qo'llaymiz (floor'dan
-    # past bo'lishi mumkin emas — haggle endpoint kafolatlaydi). Listed'dan oshmaydi.
-    unit_price = float(product["price"])
+    # past bo'lishi mumkin emas — haggle endpoint kafolatlaydi). Optom/listed'dan oshmaydi;
+    # optom va savdolashishdan ENG PAST narx xaridorga beriladi.
     deal = db.get_active_haggle_price(buyer["id"], product["id"])
     if deal and 0 < float(deal) <= unit_price:
         unit_price = float(deal)
@@ -1151,7 +1153,7 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
             qty = min(qty, int(stock))
         if qty <= 0:
             continue
-        line = qty * float(product["price"])
+        line = qty * effective_unit_price(product, qty)   # optom narx (qator soni minimumga yetsa)
         grand += line
         oid = db.create_order(
             buyer_id=buyer["id"], seller_id=co.seller_id, product_id=it.product_id,
@@ -3845,6 +3847,8 @@ class ProductIn(BaseModel):
     old_price: Optional[float] = None  # chegirma: eski (chizilgan) narx
     unit: Optional[str] = None  # #20 — o'lchov birligi (dona/kg/litr/metr...)
     min_price: Optional[float] = None  # #8 — MAXFIY oxirgi narx (savdolashish floor'i)
+    wholesale_price: Optional[float] = None  # optom (ulgurji) dona narxi
+    wholesale_min_qty: Optional[int] = None  # optom narx amal qiladigan minimal son
     image_url: Optional[str] = None  # eski: bitta file_id (moslik uchun)
     images: Optional[List[str]] = None  # galereya: file_id ro'yxati (1-chi = asosiy)
     attributes: Optional[List[AttrItem]] = None  # mahsulot atributlari (klassik/AI)
@@ -3877,6 +3881,27 @@ def _images_list(p):
     if p.image_url:
         return [p.image_url]
     return None
+
+
+def _wholesale_fields(price, wp, wq):
+    """Optom narx/min son validatsiyasi -> {'wholesale_price', 'wholesale_min_qty'}.
+    Ikkalasi to'g'ri bo'lsa yoqiladi; ikkalasi bo'sh/0 bo'lsa optom O'CHIQ (NULL).
+    Noto'g'ri (faqat bittasi, min < 2, yoki optom narx >= dona narx) -> 400 bad_wholesale."""
+    try:
+        has_wp = wp is not None and float(wp) > 0
+        has_wq = wq is not None and int(wq) > 0
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="bad_wholesale")
+    if not has_wp and not has_wq:
+        return {"wholesale_price": None, "wholesale_min_qty": None}   # o'chiq
+    if not (has_wp and has_wq):
+        raise HTTPException(status_code=400, detail="bad_wholesale")   # ikkalasi ham kerak
+    wp = float(wp); wq = int(wq)
+    if wq < 2:
+        raise HTTPException(status_code=400, detail="bad_wholesale")   # min kamida 2
+    if price is not None and wp >= float(price):
+        raise HTTPException(status_code=400, detail="wholesale_not_cheaper")  # optom narx arzon bo'lishi shart
+    return {"wholesale_price": wp, "wholesale_min_qty": wq}
 
 
 async def _notify_admins_moderation(pid, name, seller, mod):
@@ -3973,6 +3998,7 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
         fields["unit"] = p.unit.strip()[:20]
     if p.min_price is not None:
         fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    fields.update(_wholesale_fields(p.price, p.wholesale_price, p.wholesale_min_qty))
     try:
         db.update_product_fields(pid, **fields)
     except Exception as e:
@@ -3993,6 +4019,8 @@ class ProductEdit(BaseModel):
     old_price: Optional[float] = None
     unit: Optional[str] = None   # #20 — o'lchov birligi
     min_price: Optional[float] = None   # #8 — maxfiy oxirgi narx
+    wholesale_price: Optional[float] = None   # optom (ulgurji) dona narxi
+    wholesale_min_qty: Optional[int] = None   # optom narx amal qiladigan minimal son
     image_url: Optional[str] = None
     images: Optional[List[str]] = None
     attributes: Optional[List[AttrItem]] = None
@@ -4028,6 +4056,11 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
         fields["unit"] = p.unit.strip()[:20] or None
     if p.min_price is not None:
         fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
+    # Optom narx — berilgan bo'lsa (bittasi bo'lsa ham) validatsiya bilan yangilaymiz.
+    # Amaldagi dona narx = yangi narx (berilgan bo'lsa) yoki mavjud narx.
+    if p.wholesale_price is not None or p.wholesale_min_qty is not None:
+        eff_price = fields.get("price", prod.get("price"))
+        fields.update(_wholesale_fields(eff_price, p.wholesale_price, p.wholesale_min_qty))
     # #5 — TAHRIRDA ham moderatsiya: nom/tavsif o'zgargan bo'lsa qayta tekshiramiz.
     # Taqiqlangan bo'lsa darhol bloklaymiz (active'dan mod_blocked'ga). Toza bo'lsa
     # statusga tegmaymiz (avval bloklangan bo'lsa admin o'zi tasdiqlaydi).

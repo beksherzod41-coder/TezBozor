@@ -41,6 +41,46 @@ def fmt_price(uzs):
         return f"{uzs} so'm"
 
 
+def wholesale_info(product):
+    """Mahsulotning optom (ulgurji) sozlamasini xavfsiz o'qiydi.
+    Optom YOQILGAN deb hisoblanadi: wholesale_price > 0, wholesale_min_qty >= 2,
+    va optom narx dona narxidan PAST. Aks holda enabled=False (xulq o'zgarmaydi).
+    Qaytaradi: {enabled, listed, price (optom), min_qty}."""
+    try:
+        p = dict(product)
+    except Exception:
+        p = product or {}
+    try:
+        listed = float(p.get("price") or 0)
+    except (ValueError, TypeError):
+        listed = 0.0
+    wp, wq = p.get("wholesale_price"), p.get("wholesale_min_qty")
+    try:
+        wp = float(wp) if wp not in (None, "") else 0.0
+    except (ValueError, TypeError):
+        wp = 0.0
+    try:
+        wq = int(wq) if wq not in (None, "") else 0
+    except (ValueError, TypeError):
+        wq = 0
+    enabled = (wp > 0 and wq >= 2 and listed > 0 and wp < listed)
+    return {"enabled": enabled, "listed": listed,
+            "price": (wp if enabled else listed), "min_qty": (wq if enabled else 0)}
+
+
+def effective_unit_price(product, qty):
+    """Berilgan son uchun amaldagi DONA narxi: qty optom minimumiga yetsa optom narx,
+    aks holda oddiy (listed) narx. Barcha o'lchov birliklari uchun ishlaydi."""
+    w = wholesale_info(product)
+    try:
+        q = int(qty)
+    except (ValueError, TypeError):
+        q = 0
+    if w["enabled"] and q >= w["min_qty"]:
+        return w["price"]
+    return w["listed"]
+
+
 def fmt_phone(num):
     """998901234567 → '+998 90 123 45 67'"""
     if not num:
