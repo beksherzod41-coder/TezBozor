@@ -797,6 +797,7 @@ class Database:
             ("Xojalik Mollari", "🏠", "Uy-ro'zg'or buyumlari"),
             ("Elektronika", "📱", "Elektronika va gadjetlar"),
             ("Kiyimlar", "👕", "Kiyim-kechaklar"),
+            ("Oyoq kiyimlari", "👟", "Erkaklar, ayollar va bolalar oyoq kiyimlari"),
             ("Oziq-ovqat", "🍎", "Oziq-ovqat mahsulotlari"),
             ("Taomlar", "🍽️", "Turli taomlar"),
             # Yangi zamonaviy sohalar
@@ -874,6 +875,28 @@ class Database:
                         (category_id, attr_key, attr_label, attr_type, is_required, hint)
                         VALUES (?,?,?,?,?,?)
                     """, (cat_id, attr_key, attr_label, attr_type, required, hint))
+            conn.commit()
+
+        # "Oyoq kiyimlari" atribut shabloni — yuqoridagi blok FAQAT bo'sh jadvalda ishlaydi,
+        # bu kategoriya esa keyin qo'shilgani uchun har init'da idempotent (INSERT OR IGNORE,
+        # UNIQUE(category_id, attr_key)) qo'shamiz — jonli bazada ham paydo bo'lsin.
+        cursor.execute("SELECT id FROM categories WHERE name=?", ("Oyoq kiyimlari",))
+        _shoe = cursor.fetchone()
+        if _shoe:
+            _shoe_id = _shoe[0]
+            for attr_key, attr_label, attr_type, required, hint in [
+                ("size",     "O'lcham (razmer)", "text",   1, "36, 37, 38, 39, 40, 41, 42, 43..."),
+                ("color",    "Rangi",            "text",   1, "Qora, Oq, Jigarrang, Ko'k..."),
+                ("gender",   "Jinsi",            "select", 0, "Erkak/Ayol/Bolalar/Uniseks"),
+                ("brand",    "Brend",            "text",   0, "Nike, Adidas, Puma, Ecco..."),
+                ("material", "Material",         "text",   0, "Charm, Zamsh, Tekstil, Rezina..."),
+                ("season",   "Fasli",            "text",   0, "Yoz, Qish, Demi-sezon"),
+            ]:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO category_attribute_templates
+                    (category_id, attr_key, attr_label, attr_type, is_required, hint)
+                    VALUES (?,?,?,?,?,?)
+                """, (_shoe_id, attr_key, attr_label, attr_type, required, hint))
             conn.commit()
 
         # ===== PLATFORMA SOZLAMALARI (kalit-qiymat) — monetizatsiya #22/#18 =====

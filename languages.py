@@ -4359,6 +4359,7 @@ _CATEGORY_RU = {
     "Xojalik Mollari": "Хозтовары",
     "Elektronika": "Электроника",
     "Kiyimlar": "Одежда",
+    "Oyoq kiyimlari": "Обувь",
     "Oziq-ovqat": "Продукты питания",
     "Taomlar": "Готовые блюда",
     # Yangi (zamonaviy sohalar)
