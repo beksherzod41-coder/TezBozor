@@ -264,6 +264,22 @@
   .navitem small{font-size:10.5px;}
   .navitem.active{color:var(--accent);} .navitem.active span{filter:none; opacity:1;}
   .navitem:active{transform:scale(.94);}
+  /* === Xabar-badge (suzuvchi indikator) — nav + segment chiplar === */
+  .navitem{position:relative;}
+  .navbadge{position:absolute; top:4px; left:calc(50% + 8px); min-width:16px; height:16px;
+            padding:0 4px; border-radius:9px; background:var(--sale,#f43f5e); color:#fff;
+            font-size:10px; font-weight:800; line-height:16px; text-align:center;
+            box-shadow:0 0 0 2px var(--card); z-index:3; pointer-events:none;}
+  .chip{position:relative;}
+  .chipbadge{position:absolute; top:-6px; right:-5px; min-width:15px; height:15px;
+             padding:0 4px; border-radius:8px; background:var(--sale,#f43f5e); color:#fff;
+             font-size:9.5px; font-weight:800; line-height:15px; text-align:center;
+             box-shadow:0 0 0 1.5px var(--card); z-index:3; pointer-events:none;}
+  .navbadge.pulsing, .chipbadge.pulsing{ animation:nbpulse 1.3s ease-in-out infinite; }
+  @keyframes nbpulse{
+    0%,100%{ transform:scale(1);    box-shadow:0 0 0 2px var(--card), 0 0 0 0 rgba(244,63,94,.55); }
+    50%    { transform:scale(1.18); box-shadow:0 0 0 2px var(--card), 0 0 7px 3px rgba(244,63,94,.5); }
+  }
   .vhead{font-size:21px; font-weight:800; padding:16px 16px 6px; letter-spacing:-.3px;}
   /* buyurtma kartochkalari */
   .olist{padding:6px 12px 12px; display:flex; flex-direction:column; gap:10px;}
@@ -2720,6 +2736,10 @@ function switchTab(tab){
   if(tab==='seller') loadSeller();
   if(tab==='admin') loadAdmin();
   if(tab==='profile') loadProfile();
+  // Segmentsiz tablar (catalog/orders/profile) — ochilganda yangi xabarlar o'qildi.
+  // Seller/admin tablari segment darajasida (loadSeller/loadAdmin) tozalanadi.
+  if(typeof markSlotSeen==='function' && tab!=='seller' && tab!=='admin') markSlotSeen('tab:'+tab);
+  if(typeof renderBadges==='function') renderBadges();
 }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
   try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
@@ -3513,6 +3533,7 @@ function switchMode(m){
   applyMode();
   if(typeof renderNotifBanner==='function') renderNotifBanner();   // rejimga qarab nag ko'rinishi yangilansin
   switchTab(appMode==='seller' ? 'seller' : (appMode==='admin' ? 'admin' : 'catalog'));
+  if(typeof refreshBadges==='function') refreshBadges();   // notifSlots rejimga bog'liq — qayta hisob
 }
 
 // Qayta kirishda — saqlangan rejimni TIKLAYMIZ (faqat birinchi yuklashda).
@@ -3665,13 +3686,111 @@ function closeContact(){ document.getElementById('contactform').classList.remove
 document.getElementById('caClose').onclick = closeContact;
 
 // ============ UNIVERSAL XABARNOMA (top banner + inbox) ============
-let NOTIF_UNREAD=0, _notifPoll=null;
+let NOTIF_UNREAD=0, _notifPoll=null, NOTIF_ITEMS=[], PENDING_ITEMS=[], BADGES={};
 async function refreshNotifs(){
   if(!AUTH) return;
   try{
     const d=await api('/api/my/notifications');
-    NOTIF_UNREAD=d.unread||0; renderNotifBanner();
+    NOTIF_UNREAD=d.unread||0; NOTIF_ITEMS=d.items||[]; renderNotifBanner();
+    refreshBadges();
   }catch(e){}
+}
+
+// ============ SUZUVCHI XABAR-BADGE (nav + segmentlar, barcha rollar) ============
+// Slot kalitlari: 'tab:<t>', 'sseg:<sub>', 'sact:<act>', 'aseg:<seg>'.
+// newN = o'qilmagan yangi xabarlar (pulslanadi, ochilganda yo'qoladi);
+// pendN = amal kutayotgan ishlar (statik son, amal bajarilguncha turadi).
+const PENDING_SLOT={buyer_cancel:'tab:orders',seller_confirm:'sseg:orders',
+  seller_cancel:'sseg:orders',seller_approve:'sseg:products',
+  admin_requests:'aseg:requests',admin_disputes:'aseg:disputes'};
+// Notifikatsiya kind -> eng aniq slot (joriy appMode'ga qarab).
+function notifSlots(kind){
+  const m=appMode;
+  switch(kind){
+    case 'order':   return m==='buyer'?'tab:orders':(m==='admin'?'aseg:orders':'sseg:orders');
+    case 'review':  return 'sseg:reviews';
+    case 'message': return m==='seller'?'sseg:orders':'tab:orders';
+    case 'dispute': return m==='admin'?'aseg:disputes':(m==='seller'?'sseg:orders':'tab:orders');
+    case 'support': return m==='admin'?'aseg:support':'tab:profile';
+    case 'pro':     return 'aseg:payments';
+    case 'payment': return m==='seller'?'sact:payments':'tab:profile';
+  }
+  return null;
+}
+function _slotParent(slot){
+  if(slot && (slot.indexOf('sseg:')===0 || slot.indexOf('sact:')===0)) return 'tab:seller';
+  if(slot && slot.indexOf('aseg:')===0) return 'tab:admin';
+  return null;
+}
+function _badgeInc(map, slot, field, by){
+  if(!slot||!by) return;
+  (map[slot]=map[slot]||{newN:0,pendN:0})[field]+=by;
+  const p=_slotParent(slot);
+  if(p) (map[p]=map[p]||{newN:0,pendN:0})[field]+=by;
+}
+async function refreshBadges(){
+  if(!AUTH || !ME){ BADGES={}; renderBadges(); return; }
+  try{ const p=await api('/api/me/pending'); PENDING_ITEMS=p.items||[]; }catch(e){ PENDING_ITEMS=[]; }
+  const map={};
+  (NOTIF_ITEMS||[]).forEach(n=>{ if(n.is_read) return; _badgeInc(map, notifSlots(n.kind), 'newN', 1); });
+  (PENDING_ITEMS||[]).forEach(it=>{ _badgeInc(map, PENDING_SLOT[it.key], 'pendN', it.n||1); });
+  BADGES=map; renderBadges();
+}
+function _injectBadge(el, info, cls){
+  if(!el) return;
+  let b=el.querySelector('.'+cls);
+  const total=info?(info.newN+info.pendN):0;
+  if(total<=0){ if(b) b.remove(); return; }
+  if(!b){ b=document.createElement('span'); b.className=cls; el.appendChild(b); }
+  b.textContent = total>99?'99+':String(total);
+  b.classList.toggle('pulsing', !!(info && info.newN>0));
+}
+function renderBadges(){
+  document.querySelectorAll('#bottomnav .navitem[data-tab]').forEach(n=>_injectBadge(n, BADGES['tab:'+n.dataset.tab], 'navbadge'));
+  document.querySelectorAll('#sellerSeg [data-sub]').forEach(c=>_injectBadge(c, BADGES['sseg:'+c.dataset.sub], 'chipbadge'));
+  document.querySelectorAll('#sellerSeg [data-act]').forEach(c=>_injectBadge(c, BADGES['sact:'+c.dataset.act], 'chipbadge'));
+  document.querySelectorAll('#admSeg [data-seg]').forEach(c=>_injectBadge(c, BADGES['aseg:'+c.dataset.seg], 'chipbadge'));
+}
+// Bo'lim ochilganda — o'sha slotga tegishli YANGI xabarlarni o'qildi qiladi (pulslanish to'xtaydi).
+async function markSlotSeen(slot){
+  if(!slot || !AUTH) return;
+  const ids=(NOTIF_ITEMS||[]).filter(n=>!n.is_read && notifSlots(n.kind)===slot).map(n=>n.id);
+  if(!ids.length) return;
+  for(const id of ids){ try{ await apiSend('/api/my/notifications/'+id+'/read','POST',{}); }catch(e){} }
+  NOTIF_ITEMS.forEach(n=>{ if(ids.indexOf(n.id)!==-1) n.is_read=1; });
+  NOTIF_UNREAD=Math.max(0, NOTIF_UNREAD-ids.length);
+  renderNotifBanner(); refreshBadges();
+}
+// Xabar/banner bosilganda — aynan tegishli tugma/bo'lim ichiga olib kiradi.
+function _goSeller(sub){ sellerSub=sub; if(appMode!=='seller'){ switchMode('seller'); } else { switchTab('seller'); } loadSeller(); }
+function _goAdmin(seg){ admSeg=seg; if(appMode!=='admin'){ switchMode('admin'); } else { switchTab('admin'); } loadAdmin(); }
+function notifGo(n){
+  if(!n) return;
+  const k=n.kind, ref=n.ref_id;
+  const nv=document.getElementById('notifview'); if(nv) nv.classList.remove('open');
+  if(k==='message'){ if(ref) openChat(ref); return; }
+  if(k==='support'){
+    if(isAdminUser() && appMode==='admin'){ _goAdmin('support'); }
+    else if(ref){ openSupportThread(ref); }
+    else { switchTab('profile'); }
+    return;
+  }
+  if(k==='dispute'){
+    if(isAdminUser() && appMode!=='buyer'){ _goAdmin('disputes'); }
+    else if(ref){ openChat(ref); }
+    else { switchTab('orders'); }
+    return;
+  }
+  if(k==='order'){
+    if(appMode==='admin'){ _goAdmin('orders'); }
+    else if(canManage()){ _goSeller('orders'); }
+    else { switchTab('orders'); }
+    return;
+  }
+  if(k==='review'){ if(canManage()){ _goSeller('reviews'); } else { switchTab('orders'); } return; }
+  if(k==='pro'){ if(isAdminUser()){ _goAdmin('payments'); } return; }
+  if(k==='payment'){ if(appMode==='seller'){ switchTab('seller'); try{ openPayments(); }catch(e){} } else { switchTab('profile'); } return; }
+  switchTab('orders');
 }
 const _GAP_LBL={shop_name:'prof_f_shop_name',shop_address:'prof_f_shop_address',region:'prof_f_region',phone:'prof_f_phone',location:'prof_f_location',username:'prof_f_username',card:'prof_f_card'};
 // Eslatma FAQAT sotuvchi rejimida — ega xaridor rejimida ko'rganda bezovta qilmasin.
@@ -3713,7 +3832,10 @@ function renderNotifBanner(){
 }
 function onNotifBannerClick(){
   const b=document.getElementById('notifBanner');
-  if(b && b.dataset.action==='profile'){ openFirstGap(); }
+  if(b && b.dataset.action==='profile'){ openFirstGap(); return; }
+  // Bitta o'qilmagan xabar bo'lsa — to'g'ridan aynan tegishli tugma ichiga; aks holda ro'yxat.
+  const unread=(NOTIF_ITEMS||[]).filter(n=>!n.is_read);
+  if(unread.length===1) notifGo(unread[0]);
   else openNotifs();
 }
 async function openNotifs(){
@@ -3739,10 +3861,9 @@ async function openNotifs(){
     { const _ar=document.getElementById('notifAllRead'); if(_ar) _ar.onclick=async()=>{ await apiSend('/api/my/notifications/read-all','POST',{}); openNotifs(); }; }
     body.querySelectorAll('[data-nid]').forEach(c=>c.onclick=async()=>{
       try{ await apiSend('/api/my/notifications/'+c.dataset.nid+'/read','POST',{}); }catch(e){}
+      const n=(items.find(x=>String(x.id)===String(c.dataset.nid)))||{kind:c.dataset.nkind, ref_id:c.dataset.nref};
       await refreshNotifs();
-      if(c.dataset.nkind==='support' && c.dataset.nref){ document.getElementById('notifview').classList.remove('open'); openSupportThread(c.dataset.nref); }
-      else if(c.dataset.nkind==='message' && c.dataset.nref){ document.getElementById('notifview').classList.remove('open'); openChat(c.dataset.nref); }
-      else openNotifs();
+      notifGo(n);   // aynan tegishli tugma/bo'lim ichiga olib kiradi
     });
   }catch(e){ body.innerHTML=`<div class="cartempty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
@@ -3910,12 +4031,15 @@ function loadSeller(){
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
   const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission};
-  v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>actMap[o.dataset.act]());
+  v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>{ if(typeof markSlotSeen==='function') markSlotSeen('sact:'+o.dataset.act); actMap[o.dataset.act](); });
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
   else if(sellerSub==='stats') loadSellerStats();
   else if(sellerSub==='customers') loadSellerCustomers();
   else loadSellerReviews();
+  // Badge: chiplarga indikator chizamiz + ko'rilgan segment yangi xabarlarini o'qildi qilamiz.
+  if(typeof renderBadges==='function') renderBadges();
+  if(typeof markSlotSeen==='function') markSlotSeen('sseg:'+sellerSub);
 }
 
 async function loadSellerCustomers(){
@@ -5674,6 +5798,9 @@ function loadAdmin(){
             admins:admAdmins,monetization:admMonetization,commissions:admCommissions,payments:admPayments,moderation:admModeration,fraud:admFraud,
             analytics:admAnalytics,financial:admFinancial,sentiment:admSentiment,settings:admSettings,support:openAdminSupport}[admSeg];
   if(fn) fn();
+  // Badge: segment chiplariga indikator + ko'rilgan segment yangi xabarlarini o'qildi qilamiz.
+  if(typeof renderBadges==='function') renderBadges();
+  if(typeof markSlotSeen==='function') markSlotSeen('aseg:'+admSeg);
 }
 
 async function admAudit(){
