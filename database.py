@@ -3717,6 +3717,27 @@ class Database:
         conn.commit()
         return cursor.rowcount > 0
 
+    def mark_paid_atomic(self, payment_id, provider=None, provider_txn_id=None, meta=None):
+        """Atomik: faqat hali 'paid' BO'LMAGAN to'lovni 'paid' qiladi. Bu chaqiruv YUTGAN
+        (rowcount=1) bo'lsagina True qaytadi — chaqiruvchi fulfillment'ni FAQAT shunda
+        bajaradi. `UPDATE ... WHERE state!='paid'` DB darajasida atomik: webhook qayta
+        kelishi yoki bir nechta worker sharoitida ham Pro/boost IKKI marta berilmaydi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        sets = ["state='paid'", "updated_at=CURRENT_TIMESTAMP", "paid_at=CURRENT_TIMESTAMP"]
+        vals = []
+        if provider is not None:
+            sets.append("provider=?"); vals.append(provider)
+        if provider_txn_id is not None:
+            sets.append("provider_txn_id=?"); vals.append(str(provider_txn_id))
+        if meta is not None:
+            sets.append("provider_meta=?"); vals.append(meta)
+        vals.append(payment_id)
+        cursor.execute(
+            f"UPDATE payments SET {', '.join(sets)} WHERE id=? AND state!='paid'", vals)
+        conn.commit()
+        return cursor.rowcount > 0
+
     def get_payments_by_user(self, user_id, limit=50):
         conn = self.get_connection()
         cursor = conn.cursor()

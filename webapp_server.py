@@ -4998,8 +4998,12 @@ def _mark_paid_and_fulfill(payment, provider, txn_id=None, meta=None):
     if not fresh:
         return False
     if fresh["state"] == "paid":
-        return True  # idempotent — webhook qayta keldi
-    db.set_payment_state(payment["id"], "paid", provider=provider, provider_txn_id=txn_id, meta=meta)
+        return True  # idempotent — webhook qayta keldi (tez yo'l)
+    # Atomik da'vo: faqat bu chaqiruv 'paid' qila olsagina fulfillment bajariladi.
+    # get_payment o'qish bilan set orasidagi poyga (webhook retry / ko'p worker) yopiladi —
+    # aks holda ikkala chaqiruv ham state=pending ko'rib, Pro/boost IKKI marta berilardi.
+    if not db.mark_paid_atomic(payment["id"], provider=provider, provider_txn_id=txn_id, meta=meta):
+        return True  # boshqa chaqiruv allaqachon paid qildi — idempotent
     _fulfill_payment(fresh)
     # Botdan xabar (async; webhook async kontekstda ishlaydi). Loop bo'lmasa — jim o'tadi.
     try:
