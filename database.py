@@ -2390,33 +2390,42 @@ class Database:
 
     def transition_group_status(self, group_id, new_status, expected_status='pending',
                                 cancel_by=None, cancel_reason=None):
-        """Guruh (variant/savat) buyurtmasidagi BARCHA `expected_status` qatorlarni atomik
-        o'tkazadi. O'tgan (yutgan) qator id'lar ro'yxatini qaytaradi — chaqiruvchi zahira/
-        xabarni FAQAT shu id'lar uchun bajaradi (ikki marta kamaymasin). cancel_by/
-        cancel_reason — bekor qilishda saqlanadi (COALESCE bilan mavjudini o'chirmaydi)."""
+        """Guruh (variant/savat) buyurtmasidagi `expected_status` qatorlarni o'tkazadi.
+        FAQAT shu chaqiruv HAQIQATAN o'zgartirgan (yutgan) qator id'larini qaytaradi —
+        chaqiruvchi zahira/xabarni FAQAT shu id'lar uchun bajaradi (ikki marta kamaymasin).
+
+        Har qator alohida atomik da'vo qilinadi (`UPDATE ... WHERE id=? AND status=?`):
+        agar orada bir qatorni boshqa chaqiruv (masalan yakka buyurtma amali) allaqachon
+        o'zgartirgan bo'lsa, u qatorda rowcount=0 → ro'yxatga QO'SHILMAYDI. Shunday qilib
+        bir vaqtda guruh-bekor + yakka-amal bo'lsa ham hech bir qator ikki marta
+        qayta-zahiralanmaydi/xabar olmaydi. cancel_by/cancel_reason COALESCE bilan saqlanadi."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id FROM orders WHERE order_group_id=? AND status=? ORDER BY id ASC",
             (str(group_id), expected_status))
-        ids = [r[0] for r in cursor.fetchall()]
-        if not ids:
+        candidate_ids = [r[0] for r in cursor.fetchall()]
+        if not candidate_ids:
             return []
-        if new_status == 'cancelled' and (cancel_by is not None or cancel_reason is not None):
-            cursor.execute(
-                "UPDATE orders SET status=?, "
-                "cancel_by=COALESCE(?, cancel_by), "
-                "cancel_reason=COALESCE(?, cancel_reason), "
-                "updated_at=CURRENT_TIMESTAMP "
-                "WHERE order_group_id=? AND status=?",
-                (new_status, cancel_by, cancel_reason, str(group_id), expected_status))
-        else:
-            cursor.execute(
-                "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
-                "WHERE order_group_id=? AND status=?",
-                (new_status, str(group_id), expected_status))
+        won = []
+        for oid in candidate_ids:
+            if new_status == 'cancelled' and (cancel_by is not None or cancel_reason is not None):
+                cursor.execute(
+                    "UPDATE orders SET status=?, "
+                    "cancel_by=COALESCE(?, cancel_by), "
+                    "cancel_reason=COALESCE(?, cancel_reason), "
+                    "updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND status=?",
+                    (new_status, cancel_by, cancel_reason, oid, expected_status))
+            else:
+                cursor.execute(
+                    "UPDATE orders SET status=?, updated_at=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND status=?",
+                    (new_status, oid, expected_status))
+            if cursor.rowcount > 0:
+                won.append(oid)
         conn.commit()
-        return ids if cursor.rowcount > 0 else []
+        return won
 
     def set_buyer_received(self, order_id):
         """Xaridor «oldim» bosdi — buyurtma YOPILMAYDI (status 'confirmed' qoladi).
