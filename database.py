@@ -2211,22 +2211,29 @@ class Database:
 
     def record_debt_payment(self, order_id, pay_amount):
         """Qarzga qisman/to'liq to'lov qo'shadi. Yangi qolgan qarzni (amount_due) qaytaradi.
-        amount_due 0 ga tushsa settled_at o'rnatiladi."""
-        from datetime import datetime, timezone
+        amount_due 0 ga tushsa settled_at o'rnatiladi; buyurtma topilmasa None.
+
+        ATOMIK nisbiy UPDATE (read-modify-write EMAS) — bir vaqtda ikki to'lov kelsa ham
+        qarz noto'g'ri absolute qiymat bilan ustidan yozilmaydi. MAX(0,...) qarzни manfiyга
+        tushirmaydi (decrement_stock_on_confirm bilan bir naqsh)."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT amount_paid, amount_due FROM orders WHERE id=?", (order_id,))
-        row = cursor.fetchone()
-        if not row:
-            return None
-        paid = (row[0] or 0) + float(pay_amount)
-        due = max(0.0, (row[1] or 0) - float(pay_amount))
-        settled = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if due <= 0 else None
+        p = max(0.0, float(pay_amount))
         cursor.execute(
-            "UPDATE orders SET amount_paid=?, amount_due=?, settled_at=? WHERE id=?",
-            (paid, due, settled, order_id))
+            "UPDATE orders SET "
+            "amount_paid = COALESCE(amount_paid,0) + ?, "
+            "amount_due = MAX(0, COALESCE(amount_due,0) - ?), "
+            "settled_at = CASE WHEN COALESCE(amount_due,0) - ? <= 0 "
+            "            THEN CURRENT_TIMESTAMP ELSE settled_at END "
+            "WHERE id=?",
+            (p, p, p, order_id))
+        if cursor.rowcount == 0:
+            conn.commit()
+            return None
+        cursor.execute("SELECT amount_due FROM orders WHERE id=?", (order_id,))
+        row = cursor.fetchone()
         conn.commit()
-        return due
+        return row[0] if row else None
 
     def get_seller_open_debts(self, seller_id):
         """Sotuvchining ochiq qarzlari — xaridor bo'yicha jamlangan (kim qancha qarzdor)."""
