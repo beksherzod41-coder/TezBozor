@@ -17,6 +17,7 @@ import re
 import html
 import json
 import hashlib
+import hmac
 import logging
 import asyncio
 import base64
@@ -63,6 +64,28 @@ app = FastAPI(title="TezBozor Mini App API")
 # allaqachon siqilgan, lekin min_size dan kichik bo'lsa ham zarar yo'q.
 from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
 app.add_middleware(GZipMiddleware, minimum_size=600)
+
+
+# ---- Xavfsizlik sarlavhalari (chuqurlashtirilgan himoya — nginx sozlanmagan bo'lsa ham) ----
+# DIQQAT: X-Frame-Options / frame-ancestors QO'YILMAYDI — Telegram Mini App iframe ichida
+# ishlaydi, DENY bo'lsa ilova ochilmaydi. HSTS va CSP env orqali yoqiladi (inline-JS ko'p
+# bo'lgani uchun CSP sukut bo'yicha o'chiq — noto'g'ri siyosat butun ilovani buzishi mumkin).
+_SEC_HSTS = os.getenv("SECURITY_HSTS", "").strip() in ("1", "true", "yes")
+_SEC_CSP = (os.getenv("SECURITY_CSP", "").strip() or None)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("X-XSS-Protection", "0")  # zamonaviy brauzerlar CSP'ga tayanadi
+    if _SEC_HSTS:
+        resp.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    if _SEC_CSP:
+        resp.headers.setdefault("Content-Security-Policy", _SEC_CSP)
+    return resp
 
 
 # ============================================================
@@ -5209,7 +5232,8 @@ async def api_pay_click(request: Request):
     else:
         sign_keys = ["click_trans_id", "service_id", "merchant_trans_id",
                      "merchant_prepare_id", "amount", "action", "sign_time"]
-    if form.get("sign_string") != _click_sign(form, sign_keys):
+    # Doimiy-vaqtli solishtiruv (timing-attack himoyasi)
+    if not hmac.compare_digest(str(form.get("sign_string") or ""), _click_sign(form, sign_keys)):
         return {**err, "error": -1, "error_note": "SIGN CHECK FAILED"}
 
     payment = db.get_payment(int(payment_id)) if payment_id and str(payment_id).isdigit() else None
@@ -5237,7 +5261,8 @@ def _payme_auth_ok(authorization):
         decoded = base64.b64decode(authorization[6:]).decode()
     except Exception:
         return False
-    return decoded.split(":", 1)[-1] == PAYME_KEY
+    # Doimiy-vaqtli solishtiruv — timing-attack orqali kalitni bit-bit topishning oldini oladi
+    return hmac.compare_digest(decoded.split(":", 1)[-1], PAYME_KEY or "")
 
 
 def _payme_err(rid, code, msg):

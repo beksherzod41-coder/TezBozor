@@ -55,11 +55,23 @@ cat > /etc/nginx/sites-available/tezbozor <<'EOF'
 server {
     listen 80;
     server_name tezbozor.duckdns.org;
-    client_max_body_size 5m;
+    client_max_body_size 6m;
+
+    # --- Xavfsizlik sarlavhalari ---
+    # DIQQAT: X-Frame-Options QO'YMANG — Telegram Mini App iframe ichida ishlaydi, DENY buzadi.
+    # X-Content-Type-Options / Referrer-Policy'ni ilovaning O'ZI beradi (webapp_server.py) —
+    # bu yerda takrorlamang (dublikat sarlavha bo'lmasin). Faqat HSTS + CSP:
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # CSP — Mini App inline-JS ishlatgani uchun script-src 'unsafe-inline' KERAK.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org" always;
+
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # MUHIM: X-Forwarded-For bo'lmasa app hamma so'rovni 127.0.0.1 deb ko'radi —
+        # rasm-proksi rate-limiti (IP bo'yicha) global bo'lib buziladi.
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 EOF
@@ -71,6 +83,24 @@ certbot --nginx -d tezbozor.duckdns.org --non-interactive --agree-tos -m beksher
 
 ## 5. Botda Mini App tugmasi
 `main.py` ga `WebAppInfo` tugma qo'shiladi (URL: `https://tezbozor.duckdns.org`). Buyurtma deep-link uchun bot `/start order_<id>` ni qo'llashi kerak. — bu qadamni Claude qiladi (URL tayyor bo'lgach).
+
+## 6. Backup (MUHIM — jonli backend SQLite)
+Jonli backend **SQLite** (`marketplace.db`). Eski `pg_backup.sh` postgres'ni zaxiralaydi —
+u faol baza EMAS, shuning uchun `sqlite_backup.sh` ishlatiladi:
+```bash
+scp C:\marketplace-bot\sqlite_backup.sh root@178.105.229.54:/root/
+chmod +x /root/sqlite_backup.sh
+( crontab -l 2>/dev/null | grep -v sqlite_backup; echo "5 3 * * * /root/sqlite_backup.sh >> /root/db_backups/backup.log 2>&1" ) | crontab -
+/root/sqlite_backup.sh && ls -la /root/db_backups/   # sinov: ~50KB+ .db.gz chiqishi kerak
+```
+⚠️ Backup **o'sha diskda** — muntazam offsite nusxa (boshqa server/S3) tavsiya etiladi.
+
+## Xavfsizlik qattiqlashtirish (server, bir marta)
+- **ufw**: `ufw allow 22,80,443` → `ufw --force enable`
+- **fail2ban**: `apt install -y fail2ban` + `/etc/fail2ban/jail.local` [sshd] jail
+- **SSH**: `/etc/ssh/sshd_config.d/00-hardening.conf` → `PasswordAuthentication no`,
+  `PermitRootLogin prohibit-password` (kalit bilan root saqlanadi), so'ng `systemctl reload ssh`
+- **`.env`**: `chmod 600 /root/.env`
 
 ## Eslatma
 - Mini App faqat **HTTPS** + Telegram ichidа ishlaydi (brauzerда 401 normal).
