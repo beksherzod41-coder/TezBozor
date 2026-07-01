@@ -5601,7 +5601,10 @@ async def api_admin_seller_decide(user_id: int, body: SellerReqDecision,
     target = dict(target)
     if body.approve:
         db.update_user(user_id, is_approved=1, role="seller")
-        # Tasdiqlangan sotuvchida do'kon bo'lishini kafolatlaymiz (idempotent, xodim bo'lmasa)
+        # Tasdiqlangan sotuvchida do'kon bo'lishini KAFOLATLAYMIZ (create_shop idempotent —
+        # mavjud bo'lsa qaytaradi, dublikat yaratmaydi). Xato YUTILMAYDI: aks holda sotuvchi
+        # do'konsiz "tasdiqlangan" bo'lib qolardi, admin esa buni bilmay ok ko'rardi. 500
+        # qaytadi, so'rov 'approved' belgilanmaydi → admin qayta uradi (idempotent, xavfsiz).
         try:
             if not db.get_staff_by_user(user_id):
                 db.create_shop(
@@ -5615,6 +5618,7 @@ async def api_admin_seller_decide(user_id: int, body: SellerReqDecision,
                 )
         except Exception as e:
             logging.error(f"admin approve: do'kon yaratilmadi (uid {user_id}): {e}")
+            raise HTTPException(status_code=500, detail="shop_create_failed")
     else:
         db.update_user(user_id, is_approved=0, role="buyer")
     req = db.get_seller_request_by_user(user_id)
