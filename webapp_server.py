@@ -4401,23 +4401,29 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
     blocked = bool(mod and mod.get("flagged"))
     imgs = _images_list(p)
     sale_mode = _norm_sale_mode(p.sale_mode)
-    pid = db.create_product(
-        seller_id=owner_id, name=name, price=float(p.price),
-        category_id=p.category_id, description=(p.description or "").strip() or None,
-        image_url=(imgs[0] if imgs else None), stock_count=p.stock_count, created_by=user["id"],
-    )
-    if imgs:
-        try:
-            db.set_product_images(pid, imgs, labels=_image_labels_for(p, imgs))
-        except Exception as e:
-            logging.warning(f"set_product_images xato (pid {pid}): {e}")
-    # Status ustuvorligi: bloklangan (xavfsizlik) > ega tasdig'i kutilmoqda > faol
+    # Status ustuvorligi: bloklangan (xavfsizlik) > ega tasdig'i kutilmoqda > faol.
+    # DIQQAT: status YARATISH paytidayoq beriladi — aks holda quyidagi update_product_fields
+    # yiqilsa AI-bloklangan mahsulot 'active' bo'lib jonli efirga chiqib ketardi (moderatsiya
+    # chetlab o'tilishi). Endi bloklangan mahsulot boshidanoq yashirin yaratiladi.
     if blocked:
         status, in_stock = "mod_blocked", 0
     elif needs_owner_approval:
         status, in_stock = "pending_owner", 0
     else:
         status, in_stock = "active", 1
+    pid = db.create_product(
+        seller_id=owner_id, name=name, price=float(p.price),
+        category_id=p.category_id, description=(p.description or "").strip() or None,
+        image_url=(imgs[0] if imgs else None), stock_count=p.stock_count, created_by=user["id"],
+        status=status,
+    )
+    if imgs:
+        try:
+            db.set_product_images(pid, imgs, labels=_image_labels_for(p, imgs))
+        except Exception as e:
+            logging.warning(f"set_product_images xato (pid {pid}): {e}")
+    # status/in_stock yuqorida (create_product'dan oldin) hisoblangan — bu yerda faqat
+    # qolgan maydonlar bilan birga yoziladi (in_stock ni ham izchil saqlaymiz).
     fields = {"in_stock": in_stock, "status": status}
     if blocked:
         fields["mod_reason"] = (mod.get("reason") or "")[:300]
