@@ -1051,6 +1051,10 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer_id)",
             "CREATE INDEX IF NOT EXISTS idx_orders_seller ON orders(seller_id)",
             "CREATE INDEX IF NOT EXISTS idx_orders_product ON orders(product_id)",
+            # Guruh (savat/variant) amallari — transition_group_status/get_orders_in_group/
+            # agree_group_cancel/set_group_settlement doim order_group_id bo'yicha qidiradi.
+            # Indekssiz bu to'liq SCAN edi (buyurtma ko'paygach sekinlashardi).
+            "CREATE INDEX IF NOT EXISTS idx_orders_group ON orders(order_group_id)",
             "CREATE INDEX IF NOT EXISTS idx_shop_staff_shop ON shop_staff(shop_id)",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_product ON scheduled_posts(product_id)",
             "CREATE INDEX IF NOT EXISTS idx_product_audit_product ON product_audit(product_id)",
