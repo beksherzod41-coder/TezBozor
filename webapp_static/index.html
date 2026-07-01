@@ -1573,7 +1573,8 @@ function applyStaticI18n(){
     ttl_aiview:'ai_title',ttl_bcastview:'adm_bcast_title',ttl_regview:'reg_title',
     ttl_adview:'sp_ov_adview',ttl_regionview:'bp_region_title',ttl_stockview:'sp_ov_stock',
     ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code',ttl_staffdetview:'sp_staff_detail_title',
-    ttl_favview:'fav_title',ttl_trackview:'trk_title',ttl_routeview:'route_title',ttl_haggleview:'hag_title',ttl_mycardview:'mc_title',ttl_becomeview:'bs_ov'};
+    ttl_favview:'fav_title',ttl_trackview:'trk_title',ttl_routeview:'route_title',ttl_haggleview:'hag_title',ttl_mycardview:'mc_title',ttl_becomeview:'bs_ov',
+    giftTitle:'gift_title',reelsTitle:'reels_title',dynpriceTitle:'dynp_title',ttl_courierview:'cour_title'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
   try{ document.getElementById('giftBtnLbl').textContent = L('gift_short').replace(/^🎁\s*/,''); }catch(e){}
