@@ -55,11 +55,23 @@ cat > /etc/nginx/sites-available/tezbozor <<'EOF'
 server {
     listen 80;
     server_name tezbozor.duckdns.org;
-    client_max_body_size 5m;
+    client_max_body_size 6m;
+
+    # --- Xavfsizlik sarlavhalari ---
+    # DIQQAT: X-Frame-Options QO'YMANG — Telegram Mini App iframe ichida ishlaydi, DENY buzadi.
+    # X-Content-Type-Options / Referrer-Policy'ni ilovaning O'ZI beradi (webapp_server.py) —
+    # bu yerda takrorlamang (dublikat sarlavha bo'lmasin). Faqat HSTS + CSP:
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # CSP — Mini App inline-JS ishlatgani uchun script-src 'unsafe-inline' KERAK.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors https://web.telegram.org https://*.telegram.org" always;
+
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        # MUHIM: X-Forwarded-For bo'lmasa app hamma so'rovni 127.0.0.1 deb ko'radi —
+        # rasm-proksi rate-limiti (IP bo'yicha) global bo'lib buziladi.
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
 }
 EOF
