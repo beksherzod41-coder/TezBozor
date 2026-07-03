@@ -670,10 +670,20 @@
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
-// Butun ekranni qoplash (Bot API 8.0+): app tepa "ochiq" qolmasin. Eski mijozda yo'q →
-// expand yetarli. Fullscreen'da kontent tepasi CSS --safe-top (--tg-content-safe-area-inset-top)
-// bilan Telegram tugmalari ostidan tushmaydi. Xatosi ilovani buzmasin (fail-soft).
-try{ if(typeof tg.requestFullscreen==='function') tg.requestFullscreen(); }catch(e){}
+// ESLATMA: tg.requestFullscreen() O'CHIRILDI (2026-07-03). Fullscreen ekranni to'liq
+// qoplasa-da, Telegram yopish/menyu tugmalari app yozuvlari ustiga tushardi va safe-area
+// ni hamma mijozda ishonchli sozlab bo'lmadi. Standart expand rejimi (Telegram o'z
+// sarlavhasi bilan) — ustma-ustliksiz, sinovdan o'tgan. --safe-top faqat notch uchun.
+// Qurilma notch'i (status-bar) uchun aniq pikselni JS API'dan olamiz (env() zaxira).
+function applySafeArea(){
+  try{
+    var sa = tg.safeAreaInset || {top:0};              // qurilma (notch/status-bar)
+    var top = Number(sa.top)||0;
+    document.documentElement.style.setProperty('--safe-top', 'max(env(safe-area-inset-top, 0px), '+top+'px)');
+  }catch(e){}
+}
+try{ tg.onEvent && tg.onEvent('safeAreaChanged', applySafeArea); }catch(e){}
+applySafeArea();
 // #23 — ilovadan chiqishda Telegram'ning tasdiq oynasi chiqsin (tasodifan yopilmasin)
 try{ tg.enableClosingConfirmation(); }catch(e){}
 // ---- TEMA — #11 kun/tun: 'auto' (Telegram'ga ergashadi) | 'light' | 'dark' ----
@@ -5670,6 +5680,8 @@ function openProductForm(prod, mode){
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
   document.getElementById('prodform').scrollTop = 0;
+  // Optom + kategoriya ma'lum (tahrirlash yoki oldindan tanlangan) → chiplarni darrov yukla
+  if(pf.sale_mode==='optom' && pf.category_id) loadOptomOpts();
   // Tahrirda to'liq galereya + mavjud atributlarni fon'da yuklaymiz
   if(prod){ loadPriceInsight(prod.id); api('/api/products/'+prod.id).then(d=>{
     if(d && d.unit!=null && !pf.unit){ pf.unit = d.unit||''; }
@@ -5693,6 +5705,7 @@ function openProductForm(prod, mode){
       pf.questions = _atts.map(a=>({key:a.attr_key, label:a.attr_label||a.attr_key, type:'text', required:false, options:[]}));
       _atts.forEach(a=>{ pf.attrs[a.attr_key]=a.attr_value||''; pf.attrLabels[a.attr_key]=a.attr_label||a.attr_key; });
       pf.qLoaded = true;
+      applyEditChipPresets();   // saqlangan atributlar matn emas, TUGMALI (chip) chiqsin
     }
     renderProductForm();
   }).catch(()=>{}); }
@@ -5830,8 +5843,12 @@ function attrFieldHtml(q,i){
 
 function attrSectionHtml(){
   const isEdit = !!pf.id;
+  const optom = (pf.sale_mode==='optom');
   let h = '';
-  if(!isEdit){
+  // Optomda savollar kategoriya tanlanishi bilan AVTOMATIK yuklanadi (loadOptomOpts) —
+  // shuning uchun rejim tanlagich va "Savollarni yuklash" tugmasi KO'RSATILMAYDI (chiplar
+  // darrov chiqadi, ortiqcha bosish shart emas). Dona uchun avvalgidek qoladi.
+  if(!isEdit && !optom){
     const opt=(m,t,d)=>`<div class="opt ${pf.mode===m?'on':''}" data-qmode="${m}" style="text-align:left;line-height:1.35;display:block;padding:10px 12px">
       <b>${t}</b><div style="font-size:11.5px;color:var(--hint);font-weight:400;margin-top:2px">${d}</div></div>`;
     h += `<div class="cosec"><div class="lbl">${L('sp_q_mode')}</div><div class="seg col" style="height:auto">
@@ -5844,7 +5861,7 @@ function attrSectionHtml(){
   if(pf.questions && pf.questions.length){
     h += `<div class="cosec"><div class="lbl">${L('sp_q_fields')}</div>`+
       pf.questions.map((q,i)=>attrFieldHtml(q,i)).join('')+`</div>`;
-  } else if(pf.qLoaded && !isEdit){
+  } else if(pf.qLoaded && !isEdit && !optom){
     h += `<div class="cosec"><div style="color:var(--hint);font-size:13px">${L('sp_q_none')}</div></div>`;
   }
   return h;
@@ -5881,6 +5898,47 @@ async function loadQuestions(){
     pf.qLoaded=true;
   }catch(e){ tg.showAlert(L('sp_q_failed')+(e.message||e)); }
   pf.qLoading=false; renderProductForm();
+}
+
+// Optom uchun Ranglar/Razmerlar chip-variantlarini JIM yuklaydi (kategoriya tanlangach
+// avtomatik) — "Savollarni yuklash" tugmasini bosish shart emas. Kategoriya size/color
+// preset'iga ega bo'lsa chiplar chiqadi (oyoq/kiyim/sport...), aks holda faqat matn.
+async function loadOptomOpts(){
+  if(pf.sale_mode!=='optom' || !pf.category_id) return;
+  try{
+    const d = await api('/api/seller/product-questions?mode=classic&category_id='+pf.category_id);
+    const _col=(d.questions||[]).find(q=>q.key==='color'); pf.optomColorOpts=(_col&&_col.options)||[];
+    const _sz =(d.questions||[]).find(q=>q.key==='size');  pf.optomSizeOpts =(_sz &&_sz.options)||[];
+    // Qolgan kategoriya atributlari (brend, material, jinsi, fasl...) HAM tugmali chiqsin —
+    // xuddi dona kabi. size/color maxsus Ranglar/Razmerlar maydonlariga ketadi, qolgani
+    // attrSec chiplari. Faqat YANGI mahsulotda: tahrirda saqlangan atributlar edit-prefetch
+    // bilan alohida yuklanadi (uni buzib qo'ymaymiz).
+    if(!pf.id){
+      pf.questions = (d.questions||[]).filter(q=>!OPTOM_HIDDEN_ATTRS.includes(q.key));
+      pf.questions.forEach(q=>{ pf.attrLabels[q.key]=q.label; });
+      pf.qLoaded = true;
+    }
+    renderProductForm();
+  }catch(e){ /* jim — matn maydoni zaxira qoladi */ }
+}
+
+// Tahrirlashda saqlangan atributlar MATN maydoni bo'lib chiqmasin — kategoriya
+// presetlaridan (options/multi/custom) mos savollarga biriktiramiz, shunda TUGMALI (chip)
+// bo'ladi va saqlangan qiymat tanlangan holatda chiqadi (pf.attrs o'zgarmaydi). Presetda
+// yo'q atribut (erkin brend/model yoki AI qo'shgan) o'z holida — matn maydoni — qoladi.
+async function applyEditChipPresets(){
+  if(!pf.id || !pf.category_id || !(pf.questions||[]).length) return;
+  try{
+    const d = await api('/api/seller/product-questions?mode=classic&category_id='+pf.category_id);
+    const byKey = {}; (d.questions||[]).forEach(q=>{ byKey[q.key]=q; });
+    pf.questions.forEach(q=>{
+      const p = byKey[q.key];
+      if(p && Array.isArray(p.options) && p.options.length){
+        q.options = p.options; q.multi = !!p.multi; q.custom = !!p.custom;
+      }
+    });
+    renderProductForm();
+  }catch(e){ /* jim — matn maydoni zaxira qoladi */ }
 }
 
 // Optom zina qatorlari (min son + narx) — dinamik qo'shiladi/o'chiriladi.
@@ -6034,6 +6092,9 @@ function renderProductForm(){
   body.querySelectorAll('[data-cid]').forEach(ch=>ch.onclick=()=>{
     pf.category_id = Number(ch.dataset.cid);
     body.querySelectorAll('#pfCats .chip').forEach(x=>x.classList.toggle('active', x.dataset.cid==pf.category_id));
+    // Optom: kategoriya tanlanishi bilan Ranglar/Razmerlar chiplarini avtomatik yuklaymiz
+    // (sotuvchi "Savollarni yuklash"ni bosishi shart emas — chiplar darrov chiqadi).
+    if(pf.sale_mode==='optom') loadOptomOpts();
   });
   document.getElementById('pfSave').onclick = saveProduct;
   const tgl = document.getElementById('pfToggle'); if(tgl) tgl.onclick = toggleProductVisibility;
