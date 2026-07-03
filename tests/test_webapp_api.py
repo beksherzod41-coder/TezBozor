@@ -1720,6 +1720,91 @@ def test_product_questions_classic_seller_200(client, monkeypatch):
     assert isinstance(body["known"], dict)
 
 
+def test_product_questions_footwear_presets(client, monkeypatch):
+    # Oyoq kiyimlari: qo'lda yoziladigan maydonlar tugmali variantlarga aylandimi
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    cats = client.get("/api/categories", headers=hdr(5002)).json()
+    shoe = next(c for c in cats if c["name"] == "Oyoq kiyimlari")
+    r = client.get(f"/api/seller/product-questions?mode=classic&category_id={shoe['id']}",
+                   headers=hdr(5002))
+    assert r.status_code == 200
+    qs = {q["key"]: q for q in r.json()["questions"]}
+    # razmer/rang — bir nechta tanlanadi + qo'lda kiritish mumkin
+    assert qs["size"]["multi"] is True and qs["size"]["custom"] is True
+    assert "40" in qs["size"]["options"]
+    assert qs["color"]["multi"] is True and "Qora" in qs["color"]["options"]
+    # brend — bitta tanlov, lekin ro'yxatda yo'g'ini qo'lda kiritish mumkin
+    assert qs["brand"]["multi"] is False and qs["brand"]["custom"] is True
+    assert "Nike" in qs["brand"]["options"]
+    # jinsi — faqat tayyor variant (qo'lda yo'q)
+    assert qs["gender"]["custom"] is False
+
+
+def _questions_for_category(client, cat_name):
+    cats = client.get("/api/categories", headers=hdr(5002)).json()
+    cat = next(c for c in cats if c["name"] == cat_name)
+    r = client.get(f"/api/seller/product-questions?mode=classic&category_id={cat['id']}",
+                   headers=hdr(5002))
+    assert r.status_code == 200
+    return {q["key"]: q for q in r.json()["questions"]}
+
+
+def test_product_questions_kiyimlar_presets(client, monkeypatch):
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    qs = _questions_for_category(client, "Kiyimlar")
+    assert qs["size"]["multi"] is True and "M" in qs["size"]["options"]
+    assert qs["color"]["multi"] is True and qs["color"]["custom"] is True
+    assert qs["brand"]["custom"] is True and "Zara" in qs["brand"]["options"]
+    assert qs["gender"]["custom"] is False
+
+
+def test_product_questions_elektronika_presets(client, monkeypatch):
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    qs = _questions_for_category(client, "Elektronika")
+    assert "Samsung" in qs["brand"]["options"] and qs["brand"]["custom"] is True
+    assert "128GB" in qs["memory"]["options"]
+    assert qs["condition"]["custom"] is False
+    # model — preset yo'q, erkin matn bo'lib qoladi (tugmasiz)
+    assert not qs["model"]["options"]
+
+
+def test_product_questions_modern_categories_have_buttons(client, monkeypatch):
+    # Ilgari shablonsiz bo'lgan zamonaviy kategoriyalar endi tugmali savol beradi
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    for cat_name, key, opt in [
+        ("Uy va mebel", "type", "Divan"),
+        ("Gul va sovg'alar", "occasion", "8-mart"),
+        ("Bolalar mahsulotlari", "age", "1-3 yosh"),
+        ("Qurilish mollari", "unit", "Tonna"),
+    ]:
+        qs = _questions_for_category(client, cat_name)
+        assert qs, f"{cat_name}: savol yo'q"
+        assert key in qs and opt in qs[key]["options"], f"{cat_name}.{key} tugmasiz"
+        assert qs[key]["custom"] is True   # ro'yxatda yo'g'ini qo'lda kiritish mumkin
+
+
+def test_product_questions_russian_labels(client, monkeypatch):
+    # RU seller: chip yorlig'i tarjima, lekin value KANONIK (o'zbekcha, saqlanadi)
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    conn = webapp_server.db.get_connection()
+    conn.execute("UPDATE users SET language='ru' WHERE telegram_id=5002")
+    conn.commit()
+    qs = _questions_for_category(client, "Oyoq kiyimlari")
+    color_opts = qs["color"]["options"]
+    # option'lar {value,label} bo'ldi
+    assert all(isinstance(o, dict) for o in color_opts)
+    qora = next(o for o in color_opts if o["value"] == "Qora")
+    assert qora["label"] == "Чёрный"            # ko'rsatiladi — RU
+    assert qora["value"] == "Qora"              # saqlanadi — kanonik
+    # raqamli razmer tarjimasiz (ikkala tilda bir xil)
+    size_opts = {o["value"]: o["label"] for o in qs["size"]["options"]}
+    assert size_opts["40"] == "40"
+    # kolliziya: "Yangi" holatda=Новый, yangilikda=Свежий (maydon-aniq)
+    cond = {o["value"]: o["label"] for o in _questions_for_category(client, "Ehtiyot Qismlar")["condition"]["options"]}
+    fresh = {o["value"]: o["label"] for o in _questions_for_category(client, "Oziq-ovqat")["freshness"]["options"]}
+    assert cond["Yangi"] == "Новый" and fresh["Yangi"] == "Свежий"
+
+
 def test_create_product_with_attributes(client):
     r = client.post("/api/seller/product", headers=hdr(5002), json={
         "name": "Atributli mahsulot", "price": 2000,

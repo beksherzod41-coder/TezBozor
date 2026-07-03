@@ -25,6 +25,9 @@
     --shadow:0 1px 3px rgba(10,37,64,.06), 0 6px 16px rgba(10,37,64,.05);
     --bar:rgba(255,255,255,.9);
     --ph-bg:#e8eef5;
+    /* Tepa xavfsiz-maydon: notch (env) YOKI Telegram fullscreen kontent-chekkasidan kattasi.
+       Fullscreen'da Telegram --tg-content-safe-area-inset-top beradi (yopiq tugma balandligi). */
+    --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
   }
   /* ---- DARK MODE (Telegram dark theme) ---- */
   :root[data-theme="dark"]{
@@ -44,7 +47,7 @@
 
   /* ---------- TOPBAR ---------- */
   .topbar{position:sticky; top:0; z-index:20; background:var(--bg);
-          padding:10px 12px 6px; box-shadow:0 1px 0 var(--line);}
+          padding:calc(10px + var(--safe-top)) 12px 6px; box-shadow:0 1px 0 var(--line);}
   .searchwrap{position:relative;}
   .searchwrap svg{position:absolute; left:13px; top:50%; transform:translateY(-50%); opacity:.5;}
   .search{width:100%; padding:12px 14px 12px 40px; border:1px solid var(--line); border-radius:13px;
@@ -154,7 +157,7 @@
   .detail.open{transform:translateX(0);}
   .dtop{position:sticky; top:0; z-index:5; background:var(--bar);
         backdrop-filter:saturate(180%) blur(12px); -webkit-backdrop-filter:saturate(180%) blur(12px);
-        display:flex; align-items:center; gap:6px; padding:11px 12px; box-shadow:0 1px 0 var(--line);}
+        display:flex; align-items:center; gap:6px; padding:calc(11px + var(--safe-top)) 12px 11px; box-shadow:0 1px 0 var(--line);}
   .dtop .bk{display:flex; align-items:center; gap:4px; font-size:15px; font-weight:600;
             color:var(--accent); cursor:pointer; padding:4px 6px;}
   .galwrap{background:var(--card);}
@@ -205,7 +208,7 @@
   .checkout.open{transform:translateY(0);}
   .cohead{position:sticky; top:0; z-index:5; background:var(--bar);
           backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-          display:flex; align-items:center; justify-content:space-between; padding:13px 16px;
+          display:flex; align-items:center; justify-content:space-between; padding:calc(13px + var(--safe-top)) 16px 13px;
           box-shadow:0 1px 0 var(--line); font-size:16px; font-weight:700;}
   .cohead .x{font-size:22px; color:var(--hint); cursor:pointer; line-height:1; padding:0 4px;}
   .cobody{padding:14px 16px; display:flex; flex-direction:column; gap:14px;}
@@ -396,7 +399,7 @@
 </style>
 </head>
 <body>
-  <div id="notifBanner" onclick="onNotifBannerClick()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;padding:calc(8px + env(safe-area-inset-top)) 14px 8px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);align-items:center;justify-content:space-between;gap:8px">
+  <div id="notifBanner" onclick="onNotifBannerClick()" style="display:none;position:fixed;top:0;left:0;right:0;z-index:200;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;padding:calc(8px + var(--safe-top)) 14px 8px;font-size:13.5px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.18);align-items:center;justify-content:space-between;gap:8px">
     <span id="notifBannerText">📩</span><span style="opacity:.9">Ochish ›</span>
   </div>
   <div id="viewCatalog">
@@ -667,6 +670,10 @@
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
+// Butun ekranni qoplash (Bot API 8.0+): app tepa "ochiq" qolmasin. Eski mijozda yo'q →
+// expand yetarli. Fullscreen'da kontent tepasi CSS --safe-top (--tg-content-safe-area-inset-top)
+// bilan Telegram tugmalari ostidan tushmaydi. Xatosi ilovani buzmasin (fail-soft).
+try{ if(typeof tg.requestFullscreen==='function') tg.requestFullscreen(); }catch(e){}
 // #23 — ilovadan chiqishda Telegram'ning tasdiq oynasi chiqsin (tasodifan yopilmasin)
 try{ tg.enableClosingConfirmation(); }catch(e){}
 // ---- TEMA — #11 kun/tun: 'auto' (Telegram'ga ergashadi) | 'light' | 'dark' ----
@@ -1382,6 +1389,9 @@ const I18N = {
   sp_q_need_name:{uz:"Avval mahsulot nomini kiriting.",ru:"Сначала введите название товара."},
   sp_q_need_cat:{uz:"Avval kategoriyani tanlang.",ru:"Сначала выберите категорию."},
   sp_q_required:{uz:"«{f}» — majburiy maydon.",ru:"«{f}» — обязательное поле."},
+  sp_attr_custom:{uz:"Ro'yxatda yo'q — qo'lda yozing",ru:"Нет в списке — впишите вручную"},
+  sp_attr_custom_multi:{uz:"Boshqa (vergul bilan) — qo'lda",ru:"Другое (через запятую) — вручную"},
+  sp_attr_multi_hint:{uz:"Bir nechtasini tanlash mumkin",ru:"Можно выбрать несколько"},
   // overlay sarlavhalari
   sp_ov_shop:{uz:"💳 To'lov / karta",ru:"💳 Оплата / карта"}, sp_ov_reply:{uz:"💬 Sharhga javob",ru:"💬 Ответ на отзыв"},
   sp_card_moved:{uz:"ℹ️ Do'kon ma'lumotlari (nom, manzil, ish vaqti, hudud, lokatsiya) endi Profil sahifasida tahrirlanadi. Bu yerda faqat to'lov kartasi.",ru:"ℹ️ Данные магазина (название, адрес, часы, регион, локация) теперь редактируются в Профиле. Здесь только платёжная карта."},
@@ -1917,7 +1927,7 @@ async function openDetail(id){
         </div>
         ${(p.haggle_on && !p.is_own)?`<div class="dsec"><button class="oact ok full" id="haggleBtn" style="background:linear-gradient(135deg,#f59e0b,#f97316)">${L('hag_btn')}</button></div>`:''}
         <div class="dsec" id="adSec"><h4>📢 ${L('sp_ad')}</h4><div class="dcard adcard"><div class="ddesc" id="adText">${p.ad_caption?(p.ad_caption_pm==='HTML'?p.ad_caption:esc(p.ad_caption)):(p.description?esc(p.description):'')}</div><button class="descmore" id="adMore" hidden>${L('sp_read_more')}</button></div></div>
-        ${(p.attributes&&p.attributes.length)?`<div class="dsec"><h4>${L('sp_q_fields')}</h4><div class="dcard">${p.attributes.map(a=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px"><span style="color:var(--hint)">${esc(a.attr_label||a.attr_key)}</span><b style="text-align:right">${esc(a.attr_value)}</b></div>`).join('')}</div></div>`:''}
+        ${(p.attributes&&p.attributes.length)?`<div class="dsec"><h4>${L('sp_q_fields')}</h4><div class="dcard">${p.attributes.map(a=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px"><span style="color:var(--hint)">${esc(labelRu(a.attr_label||a.attr_key))}</span><b style="text-align:right">${esc(valueRu(a.attr_key, a.attr_value))}</b></div>`).join('')}</div></div>`:''}
         ${shopInfoHtml(p)}
         <div id="relatedWrap"></div>
         <div class="dsec"><h4>🤖 ${L('ask_title')}</h4><div class="dcard">
@@ -2045,7 +2055,8 @@ function wsTiers(p){
 // (optomda label=rang bo'lgani uchun "Oq · Oq" emas "Oq" chiqsin).
 function variantTag(o){
   const parts=[];
-  [o.variant_label,o.variant_color,o.variant_size].forEach(v=>{
+  // rang/razmer RU'da ko'rsatiladi (display); variant_label — custom, o'zicha qoladi
+  [o.variant_label, valueRu('color', o.variant_color), valueRu('size', o.variant_size)].forEach(v=>{
     v=(v==null?'':String(v)).trim();
     if(v && !parts.includes(v)) parts.push(v);
   });
@@ -2079,7 +2090,7 @@ function coVariantOwnQty(v){
 }
 function coVariantTotalQty(){ return coVariants.reduce((s,v)=>s+coVariantOwnQty(v),0); }
 function coMinQty(p){ const moq=Number(p&&p.min_order_qty||0); return moq>1?moq:1; }  // optom zina minimal MAJBURLAMAYDI (faqat chegirma)
-function comboLabel(c){ return [c.color,c.size].filter(Boolean).join(' · '); }
+function comboLabel(c){ return [valueRu('color',c.color),valueRu('size',c.size)].filter(Boolean).join(' · '); }
 // Atribut qiymatini variantlarga ajratadi: vergul/nuqtali vergul/slash/yangi qator bo'lsa shular bo'yicha,
 // aks holda bo'sh joy bo'yicha (AI ko'pincha "36 37 38" yoki "Qora Oq" deb saqlaydi). "S, M, L" ham, "36 37 38" ham ishlaydi.
 function splitOpts(s){
@@ -2245,12 +2256,12 @@ function renderVariantCheckout(){
       const colorPick = coColorOpts.length
         ? `<div style="font-size:11px;color:var(--hint);margin:6px 0 4px">${L('vp_color')}</div>
            <div class="chips" style="padding:0;flex-wrap:wrap">${coColorOpts.map(c=>
-             `<div class="chip ${v.dColor===c?'active':''}" data-dcolor="${i}" data-val="${esc(c)}">${esc(c)}</div>`).join('')}</div>`
+             `<div class="chip ${v.dColor===c?'active':''}" data-dcolor="${i}" data-val="${esc(c)}">${esc(valueRu('color',c))}</div>`).join('')}</div>`
         : '';
       const sizePick = coSizeOpts.length
         ? `<div style="font-size:11px;color:var(--hint);margin:6px 0 4px">${L('vp_size')}</div>
            <div class="chips" style="padding:0;flex-wrap:wrap">${coSizeOpts.map(s=>
-             `<div class="chip ${v.dSize===s?'active':''}" data-dsize="${i}" data-val="${esc(s)}">${esc(s)}</div>`).join('')}</div>`
+             `<div class="chip ${v.dSize===s?'active':''}" data-dsize="${i}" data-val="${esc(s)}">${esc(valueRu('size',s))}</div>`).join('')}</div>`
         : '';
       const dQty = Number(v.dQty)||1;
       const addReady = (!coColorOpts.length || v.dColor) && (!coSizeOpts.length || v.dSize) && canPlus;
@@ -2281,7 +2292,7 @@ function renderVariantCheckout(){
     return `<div class="vcard" style="display:flex;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)">
       <div class="vthumb" style="flex:0 0 56px;width:56px;height:56px;border-radius:10px;overflow:hidden;background:var(--bg)">${thumb}</div>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:600;font-size:13.5px">${esc(v.label)}</div>
+        <div style="font-weight:600;font-size:13.5px">${esc(valueRu('color', v.label))}</div>
         ${qtyBlock}
       </div>
     </div>`;
@@ -5649,11 +5660,12 @@ function openProductForm(prod, mode){
     min_order_qty: prod.min_order_qty||'',
     sale_mode: (prod.sale_mode==='optom'?'optom':'dona'), modeChosen: true,
     pack_size: prod.pack_size||'', size_note: prod.size_note||'', imageLabels: [], optomColors: '',
+    optomColorOpts: [], optomSizeOpts: [],
     tiers: _loadTiers(prod),
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
   }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', min_order_qty:'',
     sale_mode: (mode==='optom'?'optom':'dona'), modeChosen: !!mode,
-    pack_size:'', size_note:'', imageLabels:[], optomColors:'', tiers:[], images:[] }, base);
+    pack_size:'', size_note:'', imageLabels:[], optomColors:'', optomColorOpts:[], optomSizeOpts:[], tiers:[], images:[] }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
@@ -5691,16 +5703,129 @@ function unitPresets(){ return LANG==='ru'
   ? ['шт','кг','г','л','м','м²','т','пара','коробка']
   : ['dona','kg','g','litr','metr','m²','tonna','juft','quti']; }
 
+// Maydon YORLIG'ining RU ko'rinishi (o'zbekcha kanonik label → RU). Faqat KO'RSATISH —
+// saqlashda DOIM kanonik q.label ishlatiladi (pf.attrLabels), shunda attr_label baza
+// bo'ylab bir xil qoladi. Xaritada yo'q bo'lsa o'zi qaytadi (AI yorliqlari allaqachon lokal).
+const ATTR_LABEL_RU = {
+  "O'lcham (razmer)":"Размер", "O'lcham":"Размер", "Rangi":"Цвет", "Jinsi":"Пол",
+  "Kimga":"Кому", "Brend":"Бренд", "Material":"Материал", "Fasl":"Сезон",
+  "Model":"Модель", "Holati":"Состояние", "Kafolat":"Гарантия", "Xotira":"Память",
+  "Avtomobil":"Автомобиль", "Yili":"Год", "Qism turi":"Тип детали", "OEM/Kopiya":"OEM/Копия",
+  "Og'irligi":"Вес", "Hajmi/Og'irligi":"Объём/Вес", "Hajmi":"Объём",
+  "Yangiligi":"Свежесть", "Kelib chiqishi":"Происхождение",
+  "Porsiya":"Порция", "Achchiqlik":"Острота", "Tayyor vaqti":"Время готовности",
+  "Sovuq/Issiq":"Холодный/Горячий", "Turi":"Вид", "Shakli":"Форма", "Retsept":"Рецепт",
+  "Yosh":"Возраст", "Xona":"Комната", "Tili":"Язык", "O'lchov":"Единица",
+  "Hayvon":"Животное", "Munosabat":"Повод"
+};
+function labelRu(lbl){ return (LANG==='ru' && ATTR_LABEL_RU[lbl]) ? ATTR_LABEL_RU[lbl] : lbl; }
+// Atribut QIYMATINING RU ko'rinishi (backend _ATTR_RU_COMMON aksi). Faqat KO'RSATISH
+// (tafsilot kartasi) — saqlangan qiymat kanonik o'zbekcha qoladi. Raqam/brend/custom
+// token xaritada yo'q → o'zi qaytadi. Yangi preset qo'shilsa bu yerni ham yangilang.
+const ATTR_VALUE_RU = {
+  "Qora":"Чёрный","Oq":"Белый","Jigarrang":"Коричневый","Ko'k":"Синий","Kulrang":"Серый",
+  "Qizil":"Красный","Yashil":"Зелёный","Sariq":"Жёлтый","Pushti":"Розовый","Bej":"Бежевый",
+  "Kumush":"Серебристый","Oltin":"Золотой",
+  "Erkak":"Мужской","Ayol":"Женский","Bolalar":"Детский","Uniseks":"Унисекс",
+  "O'g'il bola":"Мальчик","Qiz bola":"Девочка",
+  "Charm":"Кожа","Ekokcharm":"Экокожа","Zamsh":"Замша","Tekstil":"Текстиль","Rezina":"Резина",
+  "Mesh (to'r)":"Сетка","Yog'och":"Дерево","Metall":"Металл","Plastik":"Пластик",
+  "Shisha":"Стекло","Mato":"Ткань",
+  "Yoz":"Лето","Qish":"Зима","Demi-sezon":"Демисезон","To'rt fasl":"Всесезон",
+  "Bahor":"Весна","Kuz":"Осень",
+  "Ishlatilgan":"Б/у","Qadoqda":"В упаковке","Original":"Оригинал","Kopiya":"Копия","Zamena":"Замена",
+  "Dvigatel":"Двигатель","Korobka":"Коробка","Xodovoy":"Ходовая","Kuzov":"Кузов",
+  "Elektrika":"Электрика","Tormoz":"Тормоза","Salon":"Салон","Optika":"Оптика",
+  "Sovuq":"Холодный","Issiq":"Горячий","Ikkalasi":"Оба",
+  "Achchiq":"Острый","O'rta":"Средний","Achchiq emas":"Не острый",
+  "1 kishi":"1 человек","2-3 kishi":"2-3 человека","4-5 kishi":"4-5 человек","Katta oila":"Большая семья",
+  "Hozir tayyor":"Готово сейчас","15 daqiqa":"15 минут","30 daqiqa":"30 минут","1 soat":"1 час",
+  "Bugungi":"Сегодняшний","Kechagi":"Вчерашний","Muzlatilgan":"Замороженный",
+  "O'zbekiston":"Узбекистан","Import":"Импорт","Rossiya":"Россия","Qozog'iston":"Казахстан",
+  "Turkiya":"Турция","Xitoy":"Китай",
+  "Yo'q":"Нет","6 oy":"6 мес","1 yil":"1 год","2 yil":"2 года","3 yil":"3 года",
+  "Parfyum":"Парфюм","Krem":"Крем","Pomada":"Помада","Tush":"Тушь","Shampun":"Шампунь",
+  "Maska":"Маска","Loson":"Лосьон","Atir":"Духи",
+  "Dori":"Лекарство","Vitamin":"Витамины","BAD":"БАД","Bandaj":"Бандаж","Tibbiy asbob":"Мед. прибор",
+  "Gigiena":"Гигиена","Tabletka":"Таблетка","Kapsula":"Капсула","Sirop":"Сироп","Malham":"Мазь",
+  "Ukol":"Укол","Tomchi":"Капли","Retseptsiz":"Без рецепта","Retsept bilan":"По рецепту",
+  "O'yinchoq":"Игрушка","Kiyim":"Одежда","Aravacha":"Коляска","Taom":"Питание","Maktab":"Школа",
+  "0-1 yosh":"0-1 год","1-3 yosh":"1-3 года","3-6 yosh":"3-6 лет","6-12 yosh":"6-12 лет","12+ yosh":"12+ лет",
+  "Sport kiyim":"Спортивная одежда","Trenajyor":"Тренажёр","Velosiped":"Велосипед","Top":"Мяч",
+  "Palatka":"Палатка","Baliq ovi":"Рыбалка","Gantel":"Гантели",
+  "Divan":"Диван","Stol":"Стол","Stul":"Стул","Shkaf":"Шкаф","Krovat":"Кровать","Polka":"Полка",
+  "Gilam":"Ковёр","Yoritish":"Освещение","Yotoqxona":"Спальня","Mehmonxona":"Гостиная",
+  "Oshxona":"Кухня","Ofis":"Офис","Hammom":"Ванная",
+  "Kitob":"Книга","Daftar":"Тетрадь","Qalam":"Карандаш","Ruchka":"Ручка","Papka":"Папка",
+  "Bo'yoq":"Краска","Ranglar":"Краски","O'zbek":"Узбекский","Rus":"Русский","Ingliz":"Английский","Arab":"Арабский",
+  "G'isht":"Кирпич","Sement":"Цемент","Plitka":"Плитка","Armatura":"Арматура","Gips":"Гипс",
+  "Quruq aralashma":"Сухая смесь","Asbob":"Инструмент",
+  "Dona":"Штука","Kg":"Кг","Tonna":"Тонна","Metr":"Метр","Qop":"Мешок","Litr":"Литр",
+  "It":"Собака","Mushuk":"Кошка","Qush":"Птица","Baliq":"Рыба","Kemiruvchi":"Грызун","Boshqa":"Другое",
+  "Ozuqa":"Корм","Aksessuar":"Аксессуар","Qafas/Uy":"Клетка/Дом",
+  "Atirgul":"Роза","Buket":"Букет","Tuvakli gul":"Горшечный цветок","Sovg'a":"Подарок",
+  "Sharlar":"Шары","Otkritka":"Открытка","Tug'ilgan kun":"День рождения","To'y":"Свадьба",
+  "8-mart":"8 марта","Sevishganlar kuni":"День влюблённых","Yubiley":"Юбилей"
+};
+// Kolliziya: "Yangi" — holatda=Новый, yangilikda=Свежий (maydon-aniq ustunlik)
+const ATTR_VALUE_RU_BY_KEY = { "freshness":{"Yangi":"Свежий"}, "condition":{"Yangi":"Новый"} };
+function valueRu(attrKey, val){
+  if(LANG!=='ru' || !val) return val;
+  return String(val).split(',').map(part=>{
+    const t=part.trim(); if(!t) return part;
+    const bk=ATTR_VALUE_RU_BY_KEY[attrKey];
+    return (bk && bk[t]) || ATTR_VALUE_RU[t] || t;
+  }).join(', ');
+}
+// Option string YOKI {value,label} bo'lishi mumkin (RU'da label tarjima, value kanonik).
+function optVL(o){ return (o && typeof o==='object') ? {value:o.value, label:(o.label!=null?o.label:o.value)} : {value:o, label:o}; }
+function attrOptVals(q){ return (q.options||[]).map(o=>optVL(o).value); }
+// Optom Ranglar/Razmerlar uchun chip-tanlov: tayyor variantlar (opts) + joriy vergulli
+// qiymat (valStr). Tanlangan = value ichida. data-atributi orqali bosish ushlanadi.
+function optomChipsHtml(opts, valStr, dataAttr){
+  if(!opts || !opts.length) return '';
+  const sel = splitOpts(valStr||'');
+  return `<div class="chips" style="padding:0 0 7px;flex-wrap:wrap">`+
+    opts.map(o=>{ const {value,label}=optVL(o);
+      return `<div class="chip ${sel.includes(value)?'active':''}" ${dataAttr}="${esc(value)}">${esc(label)}</div>`;
+    }).join('')+`</div>`;
+}
+// Vergulli ro'yxatда bir qiymatni almashtiradi (katalog tartibi + qo'lda kiritilganlar oxirida).
+function toggleInList(valStr, v, opts){
+  const optVals=(opts||[]).map(o=>optVL(o).value);
+  let sel=splitOpts(valStr||'');
+  sel = sel.includes(v) ? sel.filter(x=>x!==v) : sel.concat([v]);
+  return optVals.filter(o=>sel.includes(o)).concat(sel.filter(x=>!optVals.includes(x))).join(', ');
+}
+// Bir maydonda tanlangan qiymatlar to'plami (multi → vergulli ro'yxat, aks holda bitta).
+// DOIM kanonik qiymatlar (bazadagidek) — tarjima emas.
+function attrSelected(q){
+  const raw = pf.attrs[q.key]||'';
+  return q.multi ? splitOpts(raw) : (raw ? [raw] : []);
+}
 function attrFieldHtml(q,i){
-  const val = pf.attrs[q.key]||'';
   const req = q.required ? ' <span style="color:var(--sale)">*</span>' : '';
   const ai = q.ai ? ' 🤖' : '';
-  if(q.type==='select' && q.options && q.options.length){
-    return `<div style="margin-bottom:11px"><div class="lbl">${esc(q.label)}${req}${ai}</div>
-      <div class="chips" style="padding:0;flex-wrap:wrap">${q.options.map(o=>`<div class="chip ${val===o?'active':''}" data-qopt="${i}" data-qval="${esc(o)}">${esc(o)}</div>`).join('')}</div></div>`;
+  const opts = q.options||[];
+  // Tugmali maydon: chiplar (bitta yoki bir nechta) + ro'yxatda yo'g'ini qo'lda kiritish.
+  if(opts.length){
+    const sel = attrSelected(q);
+    const optVals = attrOptVals(q);
+    const multiHint = q.multi ? ` <span style="color:var(--hint);font-weight:400;font-size:11px">· ${L('sp_attr_multi_hint')}</span>` : '';
+    const chips = opts.map(o=>{ const {value,label}=optVL(o);
+      return `<div class="chip ${sel.includes(value)?'active':''}" data-qopt="${i}" data-qval="${esc(value)}">${esc(label)}</div>`; }).join('');
+    let custom='';
+    if(q.custom){
+      const extra = sel.filter(v=>!optVals.includes(v));   // chiplarda yo'q — qo'lda kiritilgan
+      const ph = q.multi ? L('sp_attr_custom_multi') : L('sp_attr_custom');
+      custom = `<input class="coaddr" data-qcustom="${i}" style="min-height:auto;margin-top:7px" placeholder="${esc(ph)}" value="${esc(extra.join(', '))}">`;
+    }
+    return `<div style="margin-bottom:11px"><div class="lbl">${esc(labelRu(q.label))}${req}${ai}${multiHint}</div>
+      <div class="chips" style="padding:0;flex-wrap:wrap">${chips}</div>${custom}</div>`;
   }
-  return `<div style="margin-bottom:11px"><div class="lbl">${esc(q.label)}${req}${ai}</div>
-    <input class="coaddr" data-qkey="${esc(q.key)}" style="min-height:auto" placeholder="${esc(q.hint||'')}" value="${esc(val)}"></div>`;
+  // Tugmasiz maydon — eski xulq: oddiy matn maydoni.
+  return `<div style="margin-bottom:11px"><div class="lbl">${esc(labelRu(q.label))}${req}${ai}</div>
+    <input class="coaddr" data-qkey="${esc(q.key)}" style="min-height:auto" placeholder="${esc(q.hint||'')}" value="${esc(pf.attrs[q.key]||'')}"></div>`;
 }
 
 function attrSectionHtml(){
@@ -5737,6 +5862,12 @@ async function loadQuestions(){
     if(pf.category_id) qs.set('category_id', pf.category_id);
     const d = await api('/api/seller/product-questions?'+qs.toString());
     const optom = (pf.sale_mode==='optom');
+    // Optomda size/color generik maydon sifatida KO'RSATILMAYDI, lekin ularning tayyor
+    // variantlarini maxsus Ranglar/Razmerlar maydonlariga chip qilib beramiz.
+    if(optom){
+      const _col=(d.questions||[]).find(q=>q.key==='color'); pf.optomColorOpts=(_col&&_col.options)||[];
+      const _sz =(d.questions||[]).find(q=>q.key==='size');  pf.optomSizeOpts =(_sz &&_sz.options)||[];
+    }
     pf.questions = (d.questions||[]).filter(q=>!optom || !OPTOM_HIDDEN_ATTRS.includes(q.key));
     pf.questions.forEach(q=>{ pf.attrLabels[q.key]=q.label; });
     const known = d.known||{};
@@ -5807,12 +5938,14 @@ function renderProductForm(){
   // ── Optom: ranglar ro'yxati + pachka soni + razmer matni ──
   const packSec = optom ? `<div class="cosec"><div class="lbl">${L('sp_colors_list')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_colors_list_hint')}</div>
+      ${optomChipsHtml(pf.optomColorOpts, pf.optomColors, 'data-optomcolor')}
       <input class="coaddr" id="pfColors" style="min-height:auto" placeholder="${L('sp_colors_list_ph')}" value="${esc(pf.optomColors||'')}"></div>
     <div class="cosec"><div class="lbl">${L('sp_pack_size')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_pack_size_hint')}</div>
       <input class="coaddr" id="pfPackSize" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_pack_size_ph')}" value="${pf.pack_size?fmtThousands(pf.pack_size):''}"></div>
     <div class="cosec"><div class="lbl">${L('sp_size_note')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_size_note_hint')}</div>
+      ${optomChipsHtml(pf.optomSizeOpts, pf.size_note, 'data-optomsize')}
       <input class="coaddr" id="pfSizeNote" style="min-height:auto" placeholder="${L('sp_size_note_ph')}" value="${esc(pf.size_note||'')}"></div>` : '';
   // ── Dona: o'lchov birligi + savdolashish ──
   const unitSec = optom ? '' : `<div class="cosec"><div class="lbl">${L('sp_unit')}</div>
@@ -5866,6 +5999,11 @@ function renderProductForm(){
   const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
   const pcol=document.getElementById('pfColors'); if(pcol) pcol.oninput=e=>{ pf.optomColors=e.target.value; };
+  // Optom Ranglar/Razmerlar chip-tanlovi — bosilganda vergulli ro'yxatga qo'shadi/oladi.
+  body.querySelectorAll('[data-optomcolor]').forEach(ch=>ch.onclick=()=>{
+    pf.optomColors = toggleInList(pf.optomColors, ch.dataset.optomcolor, pf.optomColorOpts); renderProductForm(); });
+  body.querySelectorAll('[data-optomsize]').forEach(ch=>ch.onclick=()=>{
+    pf.size_note = toggleInList(pf.size_note, ch.dataset.optomsize, pf.optomSizeOpts); renderProductForm(); });
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
   document.getElementById('pfPrice').oninput = e=>{
     const digits = e.target.value.replace(/\D/g,'');
@@ -5908,9 +6046,29 @@ function renderProductForm(){
   const ql=document.getElementById('qLoad'); if(ql) ql.onclick=loadQuestions;
   body.querySelectorAll('[data-qkey]').forEach(inp=>inp.oninput=e=>{ pf.attrs[e.target.dataset.qkey]=e.target.value; });
   body.querySelectorAll('[data-qopt]').forEach(ch=>ch.onclick=()=>{
-    const q=pf.questions[Number(ch.dataset.qopt)]; const v=ch.dataset.qval;
-    pf.attrs[q.key] = (pf.attrs[q.key]===v) ? '' : v;  // qayta bosilsa bekor qilinadi
+    const q=pf.questions[Number(ch.dataset.qopt)]; const v=ch.dataset.qval;  // v — kanonik qiymat
+    if(q.multi){
+      const optVals=attrOptVals(q);
+      let sel=attrSelected(q);
+      sel = sel.includes(v) ? sel.filter(x=>x!==v) : sel.concat([v]);
+      // Tartib: katalog tartibida tanlanganlar, so'ng qo'lda kiritilganlar (razmer 36,37,38 chiroyli).
+      pf.attrs[q.key] = optVals.filter(o=>sel.includes(o)).concat(sel.filter(x=>!optVals.includes(x))).join(', ');
+    } else {
+      pf.attrs[q.key] = (pf.attrs[q.key]===v) ? '' : v;  // qayta bosilsa bekor qilinadi
+    }
     renderProductForm();
+  });
+  // "Qo'lda kiritish" maydoni: ro'yxatda yo'q qiymatlarni chip tanlovi bilan birlashtiradi.
+  // Re-render QILMAYDI (fokus yo'qolmasin) — matn maydonlari kabi jim yangilaydi.
+  body.querySelectorAll('[data-qcustom]').forEach(inp=>inp.oninput=e=>{
+    const q=pf.questions[Number(e.target.dataset.qcustom)]; const optVals=attrOptVals(q);
+    const chosen = attrSelected(q).filter(v=>optVals.includes(v));   // chiplardan tanlanganlar
+    const custom = splitOpts(e.target.value);                     // qo'lda yozilganlar
+    if(q.multi){
+      pf.attrs[q.key] = chosen.concat(custom.filter(v=>!chosen.includes(v))).join(', ');
+    } else {
+      pf.attrs[q.key] = custom[0] || chosen[0] || '';   // bitta: qo'lda yozilgan ustun
+    }
   });
   _renderPriceInsight();   // #2 — narx tahlili (yuklangan bo'lsa)
 }

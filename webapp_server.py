@@ -4591,6 +4591,279 @@ def api_delete_product(product_id: int, authorization: str = Header(None)):
 #   ai_smart  — AI tavsifdan ajratadi (known) + qolganini so'raydi (questions)
 # AI o'chiq/xato bo'lsa — klassik shablonlarga qaytadi (bot bilan bir xil xulq).
 # ============================================================
+# Kategoriya atributlari uchun tayyor variant tugmalari — qo'lda yozishni bir tegishga
+# aylantiradi. Sotuvchi ko'p yozadigan maydonlarni chiplardan tanlaydi; ro'yxatda yo'q
+# bo'lsa "qo'lda kiritish" maydoniga yozadi (custom=True). multi=True — bir e'londa bir
+# nechta qiymat (razmer 40,41,42 / rang qora,oq) tanlanadi — downstream `_split_opts`
+# vergulni allaqachon variantlarga ajratadi, shuning uchun optom/variant bilan mos.
+# Qiymatlar (rang/material nomlari) — DATA, saqlanadi va hammaga bir xil ko'rinadi,
+# shuning uchun mavjud "select" chiplari kabi lokalizatsiya qilinmaydi (o'zbekcha).
+# Data-driven: yangi kategoriya qo'shish uchun shu yerga bitta blok yoziladi.
+_ATTR_PRESETS = {
+    "Oyoq kiyimlari": {
+        "size":     {"options": ["35", "36", "37", "38", "39", "40", "41", "42",
+                                  "43", "44", "45", "46"],
+                     "multi": True,  "custom": True},
+        "color":    {"options": ["Qora", "Oq", "Jigarrang", "Ko'k", "Kulrang", "Qizil",
+                                  "Yashil", "Sariq", "Pushti", "Bej", "Kumush", "Oltin"],
+                     "multi": True,  "custom": True},
+        "gender":   {"options": ["Erkak", "Ayol", "Bolalar", "Uniseks"],
+                     "multi": False, "custom": False},
+        "brand":    {"options": ["Nike", "Adidas", "Puma", "Reebok", "New Balance",
+                                  "Converse", "Vans", "Skechers", "Ecco", "Asics",
+                                  "Fila", "Salomon"],
+                     "multi": False, "custom": True},
+        "material": {"options": ["Charm", "Ekokcharm", "Zamsh", "Tekstil", "Rezina",
+                                  "Mesh (to'r)"],
+                     "multi": False, "custom": True},
+        "season":   {"options": ["Yoz", "Qish", "Demi-sezon", "To'rt fasl"],
+                     "multi": False, "custom": True},
+    },
+    "Kiyimlar": {
+        "size":     {"options": ["XS", "S", "M", "L", "XL", "XXL", "XXXL"],
+                     "multi": True,  "custom": True},
+        "color":    {"options": ["Qora", "Oq", "Jigarrang", "Ko'k", "Kulrang", "Qizil",
+                                  "Yashil", "Sariq", "Pushti", "Bej", "Kumush", "Oltin"],
+                     "multi": True,  "custom": True},
+        "gender":   {"options": ["Erkak", "Ayol", "Bolalar", "Uniseks"],
+                     "multi": False, "custom": False},
+        "brand":    {"options": ["Nike", "Adidas", "Zara", "Puma", "H&M", "Uniqlo",
+                                  "Mango", "Reebok", "Tommy Hilfiger", "Lacoste",
+                                  "Levi's", "Gucci"],
+                     "multi": False, "custom": True},
+        "season":   {"options": ["Bahor", "Yoz", "Kuz", "Qish", "To'rt fasl"],
+                     "multi": False, "custom": True},
+    },
+    "Elektronika": {
+        "brand":     {"options": ["Samsung", "Apple", "Xiaomi", "Redmi", "Huawei", "Honor",
+                                   "Realme", "Infinix", "Tecno", "Oppo", "OnePlus", "Nokia"],
+                      "multi": False, "custom": True},
+        "condition": {"options": ["Yangi", "Ishlatilgan", "Qadoqda"],
+                      "multi": False, "custom": False},
+        "warranty":  {"options": ["Yo'q", "6 oy", "1 yil", "2 yil", "3 yil"],
+                      "multi": False, "custom": True},
+        "memory":    {"options": ["32GB", "64GB", "128GB", "256GB", "512GB", "1TB"],
+                      "multi": False, "custom": True},
+    },
+    "Ichimliklar": {
+        "volume": {"options": ["0.25L", "0.33L", "0.5L", "1L", "1.5L", "2L", "5L"],
+                   "multi": False, "custom": True},
+        "cold":   {"options": ["Sovuq", "Issiq", "Ikkalasi"],
+                   "multi": False, "custom": False},
+    },
+    "Ehtiyot Qismlar": {
+        "car_make":  {"options": ["Nexia", "Cobalt", "Gentra", "Spark", "Malibu",
+                                  "Lacetti", "Damas", "Matiz", "Captiva", "Tracker",
+                                  "Onix", "Tahoe"],
+                      "multi": False, "custom": True},
+        "part_type": {"options": ["Dvigatel", "Korobka", "Xodovoy", "Kuzov", "Elektrika",
+                                  "Tormoz", "Salon", "Optika"],
+                      "multi": False, "custom": True},
+        "condition": {"options": ["Yangi", "Ishlatilgan"],
+                      "multi": False, "custom": False},
+        "oem":       {"options": ["Original", "Kopiya", "Zamena"],
+                      "multi": False, "custom": True},
+    },
+    "Xojalik Mollari": {
+        "brand":  {"options": ["Ariel", "Domestos", "Fairy", "Tide", "Persil", "Sarma",
+                               "Bref", "Comet", "Myth"],
+                   "multi": False, "custom": True},
+        "weight": {"options": ["0.5L", "1L", "2L", "5L", "500g", "1kg", "5kg"],
+                   "multi": False, "custom": True},
+    },
+    "Oziq-ovqat": {
+        "weight":    {"options": ["100g", "250g", "500g", "1kg", "2kg", "5kg", "10kg"],
+                      "multi": False, "custom": True},
+        "freshness": {"options": ["Bugungi", "Kechagi", "Yangi", "Muzlatilgan"],
+                      "multi": False, "custom": True},
+        "origin":    {"options": ["O'zbekiston", "Import", "Rossiya", "Qozog'iston",
+                                  "Turkiya", "Xitoy"],
+                      "multi": False, "custom": True},
+    },
+    "Taomlar": {
+        "serving":  {"options": ["1 kishi", "2-3 kishi", "4-5 kishi", "Katta oila"],
+                     "multi": False, "custom": True},
+        "spicy":    {"options": ["Achchiq", "O'rta", "Achchiq emas"],
+                     "multi": False, "custom": False},
+        "ready_in": {"options": ["Hozir tayyor", "15 daqiqa", "30 daqiqa", "1 soat"],
+                     "multi": False, "custom": True},
+    },
+    "Go'zallik va parfyumeriya": {
+        "type":   {"options": ["Parfyum", "Krem", "Pomada", "Tush", "Shampun", "Maska",
+                               "Loson", "Atir"],
+                   "multi": False, "custom": True},
+        "brand":  {"options": ["Chanel", "Dior", "L'Oreal", "Nivea", "Maybelline", "MAC",
+                               "Estee Lauder", "Garnier"],
+                   "multi": False, "custom": True},
+        "volume": {"options": ["30ml", "50ml", "100ml", "150ml", "200ml"],
+                   "multi": False, "custom": True},
+        "gender": {"options": ["Erkak", "Ayol", "Uniseks"],
+                   "multi": False, "custom": False},
+    },
+    "Salomatlik va dorixona": {
+        "type":         {"options": ["Dori", "Vitamin", "BAD", "Bandaj", "Tibbiy asbob",
+                                     "Gigiena"],
+                         "multi": False, "custom": True},
+        "form":         {"options": ["Tabletka", "Kapsula", "Sirop", "Malham", "Ukol",
+                                     "Tomchi"],
+                         "multi": False, "custom": True},
+        "prescription": {"options": ["Retseptsiz", "Retsept bilan"],
+                         "multi": False, "custom": False},
+    },
+    "Bolalar mahsulotlari": {
+        "type":   {"options": ["O'yinchoq", "Kiyim", "Aravacha", "Taom", "Gigiena",
+                               "Maktab"],
+                   "multi": False, "custom": True},
+        "age":    {"options": ["0-1 yosh", "1-3 yosh", "3-6 yosh", "6-12 yosh", "12+ yosh"],
+                   "multi": False, "custom": True},
+        "gender": {"options": ["O'g'il bola", "Qiz bola", "Uniseks"],
+                   "multi": False, "custom": False},
+    },
+    "Sport va dam olish": {
+        "type":   {"options": ["Sport kiyim", "Trenajyor", "Velosiped", "Top", "Palatka",
+                               "Baliq ovi", "Gantel"],
+                   "multi": False, "custom": True},
+        "size":   {"options": ["S", "M", "L", "XL", "XXL"],
+                   "multi": True,  "custom": True},
+        "gender": {"options": ["Erkak", "Ayol", "Uniseks"],
+                   "multi": False, "custom": False},
+    },
+    "Uy va mebel": {
+        "type":     {"options": ["Divan", "Stol", "Stul", "Shkaf", "Krovat", "Polka",
+                                 "Gilam", "Yoritish"],
+                     "multi": False, "custom": True},
+        "material": {"options": ["Yog'och", "Metall", "Plastik", "Shisha", "Mato", "Charm"],
+                     "multi": False, "custom": True},
+        "room":     {"options": ["Yotoqxona", "Mehmonxona", "Oshxona", "Bolalar", "Ofis",
+                                 "Hammom"],
+                     "multi": False, "custom": True},
+    },
+    "Kitob va kanstovarlar": {
+        "type":     {"options": ["Kitob", "Daftar", "Qalam", "Ruchka", "Papka", "Bo'yoq",
+                                 "Ranglar"],
+                     "multi": False, "custom": True},
+        "language": {"options": ["O'zbek", "Rus", "Ingliz", "Arab"],
+                     "multi": False, "custom": True},
+    },
+    "Qurilish mollari": {
+        "type": {"options": ["G'isht", "Sement", "Bo'yoq", "Plitka", "Armatura", "Gips",
+                             "Quruq aralashma", "Asbob"],
+                 "multi": False, "custom": True},
+        "unit": {"options": ["Dona", "Kg", "Tonna", "Metr", "m²", "Qop", "Litr"],
+                 "multi": False, "custom": True},
+    },
+    "Hayvonlar uchun": {
+        "animal": {"options": ["It", "Mushuk", "Qush", "Baliq", "Kemiruvchi", "Boshqa"],
+                   "multi": False, "custom": True},
+        "type":   {"options": ["Ozuqa", "O'yinchoq", "Aksessuar", "Gigiena", "Qafas/Uy",
+                               "Dori"],
+                   "multi": False, "custom": True},
+    },
+    "Gul va sovg'alar": {
+        "type":     {"options": ["Atirgul", "Buket", "Tuvakli gul", "Sovg'a", "Sharlar",
+                                 "Otkritka"],
+                     "multi": False, "custom": True},
+        "occasion": {"options": ["Tug'ilgan kun", "To'y", "8-mart", "Sevishganlar kuni",
+                                 "Yubiley", "Boshqa"],
+                     "multi": False, "custom": True},
+    },
+}
+
+# Preset chip qiymatlarining RU ko'rinishi. MUHIM: bu FAQAT ko'rsatiladigan yorliq —
+# bazaga DOIM o'zbekcha kanonik qiymat (option value) saqlanadi, shunda barcha mahsulotda
+# rang/material bir xil bo'ladi (ko'rsatish lokal, saqlash kanonik). Raqam/brend/model
+# (36, 128GB, Nike, Nexia) ikkala tilda bir xil — bu yerda YO'Q, o'zi qaytadi (fallback).
+_ATTR_RU_COMMON = {
+    # ranglar
+    "Qora": "Чёрный", "Oq": "Белый", "Jigarrang": "Коричневый", "Ko'k": "Синий",
+    "Kulrang": "Серый", "Qizil": "Красный", "Yashil": "Зелёный", "Sariq": "Жёлтый",
+    "Pushti": "Розовый", "Bej": "Бежевый", "Kumush": "Серебристый", "Oltin": "Золотой",
+    # jinsi / kimga
+    "Erkak": "Мужской", "Ayol": "Женский", "Bolalar": "Детский", "Uniseks": "Унисекс",
+    "O'g'il bola": "Мальчик", "Qiz bola": "Девочка",
+    # material
+    "Charm": "Кожа", "Ekokcharm": "Экокожа", "Zamsh": "Замша", "Tekstil": "Текстиль",
+    "Rezina": "Резина", "Mesh (to'r)": "Сетка", "Yog'och": "Дерево", "Metall": "Металл",
+    "Plastik": "Пластик", "Shisha": "Стекло", "Mato": "Ткань",
+    # fasl
+    "Yoz": "Лето", "Qish": "Зима", "Demi-sezon": "Демисезон", "To'rt fasl": "Всесезон",
+    "Bahor": "Весна", "Kuz": "Осень",
+    # holat / oem
+    "Ishlatilgan": "Б/у", "Qadoqda": "В упаковке",
+    "Original": "Оригинал", "Kopiya": "Копия", "Zamena": "Замена",
+    # ehtiyot qism turi
+    "Dvigatel": "Двигатель", "Korobka": "Коробка", "Xodovoy": "Ходовая", "Kuzov": "Кузов",
+    "Elektrika": "Электрика", "Tormoz": "Тормоза", "Salon": "Салон", "Optika": "Оптика",
+    # ichimlik / taom
+    "Sovuq": "Холодный", "Issiq": "Горячий", "Ikkalasi": "Оба",
+    "Achchiq": "Острый", "O'rta": "Средний", "Achchiq emas": "Не острый",
+    "1 kishi": "1 человек", "2-3 kishi": "2-3 человека", "4-5 kishi": "4-5 человек",
+    "Katta oila": "Большая семья",
+    "Hozir tayyor": "Готово сейчас", "15 daqiqa": "15 минут", "30 daqiqa": "30 минут",
+    "1 soat": "1 час",
+    # oziq-ovqat
+    "Bugungi": "Сегодняшний", "Kechagi": "Вчерашний", "Muzlatilgan": "Замороженный",
+    "O'zbekiston": "Узбекистан", "Import": "Импорт", "Rossiya": "Россия",
+    "Qozog'iston": "Казахстан", "Turkiya": "Турция", "Xitoy": "Китай",
+    # kafolat
+    "Yo'q": "Нет", "6 oy": "6 мес", "1 yil": "1 год", "2 yil": "2 года", "3 yil": "3 года",
+    # go'zallik
+    "Parfyum": "Парфюм", "Krem": "Крем", "Pomada": "Помада", "Tush": "Тушь",
+    "Shampun": "Шампунь", "Maska": "Маска", "Loson": "Лосьон", "Atir": "Духи",
+    # salomatlik
+    "Dori": "Лекарство", "Vitamin": "Витамины", "BAD": "БАД", "Bandaj": "Бандаж",
+    "Tibbiy asbob": "Мед. прибор", "Gigiena": "Гигиена",
+    "Tabletka": "Таблетка", "Kapsula": "Капсула", "Sirop": "Сироп", "Malham": "Мазь",
+    "Ukol": "Укол", "Tomchi": "Капли",
+    "Retseptsiz": "Без рецепта", "Retsept bilan": "По рецепту",
+    # bolalar
+    "O'yinchoq": "Игрушка", "Kiyim": "Одежда", "Aravacha": "Коляска", "Taom": "Питание",
+    "Maktab": "Школа",
+    "0-1 yosh": "0-1 год", "1-3 yosh": "1-3 года", "3-6 yosh": "3-6 лет",
+    "6-12 yosh": "6-12 лет", "12+ yosh": "12+ лет",
+    # sport
+    "Sport kiyim": "Спортивная одежда", "Trenajyor": "Тренажёр", "Velosiped": "Велосипед",
+    "Top": "Мяч", "Palatka": "Палатка", "Baliq ovi": "Рыбалка", "Gantel": "Гантели",
+    # uy / mebel
+    "Divan": "Диван", "Stol": "Стол", "Stul": "Стул", "Shkaf": "Шкаф", "Krovat": "Кровать",
+    "Polka": "Полка", "Gilam": "Ковёр", "Yoritish": "Освещение",
+    "Yotoqxona": "Спальня", "Mehmonxona": "Гостиная", "Oshxona": "Кухня",
+    "Ofis": "Офис", "Hammom": "Ванная",
+    # kitob / kanstovar
+    "Kitob": "Книга", "Daftar": "Тетрадь", "Qalam": "Карандаш", "Ruchka": "Ручка",
+    "Papka": "Папка", "Bo'yoq": "Краска", "Ranglar": "Краски",
+    "O'zbek": "Узбекский", "Rus": "Русский", "Ingliz": "Английский", "Arab": "Арабский",
+    # qurilish
+    "G'isht": "Кирпич", "Sement": "Цемент", "Plitka": "Плитка", "Armatura": "Арматура",
+    "Gips": "Гипс", "Quruq aralashma": "Сухая смесь", "Asbob": "Инструмент",
+    "Dona": "Штука", "Kg": "Кг", "Tonna": "Тонна", "Metr": "Метр", "Qop": "Мешок",
+    "Litr": "Литр",
+    # hayvonlar
+    "It": "Собака", "Mushuk": "Кошка", "Qush": "Птица", "Baliq": "Рыба",
+    "Kemiruvchi": "Грызун", "Boshqa": "Другое",
+    "Ozuqa": "Корм", "Aksessuar": "Аксессуар", "Qafas/Uy": "Клетка/Дом",
+    # gul / sovg'a
+    "Atirgul": "Роза", "Buket": "Букет", "Tuvakli gul": "Горшечный цветок",
+    "Sovg'a": "Подарок", "Sharlar": "Шары", "Otkritka": "Открытка",
+    "Tug'ilgan kun": "День рождения", "To'y": "Свадьба", "8-mart": "8 марта",
+    "Sevishganlar kuni": "День влюблённых", "Yubiley": "Юбилей",
+}
+# Bir xil o'zbekcha so'z turli maydonda boshqa RU'ga tarjima bo'ladigan holatlar
+# (masalan "Yangi": holatda=Новый, lekin yangilikda=Свежий). Maydon bo'yicha ustuvor.
+_ATTR_RU_BY_KEY = {
+    "freshness":  {"Yangi": "Свежий"},
+    "condition":  {"Yangi": "Новый"},
+}
+
+
+def _ru_attr_label(attr_key, value):
+    """Preset qiymatining RU yorlig'i (maydon-aniq ustunlik, so'ng umumiy, so'ng o'zi)."""
+    by_key = _ATTR_RU_BY_KEY.get(attr_key)
+    if by_key and value in by_key:
+        return by_key[value]
+    return _ATTR_RU_COMMON.get(value, value)
+
+
 def _norm_question(q):
     """db/AI shablonini frontend uchun barqaror shaklga keltiradi."""
     typ = q.get("attr_type") or "text"
@@ -4600,7 +4873,28 @@ def _norm_question(q):
         options = [o.strip() for o in str(hint).split("/") if o.strip()]
     return {"key": q.get("attr_key"), "label": q.get("attr_label") or q.get("attr_key"),
             "type": typ, "required": bool(q.get("is_required")),
-            "hint": hint, "options": options}
+            "hint": hint, "options": options, "multi": False, "custom": False}
+
+
+def _apply_attr_presets(questions, cat_name, lang=DEFAULT_LANG):
+    """Kategoriyaga mos tayyor tugma-variantlarni savollarga biriktiradi (chip UX).
+    RU tilida option'lar {value, label} bo'ladi — value KANONIK (o'zbekcha, saqlanadi),
+    label ko'rsatiladi. UZ tilida oddiy string (label=value)."""
+    presets = _ATTR_PRESETS.get(cat_name or "")
+    if not presets:
+        return questions
+    ru = (lang == "ru")
+    for q in questions:
+        key = q.get("key")
+        p = presets.get(key)
+        if not p:
+            continue
+        vals = list(p["options"])
+        q["options"] = ([{"value": v, "label": _ru_attr_label(key, v)} for v in vals]
+                        if ru else vals)
+        q["multi"] = bool(p.get("multi"))
+        q["custom"] = bool(p.get("custom", True))
+    return questions
 
 
 def _category_name(category_id, lang):
@@ -4632,7 +4926,8 @@ async def api_product_questions(category_id: Optional[int] = Query(None),
         except Exception as e:
             logging.warning(f"category templates xato (cat {category_id}): {e}")
             tmpls = []
-        return [_norm_question(dict(t)) for t in tmpls]
+        qs = [_norm_question(dict(t)) for t in tmpls]
+        return _apply_attr_presets(qs, _category_name(category_id, lang) if category_id else "", lang)
 
     if mode == "classic" or not ai_assistant.is_enabled():
         return {"questions": _classic(), "known": {}, "source": "classic"}

@@ -909,6 +909,68 @@ class Database:
                 """, (_shoe_id, attr_key, attr_label, attr_type, required, hint))
             conn.commit()
 
+        # Zamonaviy kategoriyalar atribut shablonlari — shoe bloki kabi idempotent
+        # (har init'da INSERT OR IGNORE, UNIQUE(category_id, attr_key)) — jonli bazada
+        # ham paydo bo'lsin. Hammasi ixtiyoriy (is_required=0) — mahsulot qo'shishni
+        # yengillashtirish maqsad. Tugma-variantlar webapp_server._ATTR_PRESETS'da.
+        _modern_templates = {
+            "Go'zallik va parfyumeriya": [
+                ("type",   "Turi",   "text",   0, "Parfyum, Krem, Pomada..."),
+                ("brand",  "Brend",  "text",   0, "Chanel, Dior, Nivea..."),
+                ("volume", "Hajmi",  "text",   0, "30ml, 50ml, 100ml..."),
+                ("gender", "Kimga",  "select", 0, "Erkak/Ayol/Uniseks"),
+            ],
+            "Salomatlik va dorixona": [
+                ("type",         "Turi",    "text",   0, "Dori, Vitamin, BAD..."),
+                ("form",         "Shakli",  "text",   0, "Tabletka, Sirop, Malham..."),
+                ("prescription", "Retsept", "select", 0, "Retseptsiz/Retsept bilan"),
+            ],
+            "Bolalar mahsulotlari": [
+                ("type",   "Turi",  "text",   0, "O'yinchoq, Kiyim, Aravacha..."),
+                ("age",    "Yosh",  "text",   0, "0-1, 1-3, 3-6 yosh..."),
+                ("gender", "Kimga", "select", 0, "O'g'il bola/Qiz bola/Uniseks"),
+            ],
+            "Sport va dam olish": [
+                ("type",   "Turi",    "text",   0, "Sport kiyim, Trenajyor, Top..."),
+                ("size",   "O'lcham", "text",   0, "S, M, L, XL..."),
+                ("gender", "Kimga",   "select", 0, "Erkak/Ayol/Uniseks"),
+            ],
+            "Uy va mebel": [
+                ("type",     "Turi",     "text", 0, "Divan, Stol, Shkaf..."),
+                ("material", "Material", "text", 0, "Yog'och, Metall, Plastik..."),
+                ("room",     "Xona",     "text", 0, "Yotoqxona, Mehmonxona..."),
+            ],
+            "Kitob va kanstovarlar": [
+                ("type",     "Turi", "text", 0, "Kitob, Daftar, Qalam..."),
+                ("language", "Tili", "text", 0, "O'zbek, Rus, Ingliz..."),
+            ],
+            "Qurilish mollari": [
+                ("type", "Turi",    "text", 0, "G'isht, Sement, Bo'yoq..."),
+                ("unit", "O'lchov", "text", 0, "Dona, Kg, Tonna, m²..."),
+            ],
+            "Hayvonlar uchun": [
+                ("animal", "Hayvon", "text", 0, "It, Mushuk, Qush..."),
+                ("type",   "Turi",   "text", 0, "Ozuqa, O'yinchoq, Dori..."),
+            ],
+            "Gul va sovg'alar": [
+                ("type",     "Turi",      "text", 0, "Atirgul, Buket, Sovg'a..."),
+                ("occasion", "Munosabat", "text", 0, "Tug'ilgan kun, To'y, 8-mart..."),
+            ],
+        }
+        for cat_name, attrs in _modern_templates.items():
+            cursor.execute("SELECT id FROM categories WHERE name=?", (cat_name,))
+            row = cursor.fetchone()
+            if not row:
+                continue
+            cid = row[0]
+            for attr_key, attr_label, attr_type, required, hint in attrs:
+                cursor.execute("""
+                    INSERT OR IGNORE INTO category_attribute_templates
+                    (category_id, attr_key, attr_label, attr_type, is_required, hint)
+                    VALUES (?,?,?,?,?,?)
+                """, (cid, attr_key, attr_label, attr_type, required, hint))
+        conn.commit()
+
         # ===== PLATFORMA SOZLAMALARI (kalit-qiymat) — monetizatsiya #22/#18 =====
         # Admin yoqadigan/o'chiradigan bayroqlar shu yerda saqlanadi (komissiya, boost,
         # obuna, Click/Payme...). HAMMASI default O'CHIQ — yoqilmaguncha foydalanuvchiga
