@@ -28,6 +28,8 @@
     /* Tepa xavfsiz-maydon: notch (env) YOKI Telegram fullscreen kontent-chekkasidan kattasi.
        Fullscreen'da Telegram --tg-content-safe-area-inset-top beradi (yopiq tugma balandligi). */
     --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+    /* Past xavfsiz-maydon: home-indikator (env) YOKI Telegram kontent-chekkasi. JS aniqroq beradi. */
+    --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
   }
   /* ---- DARK MODE (Telegram dark theme) ---- */
   :root[data-theme="dark"]{
@@ -190,7 +192,7 @@
   .adcard{background:linear-gradient(180deg,var(--accent-soft),var(--card)); border:1px solid var(--line);}
   .adcard .ddesc{opacity:1;}
   .adcard .ddesc b{font-weight:700;}
-  .buybar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+  .buybar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + var(--safe-bottom));
           background:var(--bar); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
           box-shadow:0 -1px 0 var(--line);}
   .buybar button{width:100%; padding:15px; border:none; border-radius:14px; font-size:16px;
@@ -238,7 +240,7 @@
           font-size:14.5px; font-family:inherit; resize:vertical; min-height:64px; outline:none;
           background:var(--card); color:var(--text); margin-top:10px;}
   .coaddr:focus{border-color:var(--accent);}
-  .cobar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+  .cobar{position:sticky; bottom:0; margin-top:auto; padding:10px 16px calc(12px + var(--safe-bottom));
          background:var(--bar); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
          box-shadow:0 -1px 0 var(--line);}
   .cototal{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:9px;}
@@ -256,11 +258,11 @@
   .cosuccess .oid{font-weight:700; color:var(--accent);}
 
   /* ---------- BOTTOM NAV + VIEWS ---------- */
-  body{padding-bottom:72px;}
+  body{padding-bottom:calc(72px + var(--safe-bottom));}
   .bottomnav{position:fixed; left:0; right:0; bottom:0; z-index:30; display:flex;
              background:var(--bar); backdrop-filter:saturate(180%) blur(14px);
              -webkit-backdrop-filter:saturate(180%) blur(14px); box-shadow:0 -1px 0 var(--line);
-             padding-bottom:env(safe-area-inset-bottom);}
+             padding-bottom:var(--safe-bottom);}
   .navitem{flex:1; display:flex; flex-direction:column; align-items:center; gap:2px;
            padding:9px 0 8px; cursor:pointer; color:var(--hint); font-weight:600; user-select:none;}
   .navitem span{font-size:21px; line-height:1; filter:grayscale(1); opacity:.6;}
@@ -283,7 +285,7 @@
     0%,100%{ transform:scale(1);    box-shadow:0 0 0 2px var(--card), 0 0 0 0 rgba(244,63,94,.55); }
     50%    { transform:scale(1.18); box-shadow:0 0 0 2px var(--card), 0 0 7px 3px rgba(244,63,94,.5); }
   }
-  .vhead{font-size:21px; font-weight:800; padding:16px 16px 6px; letter-spacing:-.3px;}
+  .vhead{font-size:21px; font-weight:800; padding:calc(16px + var(--safe-top)) 16px 6px; letter-spacing:-.3px;}
   /* buyurtma kartochkalari */
   .olist{padding:6px 12px 12px; display:flex; flex-direction:column; gap:10px;}
   .ocard{background:var(--card); border-radius:16px; padding:13px 14px; box-shadow:var(--shadow);}
@@ -381,7 +383,7 @@
   .cbub.me{align-self:flex-end; background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff; border-bottom-right-radius:5px;}
   .cbub.them{align-self:flex-start; background:var(--card); color:var(--text); box-shadow:var(--shadow); border-bottom-left-radius:5px;}
   .cbub .tm{font-size:10px; opacity:.6; margin-top:3px; text-align:right;}
-  .chatbar{display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+  .chatbar{display:flex; gap:8px; padding:10px 12px calc(10px + var(--safe-bottom));
            background:var(--bar); box-shadow:0 -1px 0 var(--line);}
   .chatbar input{flex:1; border:1.5px solid var(--line); border-radius:20px; padding:11px 15px; background:var(--card); color:var(--text);
                  font-size:14.5px; outline:none; font-family:inherit;}
@@ -564,6 +566,11 @@
     <div id="fieldeditBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="settingsview">
+    <div class="cohead"><span id="ttl_settingsview">⚙️ Sozlamalar</span><span class="x" id="settingsClose">✕</span></div>
+    <div id="settingsBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="courierview">
     <div class="cohead"><span id="ttl_courierview">🚚 Yetkazishlar</span><span class="x" id="courierClose">✕</span></div>
     <div id="courierBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -670,19 +677,33 @@
 <script>
 const tg = window.Telegram.WebApp;
 tg.ready(); tg.expand();
-// ESLATMA: tg.requestFullscreen() O'CHIRILDI (2026-07-03). Fullscreen ekranni to'liq
-// qoplasa-da, Telegram yopish/menyu tugmalari app yozuvlari ustiga tushardi va safe-area
-// ni hamma mijozda ishonchli sozlab bo'lmadi. Standart expand rejimi (Telegram o'z
-// sarlavhasi bilan) — ustma-ustliksiz, sinovdan o'tgan. --safe-top faqat notch uchun.
-// Qurilma notch'i (status-bar) uchun aniq pikselni JS API'dan olamiz (env() zaxira).
+// FULLSCREEN (Bot API 8.0+) — app butun ekranni (chetdan-chetga) qoplasin. 2026-07-04'da
+// QAYTA yoqildi: oldingi urinishda ustma-ustlik sababi .vhead ("Do'konim") --safe-top'ni
+// ISHLATMASDI; endi barcha tepa panellar (.topbar/.dtop/.cohead/.vhead/#notifBanner) uni
+// ishlatadi va --safe-top = safeAreaInset + contentSafeAreaInset (status-bar + suzuvchi
+// ✕/⋯ tugmalari joyi). Eski mijoz/desktop qo'llab-quvvatlamasa — jim expand'da qoladi.
+function requestFS(){
+  try{ if(typeof tg.requestFullscreen==='function' && !tg.isFullscreen) tg.requestFullscreen(); }catch(e){}
+}
+try{ tg.onEvent && tg.onEvent('fullscreenChanged', applySafeArea); }catch(e){}
+try{ tg.onEvent && tg.onEvent('fullscreenFailed', applySafeArea); }catch(e){}
+requestFS();
+// Tepa xavfsiz-maydon = qurilma notch/status-bar (safeAreaInset) + Telegram UI joyi
+// (contentSafeAreaInset — fullscreen'da suzuvchi ✕/⋯ tugmalari egallagan strip). Ikkalasi
+// YIG'INDISI kerak: aks holda fullscreen'da sarlavha soat/tugmalar ostiga tushadi. env() zaxira.
 function applySafeArea(){
   try{
-    var sa = tg.safeAreaInset || {top:0};              // qurilma (notch/status-bar)
-    var top = Number(sa.top)||0;
-    document.documentElement.style.setProperty('--safe-top', 'max(env(safe-area-inset-top, 0px), '+top+'px)');
+    var sa  = tg.safeAreaInset || {top:0,bottom:0};    // qurilma (notch/status-bar/home-indikator)
+    var csa = tg.contentSafeAreaInset || {top:0,bottom:0}; // Telegram UI joyi (fullscreen)
+    var top = (Number(sa.top)||0) + (Number(csa.top)||0);
+    var bot = (Number(sa.bottom)||0) + (Number(csa.bottom)||0);   // home-indikator uchun past
+    var st = document.documentElement.style;
+    st.setProperty('--safe-top', 'max(env(safe-area-inset-top, 0px), '+top+'px)');
+    st.setProperty('--safe-bottom', 'max(env(safe-area-inset-bottom, 0px), '+bot+'px)');
   }catch(e){}
 }
 try{ tg.onEvent && tg.onEvent('safeAreaChanged', applySafeArea); }catch(e){}
+try{ tg.onEvent && tg.onEvent('contentSafeAreaChanged', applySafeArea); }catch(e){}
 applySafeArea();
 // #23 — ilovadan chiqishda Telegram'ning tasdiq oynasi chiqsin (tasodifan yopilmasin)
 try{ tg.enableClosingConfirmation(); }catch(e){}
@@ -705,6 +726,15 @@ function applyTheme(){
 function setThemePref(p){ THEME_PREF=p; try{ localStorage.setItem('tezbozor_theme',p); }catch(e){} applyTheme(); }
 applyTheme();
 try{ tg.onEvent('themeChanged', applyTheme); }catch(e){}
+
+// ---- MATN O'LCHAMI — butun ilova miqyosi (ko'zi xira foydalanuvchilar uchun) ----
+// Dizayn px'da qurilgani uchun root font-size kaskad qilmaydi; shu bois butun ilovani
+// 'zoom' bilan proporsional kattalashtiramiz — matn ham, tugmalar ham o'qilishli bo'ladi.
+var FONT_STEPS = [0.9, 1, 1.15, 1.3];
+var FONT_SCALE = (function(){ try{ var v=parseFloat(localStorage.getItem('tezbozor_fontscale')); return FONT_STEPS.indexOf(v)>=0?v:1; }catch(e){ return 1; } })();
+function applyFontScale(){ try{ document.documentElement.style.zoom = FONT_SCALE===1 ? '' : String(FONT_SCALE); }catch(e){} }
+function setFontScale(s){ FONT_SCALE=s; try{ localStorage.setItem('tezbozor_fontscale', String(s)); }catch(e){} applyFontScale(); }
+applyFontScale();
 
 // ---- Global xato ushlagich: bo'sh ekran o'rniga aniq xatoni ko'rsatadi ----
 function showFatal(t){
@@ -1119,6 +1149,9 @@ const I18N = {
   pend_view:{uz:"Ko'rish",ru:"Открыть"},
   theme_label:{uz:"Ko'rinish (mavzu)",ru:"Тема оформления"}, theme_auto:{uz:"Avto",ru:"Авто"},
   theme_light:{uz:"☀️ Kunduzgi",ru:"☀️ Светлая"}, theme_dark:{uz:"🌙 Tungi",ru:"🌙 Тёмная"},
+  settings_title:{uz:"⚙️ Sozlamalar",ru:"⚙️ Настройки"}, settings_btn:{uz:"⚙️ Sozlamalar",ru:"⚙️ Настройки"},
+  set_fontsize:{uz:"🔤 Matn o'lchami",ru:"🔤 Размер текста"},
+  fs_hint:{uz:"Butun ilova o'lchami o'zgaradi — matn va tugmalar kattalashadi.",ru:"Меняется масштаб всего интерфейса — текст и кнопки становятся крупнее."},
   disc_trending:{uz:"Trend mahsulotlar",ru:"Популярные товары"}, disc_discounts:{uz:"Chegirmalar",ru:"Скидки"},
   disc_nearby:{uz:"Yaqin atrofda",ru:"Рядом с вами"}, disc_for_you:{uz:"Aynan siz uchun",ru:"Именно для вас"},
   an_title:{uz:"📊 Tahlil",ru:"📊 Аналитика"}, an_top:{uz:"🏆 Eng ko'p sotilgan",ru:"🏆 Топ продаж"},
@@ -1278,6 +1311,9 @@ const I18N = {
   sp_mode_optom:{uz:"📦 Optom (pachka)",ru:"📦 Опт (упаковка)"},
   sp_mode_optom_d:{uz:"Pachkada sotiladi. Xaridor rang bo'yicha pachka soni tanlaydi. Razmer — yozma (aralash). Savdolashish yo'q.",ru:"Продажа упаковками. Покупатель выбирает кол-во упаковок по цвету. Размеры — текстом. Без торга."},
   sp_mode_badge_dona:{uz:"🛍 Donalab",ru:"🛍 Поштучно"}, sp_mode_badge_optom:{uz:"📦 Optom",ru:"📦 Опт"},
+  sp_cat_title:{uz:"Kategoriyani tanlang",ru:"Выберите категорию"},
+  sp_cat_title_d:{uz:"Kategoriyaga qarab kerakli maydonlar (razmer, rang, brend…) chiqadi.",ru:"В зависимости от категории появятся нужные поля (размер, цвет, бренд…)."},
+  sp_cat_change:{uz:"O'zgartirish",ru:"Изменить"},
   // ── Optom forma maydonlari ──
   sp_price_optom:{uz:"1 pachka narxi",ru:"Цена за 1 упаковку"},
   sp_pack_size:{uz:"1 pachkada nechta dona?",ru:"Сколько штук в 1 упаковке?"},
@@ -1286,6 +1322,8 @@ const I18N = {
   sp_size_note:{uz:"Razmerlar (yozma, ixtiyoriy)",ru:"Размеры (текст, необязательно)"},
   sp_size_note_hint:{uz:"Pachka ichidagi razmerlar aralash. Bir marta yozing — barcha ranglarga amal qiladi. Masalan: 36–41 standart.",ru:"Размеры в упаковке смешанные. Напишите один раз — для всех цветов. Напр.: 36–41 стандарт."},
   sp_size_note_ph:{uz:"masalan: 36–41 standart, har pachkada aralash",ru:"напр.: 36–41 стандарт, в упаковке вперемешку"},
+  sp_size_pick_hint:{uz:"Pachkadagi razmerlarni belgilang (aralash bo'ladi). Ro'yxatda yo'g'ini pastda yozing.",ru:"Отметьте размеры в упаковке (могут быть смешанными). Отсутствующие впишите ниже."},
+  sp_colors_pick_hint:{uz:"Ranglarni belgilang. Ro'yxatda yo'g'ini pastda vergul bilan yozing.",ru:"Отметьте цвета. Отсутствующие впишите ниже через запятую."},
   sp_colors_list:{uz:"Ranglar (vergul bilan)",ru:"Цвета (через запятую)"},
   sp_colors_list_hint:{uz:"Pachkada mavjud ranglarni sanang — xaridor har rangdan necha pachka olishini tanlaydi. Bo'sh = rang tanlovsiz.",ru:"Перечислите цвета — покупатель выберет, сколько упаковок каждого цвета. Пусто = без выбора цвета."},
   sp_colors_list_ph:{uz:"masalan: Oq, Qora, Sariq",ru:"напр.: Белый, Чёрный, Жёлтый"},
@@ -1594,7 +1632,8 @@ function applyStaticI18n(){
     ttl_adview:'sp_ov_adview',ttl_regionview:'bp_region_title',ttl_stockview:'sp_ov_stock',
     ttl_myrevview:'bp_my_reviews',ttl_joincodeview:'bp_join_code',ttl_staffdetview:'sp_staff_detail_title',
     ttl_favview:'fav_title',ttl_trackview:'trk_title',ttl_routeview:'route_title',ttl_haggleview:'hag_title',ttl_mycardview:'mc_title',ttl_becomeview:'bs_ov',
-    giftTitle:'gift_title',reelsTitle:'reels_title',dynpriceTitle:'dynp_title',ttl_courierview:'cour_title'};
+    giftTitle:'gift_title',reelsTitle:'reels_title',dynpriceTitle:'dynp_title',ttl_courierview:'cour_title',
+    ttl_settingsview:'settings_title'};
   for(const id in titles){ const el=document.getElementById(id); if(el) el.textContent=L(titles[id]); }
   ['backBtn','shopClose'].forEach(id=>{ const el=document.getElementById(id); if(el) el.textContent=L('bp_back'); });
   try{ document.getElementById('giftBtnLbl').textContent = L('gift_short').replace(/^🎁\s*/,''); }catch(e){}
@@ -1771,6 +1810,7 @@ async function loadCategories(){
       activeCat = ch.dataset.cat || null;
       try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
       loadProducts();
+      saveUiState();
     });
   }catch(e){}
 }
@@ -2108,6 +2148,19 @@ function splitOpts(s){
   const parts = /[,;/\n·|]/.test(s) ? s.split(/[,;/\n·|]+/) : s.split(/\s+/);
   return parts.map(x=>x.trim()).filter(Boolean);
 }
+// QAT'IY ajratish — FAQAT haqiqiy ajratgichlar (vergul/nuqtali vergul/quvur/yangi qator).
+// Bo'sh joy bo'yicha BO'LMAYDI — shuning uchun ko'p so'zli qiymat ("To'q ko'k") butun qoladi.
+function splitStrict(s){ return String(s||'').split(/[,;|\n]+/).map(x=>x.trim()).filter(Boolean); }
+// Chip (tugmali) ko'p qiymatli maydon uchun: saqlangan matnni tanlangan qiymatlar to'plamiga
+// ajratadi. Avval kanonik ajratgichlar; ajratgich yo'q bo'lsa — butun matn option qiymatiga
+// TENG bo'lsa bitta ko'p so'zli qiymat, aks holda bo'sh joy bo'yicha zaxira (AI "36 37 38").
+function splitChips(s, opts){
+  s = String(s||'').trim(); if(!s) return [];
+  if(/[,;|\n]/.test(s)) return splitStrict(s);
+  const vals=(opts||[]).map(o=>optVL(o).value);
+  if(vals.includes(s)) return [s];
+  return s.split(/\s+/).map(x=>x.trim()).filter(Boolean);
+}
 function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
 function payLabel(code){ const m=PAYMENTS().find(x=>x[0]===code); return m?m[1]:(code||'—'); }
 
@@ -2131,7 +2184,8 @@ async function openCheckout(id){
       // Optom — razmer YOZMA (size_note), rang RO'YXAT; har rang uchun pachka stepperi.
       // Kombinatsiya quruvchi ishlatilmaydi (coSizeOpts/coColorOpts bo'sh).
       coSizeOpts=[]; coColorOpts=[];
-      const optColors = colorAttr ? splitOpts(colorAttr.attr_value) : [];
+      // Optom ranglar QAT'IY ajratiladi (vergul) — "To'q ko'k" kabi ko'p so'zli rang bo'linmasin.
+      const optColors = colorAttr ? splitStrict(colorAttr.attr_value) : [];
       const firstImg = (vimgs[0] && vimgs[0].file_id) || coProduct.image_url || null;
       coIsVariant = true;   // optom doim pachka-checkout (min pachka serverda)
       coVariants = optColors.length
@@ -3035,6 +3089,7 @@ document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
   document.getElementById('search').placeholder = L(isProd?'search_products':'search_shops');
   document.getElementById('cartFab').style.display = isProd? (cartCount()>0?'flex':'none') : 'none';
   if(isProd) loadProducts(); else loadShops();
+  saveUiState();
 });
 
 function shopCardHtml(s){
@@ -3153,10 +3208,11 @@ function updateFilterFades(){
   }, 400);
 })();
 
-document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='shops'?loadShops():loadProducts(); },350); };
+document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='shops'?loadShops():loadProducts(); saveUiState(); },350); };
 
 // ---------- TAB NAVIGATSIYA ----------
 function switchTab(tab){
+  _curTab=tab;
   document.querySelectorAll('.navitem').forEach(n=>n.classList.toggle('active', n.dataset.tab===tab));
   document.getElementById('viewCatalog').style.display = tab==='catalog'?'':'none';
   document.getElementById('viewOrders').style.display = tab==='orders'?'':'none';
@@ -3172,11 +3228,74 @@ function switchTab(tab){
   // Seller/admin tablari segment darajasida (loadSeller/loadAdmin) tozalanadi.
   if(typeof markSlotSeen==='function' && tab!=='seller' && tab!=='admin') markSlotSeen('tab:'+tab);
   if(typeof refreshBadges==='function') refreshBadges();   // pending'ni ham yangilaydi (amaldan keyin statik son to'g'ri)
+  saveUiState();
 }
 document.querySelectorAll('.navitem').forEach(n=>n.onclick=()=>{
   try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
   switchTab(n.dataset.tab);
 });
+
+// ---------- HOLATNI TIKLASH (state-restore) — X bosib chiqib qayta kirganda o'sha joydan davom ----------
+// Saqlaymiz: tab + katalog rejimi (products/optom/shops) + kategoriya + qidiruv + scroll.
+// _uiReady false bo'lguncha saqlash O'CHIQ — boot'da restoreModeOnBoot'ning switchTab'i
+// saqlangan holatni ustiga yozib yubormasligi uchun. Manba — boot'da bir marta o'qilgan _bootUiState.
+let _curTab='catalog', _uiReady=false, _bootUiState=null;
+try{ _bootUiState=JSON.parse(localStorage.getItem('tezbozor_uistate')||'null'); }catch(e){}
+function _throttle(fn, ms){ let last=0, id=null; return function(){ const now=Date.now(); const wait=ms-(now-last);
+  if(wait<=0){ last=now; fn(); } else { clearTimeout(id); id=setTimeout(()=>{ last=Date.now(); fn(); }, wait); } }; }
+function saveUiState(){
+  if(!_uiReady) return;
+  try{
+    const s={ tab:_curTab, catMode:catMode, cat:(activeCat||''),
+              q:((document.getElementById('search')||{}).value||''),
+              scroll:Math.round(window.scrollY||window.pageYOffset||0) };
+    localStorage.setItem('tezbozor_uistate', JSON.stringify(s));
+  }catch(e){}
+}
+try{ window.addEventListener('scroll', _throttle(saveUiState, 500), {passive:true}); }catch(e){}
+try{ window.addEventListener('pagehide', saveUiState); }catch(e){}
+try{ document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') saveUiState(); }); }catch(e){}
+
+function restoreUiOnBoot(){
+  _uiReady=true;                 // shu paytdan boshlab navigatsiya saqlanadi
+  const st=_bootUiState;
+  if(!ME || !st) return;
+  // Deep-link (mahsulot/chat/taklif/referral) bilan kirilsa — o'sha kontent ochilsin, tiklamaymiz
+  try{ const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||''; if(/^(product|chat|staff|ref)[_-]/i.test(String(sp))) return; }catch(e){}
+  try{ const qs=new URLSearchParams(location.search||''); if(qs.get('product')||qs.get('staff')||qs.get('ref')) return; }catch(e){}
+  // 1) TAB — faqat ko'rinadigan/ruxsat berilgan tab (rol o'zgargan bo'lsa xavfsiz o'tkazamiz)
+  if(st.tab && st.tab!==_curTab){
+    const nav=document.querySelector('.navitem[data-tab="'+st.tab+'"]');
+    if(nav && nav.style.display!=='none') switchTab(st.tab);
+  }
+  if(_curTab!=='catalog'){
+    if(st.scroll>0) setTimeout(()=>{ try{ window.scrollTo(0, st.scroll); }catch(e){} }, 500);
+    return;
+  }
+  // 2) KATALOG rejimi (products/optom/shops) — handler mantiqini yuklamasdan qo'llaymiz
+  const wantMode=st.catMode||'products', wantCat=st.cat||'', wantQ=st.q||'';
+  if(wantMode!==catMode){
+    catMode=wantMode;
+    const isProd=(catMode==='products'||catMode==='optom');
+    document.querySelectorAll('#catMode .opt').forEach(x=>x.classList.toggle('on',x.dataset.mode===catMode));
+    try{ document.getElementById('chips').style.display = isProd?'':'none'; }catch(e){}
+    try{ document.getElementById('search').placeholder = L(isProd?'search_products':'search_shops'); }catch(e){}
+  }
+  // 3) Kategoriya + qidiruv + scroll — chiplar/mahsulotlar async yuklangач (retry bilan)
+  let tries=0;
+  (function apply(){
+    tries++;
+    const isProd=(catMode==='products'||catMode==='optom');
+    if(isProd && wantCat){
+      const chip=document.querySelector('#chips .chip[data-cat="'+wantCat+'"]');
+      if(!chip && tries<15) return setTimeout(apply, 200);   // chiplar hali kelmadi — kutamiz
+      if(chip){ document.querySelectorAll('#chips .chip').forEach(x=>x.classList.remove('active')); chip.classList.add('active'); activeCat=wantCat; }
+    } else if(isProd){ activeCat=null; }
+    const s=document.getElementById('search'); if(s) s.value=wantQ;
+    (catMode==='shops'?loadShops():loadProducts());
+    if(st.scroll>0) setTimeout(()=>{ try{ window.scrollTo(0, st.scroll); }catch(e){} }, 450);
+  })();
+}
 
 function ORDER_STATUS(s){
   const m={pending:['st_pending','st-pending'],confirmed:['st_confirmed','st-ok'],
@@ -3508,6 +3627,61 @@ async function saveField(key, value, kind){
 }
 document.getElementById('fieldeditClose').onclick=()=>document.getElementById('fieldeditview').classList.remove('open');
 
+// ---------- SOZLAMALAR (til + ko'rinish + matn o'lchami — hammasi bir joyda) ----------
+function openSettings(){ renderSettings(); document.getElementById('settingsview').classList.add('open'); }
+function renderSettings(){
+  const b=document.getElementById('settingsBody');
+  const curLang = (ME&&ME.language)||LANG;
+  b.innerHTML=`<div class="cobody">
+    <div class="cosec"><div class="lbl">${L('lang_label')}</div>
+      <div class="seg" id="setLangSeg">
+        <div class="opt ${curLang==='uz'?'on':''}" data-lv="uz">🇺🇿 O‘zbekcha</div>
+        <div class="opt ${curLang==='ru'?'on':''}" data-lv="ru">🇷🇺 Русский</div>
+      </div></div>
+    <div class="cosec"><div class="lbl">${L('theme_label')}</div>
+      <div class="seg" id="setThemeSeg">
+        <div class="opt ${THEME_PREF==='auto'?'on':''}" data-theme="auto">${L('theme_auto')}</div>
+        <div class="opt ${THEME_PREF==='light'?'on':''}" data-theme="light">${L('theme_light')}</div>
+        <div class="opt ${THEME_PREF==='dark'?'on':''}" data-theme="dark">${L('theme_dark')}</div>
+      </div></div>
+    <div class="cosec"><div class="lbl">${L('set_fontsize')}</div>
+      <div class="seg" id="setFontSeg">
+        <div class="opt ${FONT_SCALE===0.9?'on':''}" data-fs="0.9"><span style="font-size:13px;line-height:1">A</span></div>
+        <div class="opt ${FONT_SCALE===1?'on':''}" data-fs="1"><span style="font-size:16px;line-height:1">A</span></div>
+        <div class="opt ${FONT_SCALE===1.15?'on':''}" data-fs="1.15"><span style="font-size:19px;line-height:1">A</span></div>
+        <div class="opt ${FONT_SCALE===1.3?'on':''}" data-fs="1.3"><span style="font-size:23px;line-height:1">A</span></div>
+      </div>
+      <div class="lbl" style="margin-top:8px;font-weight:400;color:var(--hint)">${L('fs_hint')}</div>
+    </div>
+    <div class="cosec"><button class="oact soft full" id="setContactBtn">${L('contact_admin')}</button></div>
+  </div>`;
+  b.querySelectorAll('#setFontSeg [data-fs]').forEach(o=>o.onclick=()=>{
+    setFontScale(parseFloat(o.dataset.fs));
+    b.querySelectorAll('#setFontSeg .opt').forEach(x=>x.classList.toggle('on', parseFloat(x.dataset.fs)===FONT_SCALE));
+    try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  });
+  b.querySelectorAll('#setThemeSeg [data-theme]').forEach(o=>o.onclick=()=>{
+    setThemePref(o.dataset.theme);
+    b.querySelectorAll('#setThemeSeg .opt').forEach(x=>x.classList.toggle('on', x.dataset.theme===THEME_PREF));
+    try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  });
+  b.querySelectorAll('#setLangSeg [data-lv]').forEach(o=>o.onclick=()=>{ applyLangChange(o.dataset.lv); });
+  const scb=document.getElementById('setContactBtn');
+  if(scb) scb.onclick=()=>{ document.getElementById('settingsview').classList.remove('open'); openContact(); };
+}
+async function applyLangChange(lv){
+  if(lv===LANG && (!ME || ME.language===lv)) return;
+  LANG=lv; applyStaticI18n();
+  try{ await fetch('/api/me',{method:'PATCH',headers:{Authorization:AUTH,'Content-Type':'application/json'},body:JSON.stringify({language:lv})}); }catch(e){}
+  if(ME) ME.language=lv;
+  try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  try{ loadCategories(); }catch(e){}
+  try{ if(typeof catMode!=='undefined' && catMode!=='shops') loadProducts(); }catch(e){}
+  try{ loadProfile(); }catch(e){}   // profil overlay ostida — yangi tilda qayta chizilsin
+  renderSettings();
+}
+document.getElementById('settingsClose').onclick=()=>document.getElementById('settingsview').classList.remove('open');
+
 // Tashqi havolani Telegram ichidan ochadi (xarita/yo'l), brauzer fallback bilan
 function openExternal(u){ try{ tg.openLink(u); }catch(e){ try{ window.open(u,'_blank'); }catch(_){} } }
 
@@ -3713,13 +3887,7 @@ async function loadProfile(){
         <button class="oact soft full" id="myRevBtn">${L('bp_my_reviews')}</button>
         ${(!canManage())?`<button class="oact soft full" id="becomeSellerBtn">${L('become_seller')}</button>`:''}
         ${(me.role!=='admin')?`<button class="oact soft full" id="joinCodeBtn">${L('bp_join_code')}</button>`:''}
-        <button class="oact soft full" id="contactAdminBtn">${L('contact_admin')}</button>
-        <div style="margin-top:4px"><div class="lbl" style="margin-bottom:6px">${L('theme_label')}</div>
-          <div class="seg" id="themeSeg">
-            <div class="opt ${THEME_PREF==='auto'?'on':''}" data-theme="auto">${L('theme_auto')}</div>
-            <div class="opt ${THEME_PREF==='light'?'on':''}" data-theme="light">${L('theme_light')}</div>
-            <div class="opt ${THEME_PREF==='dark'?'on':''}" data-theme="dark">${L('theme_dark')}</div>
-          </div></div>
+        <button class="oact soft full" id="settingsBtn">${L('settings_btn')}</button>
       </div>`;
     document.getElementById('myRevBtn').onclick = openMyReviews;
     const fvb=document.getElementById('favBtn'); if(fvb) fvb.onclick=openFavorites;
@@ -3742,14 +3910,9 @@ async function loadProfile(){
     const bs=document.getElementById('becomeSellerBtn'); if(bs) bs.onclick=becomeSeller;
     const pgb=document.getElementById('proGetBtn'); if(pgb) pgb.onclick=openProInfo;
     const ccr=document.getElementById('commCardRow'); if(ccr) ccr.onclick=openCommission;
-    v.querySelectorAll('#themeSeg [data-theme]').forEach(o=>o.onclick=()=>{
-      setThemePref(o.dataset.theme);
-      v.querySelectorAll('#themeSeg .opt').forEach(x=>x.classList.toggle('on', x.dataset.theme===THEME_PREF));
-      try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
-    });
+    const stb=document.getElementById('settingsBtn'); if(stb) stb.onclick=openSettings;
     v.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>confirmSwitchMode(b.dataset.mode));
     const ocb=document.getElementById('officialChanBtn'); if(ocb) ocb.onclick=()=>{ try{ tg.openTelegramLink(CHANNEL_URL); }catch(e){ try{ window.open(CHANNEL_URL,'_blank'); }catch(_){} } };
-    document.getElementById('contactAdminBtn').onclick=openContact;
   }catch(e){
     v.innerHTML = `<div class="vhead">${L('bp_profile')}</div><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`;
   }
@@ -5797,7 +5960,7 @@ function attrOptVals(q){ return (q.options||[]).map(o=>optVL(o).value); }
 // qiymat (valStr). Tanlangan = value ichida. data-atributi orqali bosish ushlanadi.
 function optomChipsHtml(opts, valStr, dataAttr){
   if(!opts || !opts.length) return '';
-  const sel = splitOpts(valStr||'');
+  const sel = splitChips(valStr||'', opts);
   return `<div class="chips" style="padding:0 0 7px;flex-wrap:wrap">`+
     opts.map(o=>{ const {value,label}=optVL(o);
       return `<div class="chip ${sel.includes(value)?'active':''}" ${dataAttr}="${esc(value)}">${esc(label)}</div>`;
@@ -5806,7 +5969,7 @@ function optomChipsHtml(opts, valStr, dataAttr){
 // Vergulli ro'yxatда bir qiymatni almashtiradi (katalog tartibi + qo'lda kiritilganlar oxirida).
 function toggleInList(valStr, v, opts){
   const optVals=(opts||[]).map(o=>optVL(o).value);
-  let sel=splitOpts(valStr||'');
+  let sel=splitChips(valStr||'', opts);
   sel = sel.includes(v) ? sel.filter(x=>x!==v) : sel.concat([v]);
   return optVals.filter(o=>sel.includes(o)).concat(sel.filter(x=>!optVals.includes(x))).join(', ');
 }
@@ -5814,7 +5977,7 @@ function toggleInList(valStr, v, opts){
 // DOIM kanonik qiymatlar (bazadagidek) — tarjima emas.
 function attrSelected(q){
   const raw = pf.attrs[q.key]||'';
-  return q.multi ? splitOpts(raw) : (raw ? [raw] : []);
+  return q.multi ? splitChips(raw, q.options) : (raw ? [raw] : []);
 }
 function attrFieldHtml(q,i){
   const req = q.required ? ' <span style="color:var(--sale)">*</span>' : '';
@@ -5972,16 +6135,48 @@ function modeChooserHtml(){
       ${card('optom',L('sp_mode_optom'),L('sp_mode_optom_d'))}
     </div></div>`;
 }
+// Yangi mahsulot — savdo turidan keyin KATEGORIYA tanlanadi (kategoriyaga qarab maydonlar chiqadi)
+function catChooserHtml(){
+  const card=c=>`<div class="opt" data-catpick="${c.id}" style="text-align:left;display:flex;align-items:center;gap:10px;padding:14px;margin-bottom:9px;border-radius:13px;border:1.5px solid var(--line)">
+      <span style="font-size:22px">${c.emoji||'📦'}</span><b style="font-size:15px">${esc(c.name)}</b></div>`;
+  return `<div class="cobody"><div class="cosec">
+      <div class="lbl" style="font-size:14px;margin-bottom:4px">${L('sp_cat_title')}</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:12px">${L('sp_cat_title_d')}</div>
+      ${CATS.map(card).join('')}
+    </div></div>`;
+}
+// Kategoriya tanlangach kategoriyaga mos maydonlarni (chip) avtomatik yuklaydi (dona ham, optom ham)
+function onCategoryPicked(){
+  if(pf.sale_mode==='optom') loadOptomOpts();
+  else if(pf.category_id){ pf.mode='classic'; loadQuestions(); }
+}
+// Forma scroll'ini tepaga qaytaradi (innerHTML almashgach reflow uchun rAF bilan ikki marta).
+function pfScrollTop(){
+  const el=document.getElementById('prodform');
+  if(el){ el.scrollTop=0; requestAnimationFrame(()=>{ el.scrollTop=0; }); }
+}
 function renderProductForm(){
   const body = document.getElementById('prodformBody');
   const isEdit = !!pf.id;
-  // Yangi mahsulot — avval savdo turini tanlash
+  // Yangi mahsulot — 1) savdo turi
   if(!isEdit && !pf.modeChosen){
     body.innerHTML = modeChooserHtml();
     body.querySelectorAll('[data-smode]').forEach(o=>o.onclick=()=>{
       pf.sale_mode = o.dataset.smode; pf.modeChosen = true;
       if(pf.sale_mode==='optom'){ pf.min_price=''; }   // optomda savdolashish yo'q
       renderProductForm();
+      pfScrollTop();            // yangi bosqich DOIM tepadan ochilsin
+    });
+    return;
+  }
+  // Yangi mahsulot — 2) kategoriya (keyin kategoriyaga mos maydonlar chiqadi)
+  if(!isEdit && !pf.category_id){
+    body.innerHTML = catChooserHtml();
+    body.querySelectorAll('[data-catpick]').forEach(o=>o.onclick=()=>{
+      pf.category_id = Number(o.dataset.catpick);
+      renderProductForm();      // to'liq formaga o'tamiz
+      pfScrollTop();            // forma TEPADAN (rasm qo'shish) ochilsin, ranglar o'rtasidan emas
+      onCategoryPicked();       // mos maydonlarni yuklaymiz
     });
     return;
   }
@@ -5993,18 +6188,26 @@ function renderProductForm(){
     `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
   const imagesSec = `<div class="cosec"><div class="lbl">${L('sp_images').replace('{n}', pf.images.length).replace('{m}', MAX_IMAGES)}</div>
     <div class="pfimgs">${thumbs}${addTile}</div></div>`;
-  // ── Optom: ranglar ro'yxati + pachka soni + razmer matni ──
-  const packSec = optom ? `<div class="cosec"><div class="lbl">${L('sp_colors_list')}</div>
-      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_colors_list_hint')}</div>
+  // ── Optom: ranglar + pachka soni + razmerlar (TOZA TUGMALI: preset bo'lsa chip + "boshqa",
+  //    preset bo'lmasa erkin matn zaxira) ──
+  const colOptVals = (pf.optomColorOpts||[]).map(o=>optVL(o).value);
+  const szOptVals  = (pf.optomSizeOpts ||[]).map(o=>optVL(o).value);
+  const hasColOpts = colOptVals.length>0, hasSzOpts = szOptVals.length>0;
+  const colExtra = splitChips(pf.optomColors, pf.optomColorOpts).filter(v=>!colOptVals.includes(v));
+  const szExtra  = splitChips(pf.size_note,  pf.optomSizeOpts ).filter(v=>!szOptVals.includes(v));
+  const colorSec = `<div class="cosec"><div class="lbl">${L('sp_colors_list')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${hasColOpts?L('sp_colors_pick_hint'):L('sp_colors_list_hint')}</div>
       ${optomChipsHtml(pf.optomColorOpts, pf.optomColors, 'data-optomcolor')}
-      <input class="coaddr" id="pfColors" style="min-height:auto" placeholder="${L('sp_colors_list_ph')}" value="${esc(pf.optomColors||'')}"></div>
+      <input class="coaddr" id="${hasColOpts?'pfColorCustom':'pfColors'}" style="min-height:auto" placeholder="${hasColOpts?L('sp_attr_custom_multi'):L('sp_colors_list_ph')}" value="${esc(hasColOpts?colExtra.join(', '):(pf.optomColors||''))}"></div>`;
+  const sizeSec = `<div class="cosec"><div class="lbl">${L('sp_size_note')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${hasSzOpts?L('sp_size_pick_hint'):L('sp_size_note_hint')}</div>
+      ${optomChipsHtml(pf.optomSizeOpts, pf.size_note, 'data-optomsize')}
+      <input class="coaddr" id="${hasSzOpts?'pfSizeCustom':'pfSizeNote'}" style="min-height:auto" placeholder="${hasSzOpts?L('sp_attr_custom_multi'):L('sp_size_note_ph')}" value="${esc(hasSzOpts?szExtra.join(', '):(pf.size_note||''))}"></div>`;
+  const packSec = optom ? `${colorSec}
     <div class="cosec"><div class="lbl">${L('sp_pack_size')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_pack_size_hint')}</div>
       <input class="coaddr" id="pfPackSize" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_pack_size_ph')}" value="${pf.pack_size?fmtThousands(pf.pack_size):''}"></div>
-    <div class="cosec"><div class="lbl">${L('sp_size_note')}</div>
-      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_size_note_hint')}</div>
-      ${optomChipsHtml(pf.optomSizeOpts, pf.size_note, 'data-optomsize')}
-      <input class="coaddr" id="pfSizeNote" style="min-height:auto" placeholder="${L('sp_size_note_ph')}" value="${esc(pf.size_note||'')}"></div>` : '';
+    ${sizeSec}` : '';
   // ── Dona: o'lchov birligi + savdolashish ──
   const unitSec = optom ? '' : `<div class="cosec"><div class="lbl">${L('sp_unit')}</div>
       <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_unit_hint')}</div>
@@ -6025,8 +6228,17 @@ function renderProductForm(){
   // ── Kategoriya atributlari (savollar) — ikkala rejimda ham (kategoriyaga moslashadi).
   // Optomda 'size'/'color' bundan chiqarib tashlanadi: ular maxsus (Ranglar maydoni + razmer matni).
   const attrSec = attrSectionHtml();
+  // ── Kategoriya (tepada, ixcham) — o'zgartirilsa to'liq ro'yxat ochiladi ──
+  const curCat = CATS.find(c=>c.id==pf.category_id);
+  const catHeadSec = pf.catEditing
+    ? `<div class="cosec"><div class="lbl">${L('sp_category')}</div>
+        <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>`
+    : `<div class="cosec" style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-weight:700;font-size:15px">${curCat?(curCat.emoji||'📦')+' '+esc(curCat.name):L('sp_category')}</div>
+        <button class="oact soft" type="button" id="pfCatChange" style="width:auto;padding:7px 12px;margin:0">${L('sp_cat_change')}</button></div>`;
 
   body.innerHTML = `<div class="cobody">
+    ${catHeadSec}
     ${imagesSec}
     <div class="cosec"><div class="lbl">${L('sp_name')}</div>
       <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
@@ -6034,18 +6246,16 @@ function renderProductForm(){
       <input class="coaddr" id="pfPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="0" value="${pf.price?fmtThousands(pf.price):''}">
       <div id="priceInsight" style="margin-top:7px"></div></div>
     ${packSec}
+    ${attrSec}
     <div class="cosec"><div class="lbl">${L('sp_old_price')}</div>
       <input class="coaddr" id="pfOldPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_old_price_ph')}" value="${pf.old_price?fmtThousands(pf.old_price):''}"></div>
     ${unitSec}
     ${minPriceSec}
     ${tierSec}
-    <div class="cosec"><div class="lbl">${L('sp_category')}</div>
-      <div class="chips" id="pfCats" style="padding:0;flex-wrap:wrap">${CATS.map(c=>`<div class="chip ${pf.category_id==c.id?'active':''}" data-cid="${c.id}">${c.emoji||''} ${esc(c.name)}</div>`).join('')}</div></div>
     <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
       <input class="coaddr" id="pfStock" type="number" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_stock_ph')}" value="${esc(String(pf.stock_count))}"></div>
     <div class="cosec"><div class="lbl">${L('sp_desc')}</div>
       <textarea class="coaddr" id="pfDesc" placeholder="${L('sp_desc_ph')}">${esc(pf.description)}</textarea></div>
-    ${attrSec}
     ${isEdit?`<button class="oact ok" id="pfAd" style="width:100%">${L('sp_ad_btn')}</button>
               ${optom?'':`<button class="oact no" id="pfDynPrice" style="width:100%">${L('dynp_btn')}</button>
               <button class="oact no" id="pfReels" style="width:100%">${L('reels_btn')}</button>`}
@@ -6056,7 +6266,19 @@ function renderProductForm(){
 
   const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
+  // Preset YO'Q bo'lganda erkin matn (zaxira); butun qiymatni to'g'ridan yozadi.
   const pcol=document.getElementById('pfColors'); if(pcol) pcol.oninput=e=>{ pf.optomColors=e.target.value; };
+  // Preset BOR bo'lganda "boshqa" maydoni: chiplardan tanlanganlar + qo'lda yozilganlarni QAT'IY
+  // (vergul bo'yicha) birlashtiradi — ko'p so'zli qiymat/diapazon ("36-41 standart") butun qoladi.
+  // Re-render QILMAYDI (fokus saqlanadi).
+  const pcolc=document.getElementById('pfColorCustom'); if(pcolc) pcolc.oninput=e=>{
+    const chosen = splitChips(pf.optomColors, pf.optomColorOpts).filter(v=>colOptVals.includes(v));
+    const custom = splitStrict(e.target.value);
+    pf.optomColors = chosen.concat(custom.filter(v=>!chosen.includes(v))).join(', '); };
+  const psnc=document.getElementById('pfSizeCustom'); if(psnc) psnc.oninput=e=>{
+    const chosen = splitChips(pf.size_note, pf.optomSizeOpts).filter(v=>szOptVals.includes(v));
+    const custom = splitStrict(e.target.value);
+    pf.size_note = chosen.concat(custom.filter(v=>!chosen.includes(v))).join(', '); };
   // Optom Ranglar/Razmerlar chip-tanlovi — bosilganda vergulli ro'yxatga qo'shadi/oladi.
   body.querySelectorAll('[data-optomcolor]').forEach(ch=>ch.onclick=()=>{
     pf.optomColors = toggleInList(pf.optomColors, ch.dataset.optomcolor, pf.optomColorOpts); renderProductForm(); });
@@ -6089,12 +6311,14 @@ function renderProductForm(){
   body.querySelectorAll('[data-tierprice]').forEach(inp=>inp.oninput=e=>{ const i=+e.target.dataset.tierprice; const dg=e.target.value.replace(/\D/g,''); pf.tiers[i].price=dg?Number(dg):''; e.target.value=dg?fmtThousands(dg):''; });
   body.querySelectorAll('[data-tierrm]').forEach(b=>b.onclick=()=>{ pf.tiers.splice(+b.dataset.tierrm,1); renderProductForm(); });
   const tadd=document.getElementById('pfTierAdd'); if(tadd) tadd.onclick=()=>{ if((pf.tiers||[]).length>=6){ tg.showAlert(L('sp_wholesale_max')); return; } pf.tiers.push({min:'',price:''}); renderProductForm(); };
+  const catChg=document.getElementById('pfCatChange'); if(catChg) catChg.onclick=()=>{ pf.catEditing=true; renderProductForm(); };
   body.querySelectorAll('[data-cid]').forEach(ch=>ch.onclick=()=>{
+    const changed = (Number(ch.dataset.cid)!==pf.category_id);
     pf.category_id = Number(ch.dataset.cid);
-    body.querySelectorAll('#pfCats .chip').forEach(x=>x.classList.toggle('active', x.dataset.cid==pf.category_id));
-    // Optom: kategoriya tanlanishi bilan Ranglar/Razmerlar chiplarini avtomatik yuklaymiz
-    // (sotuvchi "Savollarni yuklash"ni bosishi shart emas — chiplar darrov chiqadi).
-    if(pf.sale_mode==='optom') loadOptomOpts();
+    pf.catEditing = false;
+    renderProductForm();
+    // Kategoriya o'zgargach mos maydonlar (Ranglar/Razmerlar/atributlar) qayta yuklanadi.
+    if(changed) onCategoryPicked();
   });
   document.getElementById('pfSave').onclick = saveProduct;
   const tgl = document.getElementById('pfToggle'); if(tgl) tgl.onclick = toggleProductVisibility;
@@ -7479,7 +7703,7 @@ function admBroadcast(){
 document.getElementById('bcastClose').onclick=()=>document.getElementById('bcastview').classList.remove('open');
 
 applyStaticI18n();
-loadMe().then(()=>{ restoreModeOnBoot(); maybeHandleStaffInvite(); });
+loadMe().then(()=>{ restoreModeOnBoot(); restoreUiOnBoot(); maybeHandleStaffInvite(); });
 loadCategories();
 loadProducts();
 loadPending();   // #23 — kutilayotgan ishlar eslatmasi

@@ -57,6 +57,33 @@ def _product_buy_link(bot_username, product_id):
         return f"https://t.me/{bot_username}?startapp=product_{product_id}"
     return f"https://t.me/{bot_username}?start=product_{product_id}"
 
+
+# Mini App'ni "Main Mini App" sifatida ochuvchi t.me havolasi (Desktop'da MINIMIZE tugmasini beradi).
+# Inline web_app tugma modal ochadi (faqat X); startapp havolasi esa to'liq rejim → minimize bor.
+# BotFather'da Main Mini App yoqilgan bo'lishi shart. Username hali ma'lum bo'lmasa → None (modal zaxira).
+BOT_USERNAME = None   # _post_init'da get_me() bilan to'ldiriladi
+
+def _app_deeplink(start_param=""):
+    """Valid startapp deep-link qaytaradi, yoki None (username yo'q / belgi noto'g'ri → modal zaxira).
+    Telegram start_param faqat [A-Za-z0-9_-] (≤64) qabul qiladi; aks holda tugma butunlay rad etiladi."""
+    import re
+    if not (MINIAPP_URL and BOT_USERNAME):
+        return None
+    sp = start_param or "app"
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", sp):
+        return None
+    short = os.getenv("MINIAPP_SHORT_NAME", "").strip()
+    base = f"https://t.me/{BOT_USERNAME}/{short}" if short else f"https://t.me/{BOT_USERNAME}"
+    return f"{base}?startapp={sp}"
+
+def _open_app_button(lang, text_key, modal_url, start_param=""):
+    """Ilovani ochuvchi inline tugma: imkon bo'lsa Main Mini App havolasi (minimize'li),
+    aks holda web_app modal (zaxira). modal_url — startapp ishlamasa ishlatiladigan to'liq URL."""
+    dl = _app_deeplink(start_param)
+    if dl:
+        return InlineKeyboardButton(t(lang, text_key), url=dl)
+    return InlineKeyboardButton(t(lang, text_key), web_app=WebAppInfo(url=modal_url))
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo, MenuButtonWebApp, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
@@ -230,8 +257,7 @@ def app_launcher_kb(lang):
 def app_inline_kb(lang):
     """Matn ostida ko'rinadigan INLINE 'Ilovaga kirish' tugmasi (web_app)."""
     if MINIAPP_URL:
-        return InlineKeyboardMarkup([[InlineKeyboardButton(
-            t(lang, 'btn_open_app'), web_app=WebAppInfo(url=MINIAPP_URL))]])
+        return InlineKeyboardMarkup([[_open_app_button(lang, 'btn_open_app', MINIAPP_URL)]])
     return None
 
 
@@ -713,8 +739,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     url = f"{url}{sep}product={product_id}"
                     await update.message.reply_text(
                         t(clang, 'open_app_hint'),
-                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
-                            t(clang, 'btn_open_app'), web_app=WebAppInfo(url=url))]]),
+                        reply_markup=InlineKeyboardMarkup([[_open_app_button(
+                            clang, 'btn_open_app', url, f"product_{product_id}")]]),
                         parse_mode='HTML'
                     )
                     return ConversationHandler.END
@@ -806,8 +832,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 url = f"{url}{sep}ref={quote(ref, safe='')}"
             await update.message.reply_text(
                 t(lang, 'reg_app_welcome'),
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
-                    t(lang, 'reg_app_btn'), web_app=WebAppInfo(url=url))]]),
+                reply_markup=InlineKeyboardMarkup([[_open_app_button(
+                    lang, 'reg_app_btn', url, (f"ref_{ref}" if ref else ""))]]),
                 parse_mode='HTML'
             )
             return ConversationHandler.END
@@ -883,8 +909,8 @@ async def _handle_staff_deeplink(update, context, code, user):
         url = f"{MINIAPP_URL}{sep}staff={quote(code, safe='')}"
         await update.message.reply_text(
             t(lang, 'staff_invite_app_prompt', shop=html.escape(shop.get('name') or '—')),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton(
-                t(lang, 'staff_invite_app_btn'), web_app=WebAppInfo(url=url))]]),
+            reply_markup=InlineKeyboardMarkup([[_open_app_button(
+                lang, 'staff_invite_app_btn', url, f"staff_{code}")]]),
             parse_mode='HTML')
         return True
 
@@ -994,9 +1020,8 @@ async def registration_start(update: Update, context: ContextTypes.DEFAULT_TYPE)
             url = f"{url}{sep}ref={quote(str(ref_code), safe='')}"
         await update.message.reply_text(
             t(lang, 'reg_app_welcome'),
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton(t(lang, 'reg_app_btn'), web_app=WebAppInfo(url=url))
-            ]]),
+            reply_markup=InlineKeyboardMarkup([[_open_app_button(
+                lang, 'reg_app_btn', url, (f"ref_{ref_code}" if ref_code else ""))]]),
             parse_mode='HTML'
         )
         return ConversationHandler.END
@@ -1579,8 +1604,7 @@ async def buyer_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     # Mini App katalogi (WebApp) — rasm gridli "pro" katalog. Faqat MINIAPP_URL o'rnatilgan bo'lsa.
     if MINIAPP_URL:
-        keyboard.insert(1, [InlineKeyboardButton(
-            t(lang, 'btn_miniapp_catalog'), web_app=WebAppInfo(url=MINIAPP_URL))])
+        keyboard.insert(1, [_open_app_button(lang, 'btn_miniapp_catalog', MINIAPP_URL)])
 
     # MULTI-SOTUVCHI: do'konga taklif kodi bilan qo'shilish (faqat hali do'konda bo'lmaganlarga)
     if user and not db.get_staff_by_user(user['id']):
@@ -7300,7 +7324,7 @@ def _pro_gate_kb(lang):
     """Pro qulfi xabari klaviaturasi — Mini App'ni ochish (Pro o'sha yerda olinadi)."""
     rows = []
     if MINIAPP_URL:
-        rows.append([InlineKeyboardButton(t(lang, 'pro_open_app'), web_app=WebAppInfo(url=MINIAPP_URL))])
+        rows.append([_open_app_button(lang, 'pro_open_app', MINIAPP_URL)])
     rows.append([InlineKeyboardButton(t(lang, 'back'), callback_data="seller_panel")])
     return InlineKeyboardMarkup(rows)
 
@@ -15363,6 +15387,13 @@ async def _post_init(application):
     """Bot ishga tushganda — chat Menu tugmasini to'g'ridan-to'g'ri Mini App'ga ulaymiz.
     Shunda foydalanuvchi buyer panelga kirmasdan, matn maydoni yonidagi doimiy tugma
     bilan bitta tegishda ilovani ochadi (app-first kirish)."""
+    global BOT_USERNAME
+    try:
+        me = await application.bot.get_me()
+        BOT_USERNAME = me.username
+        logging.info(f"✅ BOT_USERNAME = @{BOT_USERNAME} (startapp deep-link'lar uchun).")
+    except Exception as e:
+        logging.warning(f"BOT_USERNAME olinmadi: {e}")
     try:
         if MINIAPP_URL:
             await application.bot.set_chat_menu_button(
