@@ -832,6 +832,15 @@ const I18N = {
   // checkout
   co_title:{uz:"Buyurtma berish",ru:"Оформление заказа"}, qty:{uz:"Miqdor",ru:"Количество"},
   delivery:{uz:"Yetkazib berish",ru:"Доставка"}, pickup:{uz:"🚶 Olib ketaman",ru:"🚶 Самовывоз"},
+  dlv_not_avail:{uz:"Bu mahsulot yetkazib berilmaydi — do'kondan olib ketiladi",ru:"Этот товар не доставляется — только самовывоз"},
+  dlv_min_short:{uz:"🚚 Yetkazib berish uchun yana {d} yetmayapti",ru:"🚚 Для доставки не хватает ещё {d}"},
+  dlv_min_info:{uz:"🚚 Yetkazish {m} dan",ru:"🚚 Доставка от {m}"},
+  dlv_pickup_only_pill:{uz:"🚶 Faqat olib ketish",ru:"🚶 Только самовывоз"},
+  sp_dlv_label:{uz:"🚚 Yetkazib berish",ru:"🚚 Доставка"},
+  sp_dlv_hint:{uz:"Bu mahsulotni yetkazib berasizmi? «Faqat olib ketish» bo'lsa xaridor kuryerni tanlay olmaydi.",ru:"Доставляете ли этот товар? При «Только самовывоз» покупатель не сможет выбрать курьера."},
+  sp_dlv_yes:{uz:"🚚 Yetkazib beriladi",ru:"🚚 С доставкой"},
+  sp_dlv_no:{uz:"🚶 Faqat olib ketish",ru:"🚶 Только самовывоз"},
+  sp_dlv_min:{uz:"🚚 Yetkazish uchun eng kam summa",ru:"🚚 Мин. сумма для доставки"},
   courier:{uz:"🚚 Yetkazib berish",ru:"🚚 Доставка"}, address_ph:{uz:"Manzil: ko'cha, uy, mo'ljal...",ru:"Адрес: улица, дом, ориентир..."},
   send_location:{uz:"📍 Joylashuvni yuborish (majburiy)",ru:"📍 Отправить геолокацию (обязательно)"}, loc_got:{uz:"✓ Joylashuv olindi (qayta olish)",ru:"✓ Геолокация получена (заново)"},
   need_location:{uz:"Yetkazib berish uchun joylashuvni yuboring — kuryer sizni topishi uchun shart.",ru:"Для доставки отправьте геолокацию — это нужно курьеру, чтобы вас найти."},
@@ -1053,6 +1062,14 @@ const I18N = {
   adm_exp_sent:{uz:"✅ Excel fayl Telegram chatingizga yuborildi ({n} qator).",ru:"✅ Excel-файл отправлен в ваш Telegram-чат ({n} строк)."},
   adm_load_more:{uz:"Ko'proq yuklash",ru:"Загрузить ещё"},
   adm_dispute_keep:{uz:"⚖️ Kuchda qoldirish",ru:"⚖️ Оставить в силе"}, adm_dispute_cancel:{uz:"❌ Buyurtmani bekor",ru:"❌ Отменить заказ"},
+  adm_d_buyer_req:{uz:"❗ Bekor qilishni XARIDOR so'ragan",ru:"❗ Отмену запросил ПОКУПАТЕЛЬ"},
+  adm_d_seller_req:{uz:"❗ Bekor qilishni SOTUVCHI so'ragan",ru:"❗ Отмену запросил ПРОДАВЕЦ"},
+  adm_d_reason:{uz:"Sabab",ru:"Причина"}, adm_d_no_reason:{uz:"Sabab ko'rsatilmagan",ru:"Причина не указана"},
+  adm_p_search:{uz:"Mahsulot, do'kon yoki sotuvchi qidirish...",ru:"Поиск товара, магазина или продавца..."},
+  adm_p_stock:{uz:"Qoldiq",ru:"Остаток"}, adm_p_unlim:{uz:"cheksiz",ru:"без огр."},
+  st_p_active:{uz:"Faol",ru:"Активен"}, st_p_deleted:{uz:"O'chirilgan",ru:"Удалён"},
+  st_p_blocked:{uz:"Bloklangan",ru:"Заблокирован"}, st_p_hidden:{uz:"Yashirin",ru:"Скрыт"},
+  st_p_pending:{uz:"Tasdiq kutmoqda",ru:"Ждёт одобрения"}, st_p_reserve:{uz:"Rezerv",ru:"Резерв"},
   adm_to_buyer:{uz:"Xaridorga",ru:"Покупателю"}, adm_to_seller:{uz:"Sotuvchiga",ru:"Продавцу"},
   adm_msg_ph:{uz:"Xabar yozing...",ru:"Напишите сообщение..."}, adm_send:{uz:"📨 Yuborish",ru:"📨 Отправить"},
   adm_bcast_ph:{uz:"Hammaga yuboriladigan xabar...",ru:"Сообщение для рассылки..."},
@@ -1973,6 +1990,9 @@ async function openDetail(id){
             ${p.seller_is_pro?`<span class="pill" style="background:#e6f4ff;color:#1592e2">${L('pro_badge')}</span>`:''}
             ${p.category_name?`<span class="pill">${p.category_emoji||'🏷'} ${esc(p.category_name)}</span>`:''}
             ${stockPill}
+            ${Number(p.delivery_available==null?1:p.delivery_available)===0
+              ?`<span class="pill" style="background:#fff3e6;color:#c2540a">${L('dlv_pickup_only_pill')}</span>`
+              :(Number(p.delivery_min_total||0)>0?`<span class="pill">${L('dlv_min_info').replace('{m}', money(p.delivery_min_total))}</span>`:'')}
           </div>
         </div>
         ${(p.haggle_on && !p.is_own)?`<div class="dsec"><button class="oact ok full" id="haggleBtn" style="background:linear-gradient(135deg,#f59e0b,#f97316)">${L('hag_btn')}</button></div>`:''}
@@ -2164,6 +2184,31 @@ function splitChips(s, opts){
 function PAYMENTS(){ return [["cash",L("pay_cash")],["terminal",L("pay_terminal")],["p2p",L("pay_p2p")]]; }
 function payLabel(code){ const m=PAYMENTS().find(x=>x[0]===code); return m?m[1]:(code||'—'); }
 
+// ---- Yetkazib berish qoidalari: mahsulot darajasi (delivery_available) + do'kon min summasi ----
+function dlvCheck(p, total){
+  if(p && p.delivery_available!=null && Number(p.delivery_available)===0)
+    return {ok:false, note:L('dlv_not_avail')};
+  const min = Number((p&&p.delivery_min_total)||0);
+  if(min>0 && Number(total||0)<min)
+    return {ok:false, note:L('dlv_min_short').replace('{d}', money(min-Number(total||0)))};
+  return {ok:true};
+}
+// Yetkazish/olib ketish segmenti: ruxsat bo'lmasa kuryer varianti o'chirilgan (qulf) + sabab.
+function dlvSegHtml(chk, cur, attr){
+  const dopt = chk.ok
+    ? `<div class="opt ${cur==='delivery'?'on':''}" data-${attr}="delivery">${L('courier')}</div>`
+    : `<div class="opt" style="opacity:.45">${L('courier')} 🔒</div>`;
+  return `<div class="seg"><div class="opt ${cur==='pickup'?'on':''}" data-${attr}="pickup">${L('pickup')}</div>${dopt}</div>`+
+    (chk.ok?'':`<div style="font-size:11.5px;color:var(--sale);margin-top:6px;line-height:1.4">${chk.note}</div>`);
+}
+// Backend yetkazish xatolarini odam tiliga o'giradi (himoya qatlami ishlasa)
+function dlvErr(d){
+  if(d==='delivery_not_available') return L('dlv_not_avail');
+  const m=/^delivery_min_(\d+)$/.exec(String(d||''));
+  if(m) return L('dlv_min_short').replace('{d}', money(m[1]));
+  return null;
+}
+
 async function openCheckout(id){
   const co = document.getElementById('checkout');
   const body = document.getElementById('checkoutBody');
@@ -2220,6 +2265,8 @@ function renderCheckout(){
   const hasDeal = p.deal_price && Number(p.deal_price) < base;
   const unit = hasDeal ? Number(p.deal_price) : base;
   const max = coMaxStock(), total = coQty * unit;
+  const dchk = dlvCheck(p, total);
+  if(!dchk.ok && coDelivery==='delivery') coDelivery='pickup';
   let priceHtml;
   if(hasDeal)
     priceHtml = `<div class="pr">${money(unit)} <span style="font-size:12px;color:var(--hint);text-decoration:line-through;font-weight:500">${money(listed)}</span></div><div style="font-size:11.5px;color:var(--ok);font-weight:700">🤝 ${L('hag_deal_applied')}</div>`;
@@ -2261,10 +2308,7 @@ function renderCheckout(){
       </div>
       <div class="cosec">
         <div class="lbl">${L('delivery')}</div>
-        <div class="seg">
-          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">${L('pickup')}</div>
-          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">${L('courier')}</div>
-        </div>
+        ${dlvSegHtml(dchk, coDelivery, 'dlv')}
         <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
           <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;${coLat?'background:var(--accent-soft);color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${coLat?L('loc_got'):L('send_location')}</button>
           ${!coLat?`<div style="font-size:11.5px;color:var(--sale);margin-top:6px;line-height:1.4">${L('loc_required_hint')}</div>`:''}
@@ -2306,6 +2350,8 @@ function renderVariantCheckout(){
   const total = totalQ * base;
   const stockMax = (p.stock_count!=null) ? Number(p.stock_count) : null;
   const belowMin = totalQ < minQ;
+  const dchk = dlvCheck(p, total);
+  if(!dchk.ok && coDelivery==='delivery') coDelivery='pickup';
 
   // Variant (hil) kartalari — rasm + (rang/razmer tanlash + "Qo'shish") yoki bitta son stepperi
   const hasAttrs = coHasAttrs();
@@ -2400,10 +2446,7 @@ function renderVariantCheckout(){
       </div>
       <div class="cosec">
         <div class="lbl">${L('delivery')}</div>
-        <div class="seg">
-          <div class="opt ${coDelivery==='pickup'?'on':''}" data-dlv="pickup">${L('pickup')}</div>
-          <div class="opt ${coDelivery==='delivery'?'on':''}" data-dlv="delivery">${L('courier')}</div>
-        </div>
+        ${dlvSegHtml(dchk, coDelivery, 'dlv')}
         <div id="addrWrap" style="${coDelivery==='delivery'?'':'display:none'}">
           <button class="oact ok" id="coLocBtn" style="width:100%;margin-top:10px;background:var(--accent-soft);color:${coLat?'var(--ok)':'var(--accent)'};box-shadow:none">${coLat?L('loc_got'):L('send_location')}</button>
           ${!coLat?`<div style="font-size:11.5px;color:var(--sale);margin-top:6px;line-height:1.4">${L('loc_required_hint')}</div>`:''}
@@ -2485,7 +2528,7 @@ async function submitVariantOrder(){
         lon: coDelivery==='delivery' ? coLon : null
       })
     });
-    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(vpErr(d.detail)||('HTTP '+r.status)); }
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(dlvErr(d.detail)||vpErr(d.detail)||('HTTP '+r.status)); }
     const res = await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     showOrderSuccess(res.group_id);
@@ -2524,7 +2567,7 @@ async function submitOrder(){
         lon: coDelivery==='delivery' ? coLon : null
       })
     });
-    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(dlvErr(d.detail)||d.detail||('HTTP '+r.status)); }
     const res = await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     showOrderSuccess(res.order_id);
@@ -2563,8 +2606,10 @@ function updateCartFab(){
 function _cartPut(p){
   const k=String(p.id);
   if(CART.items[k]) CART.items[k].qty++;
-  else CART.items[k]={qty:1, name:p.name, price:p.price, image:p.image_url||null};
+  else CART.items[k]={qty:1, name:p.name, price:p.price, image:p.image_url||null,
+                      dlv:(Number(p.delivery_available==null?1:p.delivery_available)===0?0:1)};
   CART.seller_id=p.seller_id; CART.seller_name=p.shop_name||CART.seller_name;
+  if(p.delivery_min_total!=null) CART.dmin=Number(p.delivery_min_total)||0;   // do'kon min summasi
   _saveCart();
   try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
 }
@@ -2607,14 +2652,16 @@ function renderCart(){
       <span class="crm" data-rm="${pid}">🗑</span>
     </div>`;
   }).join('');
+  // Yetkazish qoidalari: savatda birorta "faqat olib ketish" mahsulot bo'lsa yoki
+  // jami summa do'kon minimumidan past bo'lsa — kuryer varianti yopiq.
+  const kAnyPickupOnly = Object.values(CART.items).some(i=>Number(i.dlv==null?1:i.dlv)===0);
+  const kChk = dlvCheck({delivery_available:(kAnyPickupOnly?0:1), delivery_min_total:Number(CART.dmin||0)}, cartTotal());
+  if(!kChk.ok && kDlv==='delivery') kDlv='pickup';
   body.innerHTML=`<div class="cobody">
     <div style="font-size:13px;color:var(--hint)">🏪 ${esc(CART.seller_name||'')}</div>
     ${rows}
     <div class="cosec"><div class="lbl">${L('delivery')}</div>
-      <div class="seg">
-        <div class="opt ${kDlv==='pickup'?'on':''}" data-kdlv="pickup">${L('pickup')}</div>
-        <div class="opt ${kDlv==='delivery'?'on':''}" data-kdlv="delivery">${L('courier')}</div>
-      </div>
+      ${dlvSegHtml(kChk, kDlv, 'kdlv')}
       <div style="${kDlv==='delivery'?'':'display:none'}">
         <button class="oact ok" id="kLocBtn" style="width:100%;margin-top:10px;${kLat?'background:var(--accent-soft);color:var(--ok)':'background:var(--accent-soft);color:var(--accent)'};box-shadow:none">${kLat?L('loc_got'):L('send_location')}</button>
         ${!kLat?`<div style="font-size:11.5px;color:var(--sale);margin-top:6px;line-height:1.4">${L('loc_required_hint')}</div>`:''}
@@ -2650,7 +2697,7 @@ async function cartCheckout(){
     const r=await fetch('/api/cart/checkout',{method:'POST',headers:{Authorization:AUTH,'Content-Type':'application/json'},
       body:JSON.stringify({seller_id:CART.seller_id, items, delivery_type:kDlv, payment_method:kPay,
         address:kDlv==='delivery'?kAddr.trim():null, lat:kDlv==='delivery'?kLat:null, lon:kDlv==='delivery'?kLon:null})});
-    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(dlvErr(d.detail)||d.detail||('HTTP '+r.status)); }
     const res=await r.json();
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
     CART={seller_id:null,seller_name:'',items:{}}; _saveCart();
@@ -3610,6 +3657,8 @@ function openFieldEdit(o){
 }
 async function saveField(key, value, kind){
   const url = kind==='shop' ? '/api/seller/shop' : '/api/me';
+  // Summa maydoni: "50 000 so'm" kabi yozuvdan faqat raqamlarni olamiz (bo'sh = 0 → cheklovsiz)
+  if(key==='delivery_min_total') value = Number(String(value).replace(/[^\d]/g,'')||0);
   try{
     const r=await fetch(url,{method:'PATCH',headers:{Authorization:AUTH,'Content-Type':'application/json'},
       body:JSON.stringify({[key]: value})});
@@ -3814,6 +3863,7 @@ async function loadProfile(){
         _pfRow('🎯 '+L('sp_landmark'), f.shop_landmark, canEditShop?{key:'shop_landmark',type:'text',kind:'shop'}:null) +
         _pfRow('🕐 '+L('sp_work_hours'), f.working_hours, canEditShop?{key:'working_hours',type:'text',kind:'shop'}:null) +
         _pfRow('📆 '+L('sp_work_days'), f.working_days, canEditShop?{key:'working_days',type:'text',kind:'shop'}:null) +
+        _pfRow(L('sp_dlv_min'), (Number(f.delivery_min_total||0)>0?money(f.delivery_min_total):''), canEditShop?{key:'delivery_min_total',type:'text',kind:'shop'}:null) +
         (canEditShop && f.shop_lat==null ? `<div class="locwarn">${L('sp_loc_warn')}</div>` : '') +
         _pfRow('📍 '+L('sp_shop_location'), (f.shop_lat!=null?L('sp_loc_saved'):''), canEditShop?{key:'__location__',type:'location',kind:'shop'}:null) +
         `</div>`;
@@ -5835,10 +5885,11 @@ function openProductForm(prod, mode){
     pack_size: prod.pack_size||'', size_note: prod.size_note||'', imageLabels: [], optomColors: '',
     optomColorOpts: [], optomSizeOpts: [],
     tiers: _loadTiers(prod),
+    delivery_available: (prod.delivery_available==null?1:Number(prod.delivery_available)),
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
   }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', min_order_qty:'',
     sale_mode: (mode==='optom'?'optom':'dona'), modeChosen: !!mode,
-    pack_size:'', size_note:'', imageLabels:[], optomColors:'', optomColorOpts:[], optomSizeOpts:[], tiers:[], images:[] }, base);
+    pack_size:'', size_note:'', imageLabels:[], optomColors:'', optomColorOpts:[], optomSizeOpts:[], tiers:[], images:[], delivery_available:1 }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
@@ -5854,6 +5905,7 @@ function openProductForm(prod, mode){
     if(d && d.sale_mode){ pf.sale_mode = (d.sale_mode==='optom'?'optom':'dona'); }
     if(d && d.pack_size!=null && !pf.pack_size){ pf.pack_size = d.pack_size||''; }
     if(d && d.size_note!=null && !pf.size_note){ pf.size_note = d.size_note||''; }
+    if(d && d.delivery_available!=null){ pf.delivery_available = Number(d.delivery_available); }
     if(d && pf.sale_mode==='optom' && !pf.optomColors){
       const _c=(d.attributes||[]).find(a=>a.attr_key==='color' && (a.attr_value||'').trim());
       if(_c) pf.optomColors = _c.attr_value||'';
@@ -6237,6 +6289,13 @@ function renderProductForm(){
         <div style="font-weight:700;font-size:15px">${curCat?(curCat.emoji||'📦')+' '+esc(curCat.name):L('sp_category')}</div>
         <button class="oact soft" type="button" id="pfCatChange" style="width:auto;padding:7px 12px;margin:0">${L('sp_cat_change')}</button></div>`;
 
+  // ── Yetkazib berish: sotuvchi mahsulot darajasida belgilaydi ──
+  const dlvSec = `<div class="cosec"><div class="lbl">${L('sp_dlv_label')}</div>
+      <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_dlv_hint')}</div>
+      <div class="seg">
+        <div class="opt ${pf.delivery_available!==0?'on':''}" data-pfdlv="1">${L('sp_dlv_yes')}</div>
+        <div class="opt ${pf.delivery_available===0?'on':''}" data-pfdlv="0">${L('sp_dlv_no')}</div>
+      </div></div>`;
   body.innerHTML = `<div class="cobody">
     ${catHeadSec}
     ${imagesSec}
@@ -6252,6 +6311,7 @@ function renderProductForm(){
     ${unitSec}
     ${minPriceSec}
     ${tierSec}
+    ${dlvSec}
     <div class="cosec"><div class="lbl">${L('sp_stock')}</div>
       <input class="coaddr" id="pfStock" type="number" inputmode="numeric" style="min-height:auto" placeholder="${L('sp_stock_ph')}" value="${esc(String(pf.stock_count))}"></div>
     <div class="cosec"><div class="lbl">${L('sp_desc')}</div>
@@ -6284,6 +6344,8 @@ function renderProductForm(){
     pf.optomColors = toggleInList(pf.optomColors, ch.dataset.optomcolor, pf.optomColorOpts); renderProductForm(); });
   body.querySelectorAll('[data-optomsize]').forEach(ch=>ch.onclick=()=>{
     pf.size_note = toggleInList(pf.size_note, ch.dataset.optomsize, pf.optomSizeOpts); renderProductForm(); });
+  body.querySelectorAll('[data-pfdlv]').forEach(o=>o.onclick=()=>{
+    pf.delivery_available = Number(o.dataset.pfdlv); renderProductForm(); });
   document.getElementById('pfName').oninput = e=>pf.name=e.target.value;
   document.getElementById('pfPrice').oninput = e=>{
     const digits = e.target.value.replace(/\D/g,'');
@@ -6441,6 +6503,7 @@ async function saveProduct(){
     sale_mode: optom ? 'optom' : 'dona',
     pack_size: optom ? Number(pf.pack_size) : 0,
     size_note: optom ? (pf.size_note||'').trim() : '',
+    delivery_available: (pf.delivery_available===0 ? 0 : 1),
   };
   try{
     const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';
@@ -7076,16 +7139,33 @@ async function admDecideReq(uid, approve){
   }catch(e){ tg.showAlert(L('err')+': '+e.message); }
 }
 
+// Nizo kartasi kontenti (ro'yxatda VA nizo oynasi tepasida bir xil) — admin bir qarashda
+// nima, kimdan, nima uchun bekor so'ralganini ko'radi.
+function dispCardHtml(o, brief){
+  const img=o.product_image
+    ?`<img src="${imgUrl(o.product_image)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex:0 0 auto" onerror="this.style.display='none'">`
+    :`<div class="ph" style="width:64px;height:64px;border-radius:10px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--ph-bg)">🖼️</div>`;
+  const who=o.cancel_by==='seller'?L('adm_d_seller_req'):L('adm_d_buyer_req');
+  const variant=[o.variant_label,o.variant_color,o.variant_size].filter(Boolean).map(esc).join(' · ');
+  return `<div style="display:flex;gap:10px;align-items:flex-start">${img}
+      <div style="flex:1;min-width:0">
+        <div class="oname">⚖️ #${o.id} — ${esc(o.product_name||'')}</div>
+        <div class="ometa">${o.quantity||1} ${L('pcs')}${variant?' · '+variant:''} · <b>${money(o.total_price)}</b></div>
+        <div class="ometa">${fmtDate(o.updated_at||o.created_at)}</div>
+      </div></div>
+    <div class="ometa" style="margin-top:7px;color:var(--sale);font-weight:700">${who}</div>
+    <div class="ometa">📝 ${L('adm_d_reason')}: ${o.cancel_reason?esc(o.cancel_reason):('<i>'+L('adm_d_no_reason')+'</i>')}</div>
+    <div class="ometa">👤 ${esc(o.buyer_name||'')}${o.buyer_phone?' · 📞 '+esc(o.buyer_phone):''}${o.buyer_username?' · @'+esc(o.buyer_username):''}</div>
+    <div class="ometa">🏪 ${esc(o.shop_name||o.seller_name||'')}${o.seller_phone?' · 📞 '+esc(o.seller_phone):''}${o.seller_username?' · @'+esc(o.seller_username):''}</div>`;
+}
+let DISP_LIST=[];
 async function admDisputes(){
   const b=admBox();
   try{
     const list=await api('/api/admin/disputes');
+    DISP_LIST=list;
     if(!list.length){ b.innerHTML=admEmpty(L('adm_no_disputes')); return; }
-    b.innerHTML=`<div class="olist">`+list.map(o=>`<div class="ocard" data-disp="${o.id}">
-      <div class="oname">⚖️ #${o.id} — ${esc(o.product_name||'')}</div>
-      <div class="ometa">👤 ${esc(o.buyer_name||'')} ⇄ 🏪 ${esc(o.shop_name||o.seller_name||'')}</div>
-      <div class="ometa"><b>${money(o.total_price)}</b></div>
-    </div>`).join('')+`</div>`;
+    b.innerHTML=`<div class="olist">`+list.map(o=>`<div class="ocard" data-disp="${o.id}">${dispCardHtml(o)}</div>`).join('')+`</div>`;
     b.querySelectorAll('[data-disp]').forEach(x=>x.onclick=()=>openDispute(x.dataset.disp));
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
@@ -7095,6 +7175,10 @@ async function openDispute(oid){
   DISP_ID=oid; DISP_PARTY='buyer';
   document.getElementById('dispview').classList.add('open');
   document.getElementById('dispTitle').textContent='⚖️ #'+oid;
+  // Ro'yxatdan tashqari kirilsa (masalan, push'dan) kontekst kartasi uchun yuklab olamiz
+  if(!DISP_LIST.some(x=>String(x.id)===String(oid))){
+    try{ DISP_LIST=await api('/api/admin/disputes'); }catch(e){}
+  }
   await renderDispute();
 }
 async function renderDispute(){
@@ -7103,7 +7187,11 @@ async function renderDispute(){
   let msgs=[];
   try{ msgs=(await api('/api/admin/dispute/'+DISP_ID+'/messages')).messages||[]; }catch(e){}
   const chat=msgs.length?msgs.map(m=>`<div class="ocard"><div class="ometa"><b>${esc(m.sender_name||m.sender_role)}</b> · ${esc(m.party)}</div><div>${esc(m.message)}</div></div>`).join(''):admEmpty(L('no_msgs'));
+  // Kontekst kartasi — mahsulot rasmi, soni, kim so'ragani, sababi (admin hukm chiqarishidan oldin ko'rsin)
+  const _do=DISP_LIST.find(x=>String(x.id)===String(DISP_ID));
+  const ctx=_do?`<div class="ocard" style="margin-bottom:10px">${dispCardHtml(_do)}</div>`:'';
   body.innerHTML=`<div class="cobody" style="overflow-y:auto">
+    ${ctx}
     <div style="display:flex;gap:8px;margin-bottom:10px">
       <button class="oact ok" id="dKeep" style="flex:1">${L('adm_dispute_keep')}</button>
       <button class="oact no" id="dCancel" style="flex:1">${L('adm_dispute_cancel')}</button></div>
@@ -7656,22 +7744,60 @@ async function admOrders(){
   }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 
-async function admProducts(){
+// Admin «Mahsulotlar» — to'liq karta (rasm, do'kon, status, qoldiq, sotilgan, sana)
+// + qidiruv + 50 tadan sahifalash. Admin nimani o'chirayotganini aniq ko'radi.
+let admProdOffset=0, admProdList=[], admProdQ='';
+function admProdStatus(p){
+  const s=p.status||'active';
+  if(s==='deleted'||s==='purged') return ['🗑 '+L('st_p_deleted'),'var(--sale)'];
+  if(s==='mod_blocked') return ['🛡 '+L('st_p_blocked'),'var(--sale)'];
+  if(s==='pending_owner') return ['⏳ '+L('st_p_pending'),'#d98300'];
+  if(s==='reserve') return ['📦 '+L('st_p_reserve'),'#d98300'];
+  if(!p.in_stock) return ['🙈 '+L('st_p_hidden'),'var(--hint)'];
+  return ['✅ '+L('st_p_active'),'var(--ok)'];
+}
+function admProducts(){
   const b=admBox();
+  admProdQ='';
+  b.innerHTML=`<div style="padding:0 12px 8px"><input class="search" id="admProdSearch" placeholder="${L('adm_p_search')}" style="box-shadow:none;border:1px solid var(--line)"></div><div id="admProdList"></div>`;
+  const inp=document.getElementById('admProdSearch');
+  let tmr=null;
+  inp.oninput=()=>{ clearTimeout(tmr); tmr=setTimeout(()=>{ admProdQ=inp.value.trim(); admProdFetch(true); },350); };
+  admProdFetch(true);
+}
+async function admProdFetch(reset){
+  const wrap=document.getElementById('admProdList'); if(!wrap) return;
+  if(reset){ admProdOffset=0; admProdList=[]; wrap.innerHTML=`<div class="loading">...</div>`; }
   try{
-    const list=await api('/api/admin/products');
-    if(!list.length){ b.innerHTML=admEmpty(L('s_no_products')); return; }
-    b.innerHTML=`<div class="olist">`+list.map(p=>`<div class="ocard">
-      <div class="oname">🛍️ ${esc(p.name||'')}</div>
-      <div class="ometa"><b>${money(p.price)}</b> · ${p.order_count||0} ${L('adm_sold')}</div>
-      <button class="oact no" data-delp="${p.id}" style="width:100%;margin-top:8px">${L('adm_del')}</button>
-    </div>`).join('')+`</div>`;
-    b.querySelectorAll('[data-delp]').forEach(x=>x.onclick=()=>{
-      const go=async()=>{ try{ await apiSend('/api/admin/product/'+x.dataset.delp,'DELETE'); admProducts(); }
+    const res=await api('/api/admin/products?q='+encodeURIComponent(admProdQ)+'&offset='+admProdOffset);
+    admProdList=admProdList.concat(res||[]);
+    if(!admProdList.length){ wrap.innerHTML=admEmpty(L('s_no_products')); return; }
+    const more=(res||[]).length>=50;
+    wrap.innerHTML=`<div class="olist">`+admProdList.map(p=>{
+      const img=p.image_url
+        ?`<img src="${imgUrl(p.image_url)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex:0 0 auto" onerror="this.style.display='none'">`
+        :`<div class="ph" style="width:64px;height:64px;border-radius:10px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;background:var(--ph-bg)">🖼️</div>`;
+      const st=admProdStatus(p);
+      return `<div class="ocard">
+        <div style="display:flex;gap:10px;align-items:flex-start">${img}
+          <div style="flex:1;min-width:0">
+            <div class="oname">🛍️ #${p.id} ${esc(p.name||'')}</div>
+            <div class="ometa"><b>${money(p.price)}</b>${p.category_name?' · '+esc(p.category_name):''}${p.sale_mode==='optom'?' · 📦 Optom':''}</div>
+            <div class="ometa">🏪 ${esc(p.shop_name||p.seller_name||'—')}${p.seller_phone?' · 📞 '+esc(p.seller_phone):''}</div>
+            <div class="ometa"><span style="color:${st[1]};font-weight:700">${st[0]}</span> · ${L('adm_p_stock')}: ${p.stock_count==null?L('adm_p_unlim'):p.stock_count} · ${p.sold_count||0} ${L('adm_sold')}</div>
+            <div class="ometa">📅 ${fmtDate(p.created_at)}</div>
+          </div></div>
+        ${(p.status==='deleted'||p.status==='purged')?'':`<button class="oact no" data-delp="${p.id}" style="width:100%;margin-top:8px">${L('adm_del')}</button>`}
+      </div>`;}).join('')+`</div>`+
+      (more?`<div style="padding:0 12px 12px"><button class="oact ok" id="admProdMore" style="width:100%;background:var(--bg);color:var(--accent)">${L('adm_load_more')}</button></div>`:'');
+    wrap.querySelectorAll('[data-delp]').forEach(x=>x.onclick=()=>{
+      const go=async()=>{ try{ await apiSend('/api/admin/product/'+x.dataset.delp,'DELETE'); admProdFetch(true); }
         catch(e){ tg.showAlert(L('err')+': '+e.message); } };
       if(tg.showConfirm) tg.showConfirm(L('adm_confirm_del'), ok=>{ if(ok) go(); }); else go();
     });
-  }catch(e){ b.innerHTML=admEmpty(L('err')+': '+e.message); }
+    const mb=document.getElementById('admProdMore');
+    if(mb) mb.onclick=()=>{ admProdOffset=admProdList.length; admProdFetch(false); };
+  }catch(e){ wrap.innerHTML=admEmpty(L('err')+': '+e.message); }
 }
 
 function admBroadcast(){

@@ -8279,8 +8279,6 @@ async def _build_ad_design_bytes(context, product):
     try:
         tg_file = await context.bot.get_file(photo)
         raw = bytes(await tg_file.download_as_bytearray())
-        badges = ["YANGI", "ORIGINAL", "SIFATLI", "TOP TANLOV", "OMMABOP"]
-        badge = badges[(product.get('id') or 0) % len(badges)]
         shop_name = product.get('shop_name')
         region_lbl = region_label_l(product.get('seller_region_id'), DEFAULT_LANG)
         # Optom rozetkasi — pachka belgisi (rasm ustida)
@@ -8291,7 +8289,7 @@ async def _build_ad_design_bytes(context, product):
         return await asyncio.to_thread(
             ad_design.build_ad_image, raw,
             price_text=fmt_price(product.get('price')),
-            badge_text=badge,
+            badge_text='',
             shop_text=(str(shop_name) if shop_name else (region_lbl or '')),
             optom_text=optom_txt,
         )

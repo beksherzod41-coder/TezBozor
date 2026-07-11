@@ -470,6 +470,8 @@ class Database:
             ("products", "sale_mode",       "TEXT DEFAULT 'dona'"), # 'dona' (donalab) | 'optom' (pachka). Eski mahsulotlar = 'dona'
             ("products", "pack_size",       "INTEGER"),            # optom: 1 pachkadagi dona soni (NULL = dona rejimi)
             ("products", "size_note",       "TEXT"),               # optom: razmer matni (butun mahsulotga; xaridor tanlamaydi)
+            ("products", "delivery_available", "INTEGER DEFAULT 1"),  # 1=yetkaziladi, 0=faqat olib ketish (sotuvchi belgilaydi)
+            ("users",    "delivery_min_total", "REAL"),               # do'kon: yetkazish uchun minimal buyurtma summasi (NULL/0 = cheklov yo'q)
         ]
         for _tbl, _col, _defn in _migrations:
             try:
@@ -1851,7 +1853,7 @@ class Database:
                    u.shop_name, u.shop_address, u.shop_landmark,
                    u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
                    u.telegram_username, u.phone_number, u.is_verified, u.region_id as seller_region_id,
-                   u.pro_until as seller_pro_until,
+                   u.pro_until as seller_pro_until, u.delivery_min_total,
                    (SELECT AVG(r.rating) FROM reviews r WHERE r.seller_id=p.seller_id) as avg_rating,
                    (SELECT AVG(r2.product_rating) FROM reviews r2 WHERE r2.product_id=p.id AND r2.product_rating IS NOT NULL) as prod_avg_rating,
                    (SELECT COUNT(*) FROM reviews r3 WHERE r3.product_id=p.id AND r3.product_rating IS NOT NULL) as prod_review_count
@@ -2641,9 +2643,12 @@ class Database:
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT o.*, p.name as product_name,
+            SELECT o.*, p.name as product_name, p.image_url as product_image,
+                   p.price as product_price, p.sale_mode, p.pack_size,
                    bu.name as buyer_name, bu.telegram_id as buyer_tg,
-                   su.name as seller_name, su.shop_name, su.telegram_id as seller_tg
+                   bu.phone_number as buyer_phone, bu.telegram_username as buyer_username,
+                   su.name as seller_name, su.shop_name, su.telegram_id as seller_tg,
+                   su.phone_number as seller_phone, su.telegram_username as seller_username
             FROM orders o
             JOIN products p ON o.product_id=p.id
             JOIN users bu ON o.buyer_id=bu.id
@@ -3112,6 +3117,7 @@ class Database:
                    u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
                    u.telegram_username, u.phone_number, u.telegram_id as seller_tg,
                    u.is_blocked as seller_blocked, u.region_id as seller_region_id,
+                   u.delivery_min_total,
                    (SELECT AVG(rating) FROM reviews WHERE seller_id=p.seller_id) as avg_rating,
                    (SELECT AVG(product_rating) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_avg_rating,
                    (SELECT COUNT(*) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_review_count
@@ -4445,6 +4451,34 @@ class Database:
             ORDER BY order_count DESC
             LIMIT ?
         """, (limit,))
+        cols = [d[0] for d in cursor.description]
+        return [dict(zip(cols, r)) for r in cursor.fetchall()]
+
+    def get_admin_products_full(self, q=None, limit=50, offset=0):
+        """Admin «Mahsulotlar» bo'limi — TO'LIQ ma'lumot: rasm, sotuvchi/do'kon (telefon
+        bilan), status, qoldiq, sotilgan soni, sana. q — nom/do'kon/sotuvchi qidiruvi.
+        O'chirishdan oldin admin kimning qaysi mahsuloti ekanini aniq ko'rsin."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        where, params = "", []
+        if q:
+            like = f"%{q}%"
+            where = "WHERE (p.name LIKE ? OR u.shop_name LIKE ? OR u.name LIKE ?)"
+            params = [like, like, like]
+        cursor.execute(f"""
+            SELECT p.id, p.name, p.price, p.image_url, p.status, p.in_stock,
+                   p.stock_count, p.sale_mode, p.created_at,
+                   c.name as category_name,
+                   u.name as seller_name, u.shop_name, u.phone_number as seller_phone,
+                   (SELECT COUNT(*) FROM orders o WHERE o.product_id=p.id
+                        AND o.status='delivered') as sold_count
+            FROM products p
+            LEFT JOIN users u ON p.seller_id=u.id
+            LEFT JOIN categories c ON p.category_id=c.id
+            {where}
+            ORDER BY p.created_at DESC, p.id DESC
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset])
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, r)) for r in cursor.fetchall()]
 

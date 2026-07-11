@@ -1064,6 +1064,24 @@ _VALID_DELIVERY = {"delivery", "pickup"}
 _VALID_PAYMENT = {"cash", "terminal", "p2p"}
 
 
+def _check_delivery_rules(products, total):
+    """delivery_type='delivery' uchun himoya: (1) har bir mahsulot yetkaziladigan
+    bo'lishi kerak (sotuvchi mahsulot darajasida belgilaydi), (2) jami summa
+    do'konning minimal yetkazish summasiga (delivery_min_total) yetishi kerak —
+    arzon buyurtmaga yetkazish sotuvchiga zarar qilmasligi uchun."""
+    min_t = 0.0
+    for prod in products:
+        da = prod.get("delivery_available")
+        if da is not None and int(da) == 0:
+            raise HTTPException(status_code=400, detail="delivery_not_available")
+        try:
+            min_t = max(min_t, float(prod.get("delivery_min_total") or 0))
+        except (ValueError, TypeError):
+            pass
+    if min_t > 0 and total < min_t:
+        raise HTTPException(status_code=400, detail=f"delivery_min_{int(min_t)}")
+
+
 class OrderIn(BaseModel):
     product_id: int
     quantity: int = 1
@@ -1111,6 +1129,7 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
         unit_price = float(deal)
     total = order.quantity * unit_price
     if order.delivery_type == "delivery":
+        _check_delivery_rules([product], total)
         address = (order.address or "").strip() or None
         lat, lon = order.lat, order.lon
         if lat is None or lon is None:   # yetkazib berishda joylashuv MAJBURIY (kuryer topishi uchun)
@@ -1170,7 +1189,7 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
     else:
         address, lat, lon = None, None, None
 
-    created, grand = [], 0.0
+    pending, grand = [], 0.0
     for it in co.items:
         if it.quantity < 1:
             continue
@@ -1189,16 +1208,23 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
             continue
         line = qty * effective_unit_price(product, qty)   # optom narx (qator soni minimumga yetsa)
         grand += line
+        pending.append((product, qty, line))
+
+    if not pending:
+        raise HTTPException(status_code=409, detail="nothing_available")
+    # Yetkazish qoidalari BUTUN savat bo'yicha (yaratishdan OLDIN — yarim guruh qolmasin)
+    if co.delivery_type == "delivery":
+        _check_delivery_rules([pr for pr, _, _ in pending], grand)
+
+    created = []
+    for product, qty, line in pending:
         oid = db.create_order(
-            buyer_id=buyer["id"], seller_id=co.seller_id, product_id=it.product_id,
+            buyer_id=buyer["id"], seller_id=co.seller_id, product_id=product["id"],
             quantity=qty, total_price=line, delivery_address=address,
             buyer_lat=lat, buyer_lon=lon, payment_method=co.payment_method,
             delivery_type=co.delivery_type,
         )
         created.append(oid)
-
-    if not created:
-        raise HTTPException(status_code=409, detail="nothing_available")
     group_id = str(created[0])
     db.set_orders_group(created, group_id)
     deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
@@ -1336,6 +1362,8 @@ def api_variant_order(vo: VariantOrderIn, authorization: str = Header(None)):
 
     # Optom narx JAMI songa qarab (har variant qatoriga bir xil dona narx)
     unit_price = effective_unit_price(product, total_qty)
+    if vo.delivery_type == "delivery":
+        _check_delivery_rules([product], total_qty * unit_price)
     created, grand = [], 0.0
     for idx, ln in enumerate(lines):
         qty = int(ln.qty)
@@ -3260,8 +3288,6 @@ def api_cancel_autorepost(repost_id: int, authorization: str = Header(None)):
 # Sotuvchi mahsulot uchun reklama matni + dizayn rasmni app ichida ko'radi,
 # tahrirlaydi va kanal/guruhlariga darhol e'lon qiladi.
 # ============================================================
-_AD_BADGES = ["YANGI", "ORIGINAL", "SIFATLI", "TOP TANLOV", "OMMABOP"]
-
 
 async def _fetch_image_bytes(file_id):
     """Telegram file_id -> rasm baytlari (disk-cache bilan). Xato bo'lsa None."""
@@ -3421,7 +3447,6 @@ async def _build_ad_design_web(product):
     raw = await _fetch_image_bytes(photo)
     if not raw:
         return None
-    badge = _AD_BADGES[(product.get("id") or 0) % len(_AD_BADGES)]
     shop_name = product.get("shop_name")
     region_lbl = _region_label(product)
     # Optom rozetkasi — pachka belgisi (rasm ustida ko'rinadi)
@@ -3433,7 +3458,7 @@ async def _build_ad_design_web(product):
         return await asyncio.to_thread(
             ad_design.build_ad_image, raw,
             price_text=fmt_price(product.get("price")),
-            badge_text=badge,
+            badge_text="",
             shop_text=(str(shop_name) if shop_name else (region_lbl or "")),
             optom_text=optom_txt)
     except Exception as e:
@@ -3681,7 +3706,8 @@ def api_seller_analytics(authorization: str = Header(None)):
 
 _SHOP_FIELDS = ("shop_name", "shop_address", "shop_landmark", "working_days",
                 "working_hours", "phone_number", "card_number", "card_owner",
-                "card_type", "shop_lat", "shop_lon", "telegram_username")
+                "card_type", "shop_lat", "shop_lon", "telegram_username",
+                "delivery_min_total")
 _VALID_CARD = {"uzcard", "humo", "visa", "mastercard"}
 
 
@@ -3713,6 +3739,7 @@ class ShopEdit(BaseModel):
     lat: Optional[float] = None
     lon: Optional[float] = None
     telegram_username: Optional[str] = None  # sotuvchi kontakt username (bot edit_telegram pariteti)
+    delivery_min_total: Optional[float] = None  # yetkazish uchun minimal buyurtma summasi (0 = cheklov yo'q)
 
 
 @app.patch("/api/seller/shop")
@@ -3776,6 +3803,16 @@ def api_edit_shop(p: ShopEdit, authorization: str = Header(None)):
             fields["telegram_username"] = un
         else:
             fields["telegram_username"] = None
+    # Yetkazish uchun minimal buyurtma summasi (arzon buyurtmaga yetkazish zarar
+    # qilmasligi uchun). 0 yoki manfiy → cheklov olib tashlanadi (NULL).
+    if p.delivery_min_total is not None:
+        try:
+            mv = float(p.delivery_min_total)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="bad_delivery_min")
+        if mv > 1e12:
+            raise HTTPException(status_code=400, detail="bad_delivery_min")
+        fields["delivery_min_total"] = mv if mv > 0 else None
     if fields:
         db.update_user(user["id"], **fields)
     # payment_mode shops jadvalida (faqat ega)
@@ -4225,6 +4262,7 @@ class ProductIn(BaseModel):
     sale_mode: Optional[str] = None  # 'dona' (donalab) | 'optom' (pachka). None/noma'lum = 'dona'
     pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
     size_note: Optional[str] = None  # optom: razmer matni (butun mahsulotga)
+    delivery_available: Optional[int] = None  # 1=yetkaziladi (default), 0=faqat olib ketish
 
 
 def _save_attrs(product_id, attributes):
@@ -4447,6 +4485,8 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
             fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
     if p.min_order_qty is not None:
         fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
+    if p.delivery_available is not None:
+        fields["delivery_available"] = 1 if p.delivery_available else 0
     fields.update(_wholesale_fields(p.price, p.wholesale_tiers, p.wholesale_price, p.wholesale_min_qty))
     try:
         db.update_product_fields(pid, **fields)
@@ -4479,6 +4519,7 @@ class ProductEdit(BaseModel):
     sale_mode: Optional[str] = None  # 'dona' | 'optom'
     pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
     size_note: Optional[str] = None  # optom: razmer matni
+    delivery_available: Optional[int] = None  # 1=yetkaziladi, 0=faqat olib ketish
 
 
 @app.patch("/api/seller/product/{product_id}")
@@ -4529,6 +4570,8 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
             fields["min_price"] = float(p.min_price) if p.min_price and p.min_price > 0 else None
     if p.min_order_qty is not None:
         fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
+    if p.delivery_available is not None:
+        fields["delivery_available"] = 1 if p.delivery_available else 0
     # Optom narx — berilgan bo'lsa (zinalar yoki eski yagona) validatsiya bilan yangilaymiz.
     # Amaldagi dona narx = yangi narx (berilgan bo'lsa) yoki mavjud narx.
     if p.wholesale_tiers is not None or p.wholesale_price is not None or p.wholesale_min_qty is not None:
@@ -6421,9 +6464,12 @@ def api_admin_audit(authorization: str = Header(None)):
 
 
 @app.get("/api/admin/products")
-def api_admin_products(authorization: str = Header(None)):
+def api_admin_products(q: str = "", offset: int = 0, authorization: str = Header(None)):
+    """Admin mahsulotlari — to'liq ma'lumot (rasm, do'kon, status, qoldiq, sotilgan)
+    + qidiruv + sahifalash (50 tadan)."""
     _admin_from_auth(authorization)
-    return _rows(db.get_admin_products_summary(limit=30))
+    return _rows(db.get_admin_products_full(q=(q or "").strip() or None,
+                                            limit=50, offset=max(0, offset)))
 
 
 @app.delete("/api/admin/product/{product_id}")
