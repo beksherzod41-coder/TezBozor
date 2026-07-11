@@ -16,8 +16,8 @@ emoji'ni ishonchli chiza olmaydi, shuning uchun rasm ustida emoji ishlatilmaydi
 """
 
 import io
-import re
 import logging
+import unicodedata
 
 log = logging.getLogger(__name__)
 
@@ -50,15 +50,21 @@ _REG_CANDIDATES = [
     "C:\\Windows\\Fonts\\segoeui.ttf",
 ]
 
-# Maxsus (ko'rinmas) bo'shliqlar — ba'zi shriftlarda ular .notdef glifi (□ yoki '#')
-# bo'lib chiqadi. fmt_price minglarni   (uzilmas bo'shliq) bilan ajratadi, shu
-# sababli rasm ustida narx "11 000" emas "11#000" bo'lib ko'rinardi. Oddiy bo'shliqqa
-# aylantiramiz — u har doim to'g'ri chiziladi.
-_SPACE_RE = re.compile("[    ⁠﻿​]")
-
-
 def _norm_spaces(s):
-    return _SPACE_RE.sub(" ", s or "")
+    """Barcha bo'shliq va ko'rinmas belgilarni ODDIY bo'shliqqa aylantiradi.
+
+    fmt_price minglarni U+00A0 (uzilmas bo'shliq) bilan ajratadi; ba'zi shriftlarda
+    (ayniqsa server fallback shriftida) bunday belgilar .notdef glifi (□) bo'lib
+    chiqadi — narx "4 500" o'rniga "4□500" ko'rinardi. Belgilarni sanab chiqish
+    o'rniga umumiy qoida: har qanday whitespace (isspace) + Zs (bo'shliqlar) +
+    Cf (ko'rinmas format belgilari: ZWSP, WJ, BOM...) → " "."""
+    out = []
+    for ch in (s or ""):
+        if ch.isspace() or unicodedata.category(ch) in ("Zs", "Cf"):
+            out.append(" ")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def is_enabled() -> bool:
