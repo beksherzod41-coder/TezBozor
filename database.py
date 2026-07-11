@@ -1105,6 +1105,45 @@ class Database:
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_support_msg_thread ON support_messages(thread_id)")
+
+        # ISTAK RO'YXATI (deal hunter) — xaridor "nima kerak + budjet" yozadi; yangi mos
+        # mahsulot sotuvga chiqqanda avtomatik push oladi. wish_hits — bitta mahsulot
+        # haqida BIR MARTA xabar berish uchun (dublikat push bo'lmasin).
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS wishes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                buyer_id INTEGER NOT NULL,
+                query TEXT NOT NULL,               -- nima kerak ("iphone 13", "qishki kurtka")
+                max_price REAL,                    -- budjet (NULL = cheklanmagan)
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (buyer_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS wish_hits (
+                wish_id INTEGER NOT NULL,
+                product_id INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (wish_id, product_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishes_active ON wishes(is_active, buyer_id)")
+
+        # AI SMM — sotuvchi kanaliga kunlik avtomatik mavzuli post. Har sotuvchi (ega)
+        # uchun bitta sozlama: soat (Toshkent) + faollik. Bot job har kuni shu soatda
+        # navbatdagi mahsulotni tanlab, AI matn bilan kanallarga joylaydi.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS smm_settings (
+                seller_id INTEGER PRIMARY KEY,     -- do'kon EGASI user id
+                hour INTEGER NOT NULL DEFAULT 10,  -- Toshkent soati (0-23)
+                is_active INTEGER NOT NULL DEFAULT 0,
+                last_posted_at TIMESTAMP,          -- oxirgi SMM post vaqti (kuniga 1 marta)
+                last_product_id INTEGER,           -- rotatsiya: oxirgi joylangan mahsulot
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+        """)
         conn.commit()
 
         # ===== INDEKSLAR (tezlik #3) =====
@@ -3764,6 +3803,148 @@ class Database:
         cursor = conn.cursor()
         cursor.execute("SELECT COUNT(*) FROM support_threads WHERE status='open'")
         return int(cursor.fetchone()[0])
+
+    # ===== ISTAK RO'YXATI (deal hunter) =====
+    def create_wish(self, buyer_id, query, max_price=None):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO wishes (buyer_id, query, max_price) VALUES (?,?,?)",
+                       (buyer_id, (query or "").strip(), max_price))
+        conn.commit()
+        return cursor.lastrowid
+
+    def get_user_wishes(self, buyer_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM wishes WHERE buyer_id=? AND is_active=1 "
+                       "ORDER BY created_at DESC", (buyer_id,))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def count_user_wishes(self, buyer_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM wishes WHERE buyer_id=? AND is_active=1", (buyer_id,))
+        return int(cursor.fetchone()[0])
+
+    def delete_wish(self, wish_id, buyer_id):
+        """Faqat egasi o'chira oladi (is_active=0 — tarix saqlanadi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE wishes SET is_active=0 WHERE id=? AND buyer_id=?",
+                       (wish_id, buyer_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+    def get_active_wishes(self):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT w.*, u.telegram_id as buyer_tg FROM wishes w "
+                       "JOIN users u ON u.id=w.buyer_id WHERE w.is_active=1")
+        return [dict(r) for r in cursor.fetchall()]
+
+    def record_wish_hit(self, wish_id, product_id):
+        """Bitta mahsulot haqida BIR MARTA xabar — yangi bo'lsa True, dublikat bo'lsa False."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("INSERT INTO wish_hits (wish_id, product_id) VALUES (?,?)",
+                           (wish_id, product_id))
+            conn.commit()
+            return True
+        except Exception:
+            return False
+
+    def get_new_active_products_after(self, last_id, limit=50):
+        """Istak-skan uchun: last_id dan KEYIN qo'shilgan sotuvdagi mahsulotlar
+        (id o'sish tartibida — skanner ko'rsatkichini oldinga suradi)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT p.*, c.name as category_name, u.shop_name "
+            "FROM products p LEFT JOIN categories c ON c.id=p.category_id "
+            "LEFT JOIN users u ON u.id=p.seller_id "
+            "WHERE p.id>? AND p.status='active' AND p.in_stock=1 "
+            "ORDER BY p.id ASC LIMIT ?", (int(last_id or 0), limit))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def get_max_product_id(self):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COALESCE(MAX(id),0) FROM products")
+        return int(cursor.fetchone()[0])
+
+    def get_recent_active_sellers(self, days=30):
+        """Oxirgi N kunda buyurtma olgan YOKI faol mahsulotli do'kon egalari
+        (haftalik AI direktor eslatmasi uchun)."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT DISTINCT u.id, u.telegram_id, u.language FROM users u
+            WHERE u.id IN (
+                SELECT seller_id FROM orders WHERE created_at >= datetime('now','-{int(days)} days')
+                UNION
+                SELECT seller_id FROM products WHERE status='active'
+            ) AND u.telegram_id IS NOT NULL
+        """)
+        return [dict(r) for r in cursor.fetchall()]
+
+    # ===== AI SMM (kunlik avtomatik kanal posti) =====
+    def get_smm_settings(self, seller_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM smm_settings WHERE seller_id=?", (seller_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def upsert_smm_settings(self, seller_id, hour=None, is_active=None):
+        cur = self.get_smm_settings(seller_id)
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        if cur is None:
+            cursor.execute("INSERT INTO smm_settings (seller_id, hour, is_active) VALUES (?,?,?)",
+                           (seller_id, int(hour if hour is not None else 10),
+                            1 if is_active else 0))
+        else:
+            if hour is not None:
+                cursor.execute("UPDATE smm_settings SET hour=? WHERE seller_id=?",
+                               (int(hour), seller_id))
+            if is_active is not None:
+                cursor.execute("UPDATE smm_settings SET is_active=? WHERE seller_id=?",
+                               (1 if is_active else 0, seller_id))
+        conn.commit()
+        return self.get_smm_settings(seller_id)
+
+    def get_due_smm(self, hour):
+        """Shu soat (Toshkent) uchun faol va BUGUN hali joylamagan sozlamalar."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM smm_settings WHERE is_active=1 AND hour=? "
+            "AND (last_posted_at IS NULL OR date(last_posted_at) < date('now'))", (int(hour),))
+        return [dict(r) for r in cursor.fetchall()]
+
+    def mark_smm_posted(self, seller_id, product_id):
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE smm_settings SET last_posted_at=CURRENT_TIMESTAMP, "
+                       "last_product_id=? WHERE seller_id=?", (product_id, seller_id))
+        conn.commit()
+
+    def get_next_smm_product(self, seller_id, last_product_id=None):
+        """SMM rotatsiyasi: sotuvdagi mahsulotlar ichидан oxirgisidan KEYINGISINI
+        (id bo'yicha siklik) tanlaydi — har kuni boshqa mahsulot chiqadi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        base = ("SELECT * FROM products WHERE seller_id=? AND status='active' AND in_stock=1 ")
+        row = None
+        if last_product_id:
+            cursor.execute(base + "AND id>? ORDER BY id ASC LIMIT 1",
+                           (seller_id, last_product_id))
+            row = cursor.fetchone()
+        if row is None:   # sikl boshiga qaytamiz
+            cursor.execute(base + "ORDER BY id ASC LIMIT 1", (seller_id,))
+            row = cursor.fetchone()
+        return dict(row) if row else None
 
     # ===== TO'LOVLAR (monetizatsiya #18) =====
     def create_payment(self, user_id, purpose, amount, ref_id=None, provider=None):

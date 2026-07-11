@@ -175,9 +175,9 @@ def build_system_prompt(lang: str, role: str, user_name: str = "") -> str:
 # ============================================================
 # TOOL SXEMALARI (OpenAI/DeepSeek function-calling format)
 # ============================================================
-def _tools_for(role: str) -> list:
+def _tools_for(role: str, channel: str = 'bot') -> list:
     if role == 'buyer':
-        return [{
+        buyer_tools = [{
             "type": "function",
             "function": {
                 "name": "search_products",
@@ -203,7 +203,50 @@ def _tools_for(role: str) -> list:
                 "description": "Mavjud mahsulot kategoriyalari ro'yxatini qaytaradi.",
                 "parameters": {"type": "object", "properties": {}},
             },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "my_orders",
+                "description": "Foydalanuvchining O'Z buyurtmalari va holatlari ('buyurtmam qayerda?', "
+                               "'nima buyurtma qilganman?' kabi savollarda chaqir).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "status": {"type": "string",
+                                   "enum": ["pending", "confirmed", "delivered", "cancelled", "all"],
+                                   "description": "Filtr (ixtiyoriy, default 'all')."},
+                    },
+                },
+            },
+        }, {
+            "type": "function",
+            "function": {
+                "name": "my_debts",
+                "description": "Foydalanuvchining ochiq qarzlari (nasiya/bo'lib to'lash) — "
+                               "'qarzim qancha?' kabi savollarda chaqir.",
+                "parameters": {"type": "object", "properties": {}},
+            },
         }]
+        if channel == 'app':
+            buyer_tools.append({
+                "type": "function",
+                "function": {
+                    "name": "add_to_cart",
+                    "description": "Mahsulotni foydalanuvchi SAVATiga soladi. Foydalanuvchi aniq "
+                                   "«savatga sol / olaman / buyurtma qil» deganda chaqir. Avval "
+                                   "search_products bilan to'g'ri product_id ni aniqla. Bir nechta "
+                                   "variant bo'lsa — avval foydalanuvchidan qaysi birini so'ra.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "product_id": {"type": "integer", "description": "Mahsulot id si."},
+                            "quantity": {"type": "integer", "description": "Soni (default 1)."},
+                        },
+                        "required": ["product_id"],
+                    },
+                },
+            })
+        return buyer_tools
 
     if role == 'seller':
         return [{
@@ -477,6 +520,71 @@ def _exec_tool(db, actor, name, args):
             cats = db.get_categories()
             names = [_category_name(c.get('name'), lang) for c in cats if c.get('name')]
             return {"categories": names}, None
+
+        if name == "my_orders":
+            buyer_id = actor.get('buyer_id')
+            if not buyer_id:
+                return {"status": "error", "reason": "foydalanuvchi aniqlanmadi"}, None
+            rows = db.get_orders_by_buyer(buyer_id) or []
+            want = (args.get("status") or "all")
+            out = []
+            for o in rows[:15]:
+                o = dict(o)
+                if want != "all" and o.get('status') != want:
+                    continue
+                out.append({
+                    "order_id": o.get('id'), "product": o.get('product_name'),
+                    "qty": o.get('quantity'), "total_som": _fmt(o.get('total_price')),
+                    "status": o.get('status'), "shop": o.get('shop_name') or o.get('seller_name') or '',
+                    "created": str(o.get('created_at') or '')[:16],
+                })
+            return {"orders": out, "count": len(out),
+                    "note": "status: pending=tasdiq kutmoqda, confirmed=tayyorlanmoqda, "
+                            "delivered=yetkazilgan, cancelled=bekor"}, None
+
+        if name == "my_debts":
+            buyer_id = actor.get('buyer_id')
+            if not buyer_id:
+                return {"status": "error", "reason": "foydalanuvchi aniqlanmadi"}, None
+            rows = db.get_buyer_open_debts(buyer_id) or []
+            debts = [{"shop": d.get('shop_name') or d.get('seller_name') or '',
+                      "due_som": _fmt(d.get('total_due'))} for d in (dict(r) for r in rows)]
+            return {"debts": debts, "count": len(debts)}, None
+
+        if name == "add_to_cart":
+            # Savat CLIENT tomonида (App localStorage) — server faqat mahsulotni tekshirib,
+            # frontend bajaradigan action qaytaradi. Bot kanalida bu tool berilmaydi.
+            pid = args.get("product_id")
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                return {"status": "error", "reason": "product_id noto'g'ri"}, None
+            p = db.get_product_by_id(pid)
+            if not p or p.get('status') != 'active' or not p.get('in_stock'):
+                return {"status": "error", "reason": "mahsulot topilmadi yoki sotuvda emas"}, None
+            p = dict(p)
+            qty = args.get("quantity")
+            try:
+                qty = max(1, min(50, int(qty)))
+            except (TypeError, ValueError):
+                qty = 1
+            if actor.get('buyer_id') and p.get('seller_id') == actor.get('buyer_id'):
+                return {"status": "error", "reason": "o'z mahsulotini sotib olib bo'lmaydi"}, None
+            if p.get('sale_mode') == 'optom':
+                return {"status": "error",
+                        "reason": "bu OPTOM mahsulot — savatga emas, mahsulot sahifasidan "
+                                  "pachka/rang tanlab buyurtma qilinadi. Foydalanuvchiga "
+                                  "mahsulot kartasini ochishni ayting."}, None
+            ui = {"type": "cart_add", "product": {
+                "id": p.get('id'), "name": p.get('name'), "price": p.get('price'),
+                "image_url": p.get('image_url'), "seller_id": p.get('seller_id'),
+                "shop_name": p.get('shop_name'),
+                "delivery_available": p.get('delivery_available'),
+                "sale_mode": p.get('sale_mode'),
+            }, "qty": qty}
+            return {"status": "added",
+                    "note": f"«{p.get('name')}» ({qty} dona) savatga solindi. Foydalanuvchiga "
+                            "savat tugmasi orqali rasmiylashtirishni ayting."}, ui
 
         # ---------- SOTUVCHI ----------
         if name == "compose_listing":
@@ -2025,6 +2133,228 @@ async def suggest_cancel_reasons(*, party, product_name="", status="", lang="uz"
 
 
 # ============================================================
+# UMUMIY JSON CHAQIRUV (yangi AI funksiyalar uchun bitta yo'l)
+# ============================================================
+async def _json_call(system, user_msg, *, max_tokens=600, temperature=0.4, tag="ai"):
+    """JSON-mode chat chaqiruvi. dict qaytaradi yoki None (o'chiq/xato — fail-soft)."""
+    if not is_enabled():
+        return None
+    headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": MODEL,
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user_msg}],
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await client.post(f"{BASE_URL}/chat/completions",
+                                     json=payload, headers=headers)
+            if resp.status_code >= 400:
+                log.warning(f"{tag} API xatosi {resp.status_code}")
+                return None
+            content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            if not content:
+                return None
+            m = re.search(r"\{.*\}", content, re.DOTALL)
+            return json.loads(m.group(0) if m else content)
+    except Exception as e:
+        log.warning(f"{tag} xato: {e}")
+        return None
+
+
+# ============================================================
+# AI DIREKTOR — sotuvchiga aqlli hisobot + 1-tap amallar
+# ============================================================
+_DIRECTOR_SYSTEM = {
+    'uz': ("Siz tajribali savdo-direktorisiz. Quyida sotuvchining REAL do'kon ma'lumotlari "
+           "(JSON). Ular asosida 3-6 ta ANIQ, bajariladigan tavsiya bering. Har tavsiyada "
+           "mumkin bo'lsa action qo'ying:\n"
+           "- type='price' — narxni o'zgartirish (value=yangi narx, product_id shart; "
+           "qotib qolgan mahsulotga 5-15% chegirma tavsiya qiling)\n"
+           "- type='ad' — mahsulotni kanalga reklama qilish (product_id shart)\n"
+           "- type='restock' — zaxira tugayapti, to'ldirish (product_id shart)\n"
+           "- action=null — umumiy maslahat\n"
+           "JAVOB FAQAT JSON: {\"summary\": \"1-2 jumla umumiy xulosa\", \"recs\": "
+           "[{\"icon\": \"emoji\", \"text\": \"tavsiya (qisqa, aniq, sonlar bilan)\", "
+           "\"action\": {\"type\": \"price|ad|restock\", \"product_id\": N, \"value\": N} | null}]}\n"
+           "O'zbek tilida, samimiy-professional ohangda. Ma'lumotda yo'q narsani O'YLAB TOPMANG."),
+    'ru': ("Вы опытный коммерческий директор. Ниже РЕАЛЬНЫЕ данные магазина продавца (JSON). "
+           "Дайте 3-6 КОНКРЕТНЫХ выполнимых рекомендаций. Где возможно — добавьте action:\n"
+           "- type='price' — изменить цену (value=новая цена, product_id обязателен; "
+           "залежавшимся товарам рекомендуйте скидку 5-15%)\n"
+           "- type='ad' — рекламировать товар в канале (product_id обязателен)\n"
+           "- type='restock' — запас кончается, пополнить (product_id обязателен)\n"
+           "- action=null — общий совет\n"
+           "ОТВЕТ ТОЛЬКО JSON: {\"summary\": \"общий вывод 1-2 предложения\", \"recs\": "
+           "[{\"icon\": \"emoji\", \"text\": \"рекомендация (кратко, с цифрами)\", "
+           "\"action\": {\"type\": \"price|ad|restock\", \"product_id\": N, \"value\": N} | null}]}\n"
+           "На русском, дружелюбно-профессионально. НЕ ВЫДУМЫВАЙТЕ того, чего нет в данных."),
+}
+
+
+async def director_report(*, facts, lang="uz") -> dict:
+    """Do'kon faktlari (dict) → AI direktor hisoboti.
+    Qaytaradi {"summary": str, "recs": [{"icon","text","action"|None}]} yoki None."""
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    parsed = await _json_call(_DIRECTOR_SYSTEM[lng],
+                              json.dumps(facts, ensure_ascii=False, default=str),
+                              max_tokens=900, temperature=0.4, tag="AI direktor")
+    if not parsed:
+        return None
+    recs = []
+    for r in (parsed.get("recs") or [])[:6]:
+        if not isinstance(r, dict) or not str(r.get("text") or "").strip():
+            continue
+        act = r.get("action") if isinstance(r.get("action"), dict) else None
+        if act:
+            atype = str(act.get("type") or "")
+            pid = act.get("product_id")
+            if atype not in ("price", "ad", "restock") or not pid:
+                act = None
+            else:
+                act = {"type": atype, "product_id": int(pid),
+                       "value": _num(act.get("value"))}
+        recs.append({"icon": str(r.get("icon") or "💡")[:4],
+                     "text": str(r.get("text")).strip()[:300], "action": act})
+    if not recs:
+        return None
+    return {"summary": str(parsed.get("summary") or "").strip()[:400], "recs": recs}
+
+
+# ============================================================
+# AI SMM — kunlik mavzuli kanal posti matni
+# ============================================================
+_SMM_SYSTEM = {
+    'uz': ("Siz Telegram-kanal uchun SMM-mozgsiz. Mahsulot ma'lumotidan QISQA (3-6 qator), "
+           "jonli, emoji'li sotuv posti yozing. Mavzu ohangi: {THEME}. Har kuni takrorlanmas, "
+           "tabiiy yozing — reklama shabloniga o'xshamasin. Narxni albatta ko'rsating. "
+           "Oxirida harakatga chaqiriq («Buyurtma uchun tugmani bosing» kabi). "
+           "Hashtag YOZMANG. JAVOB FAQAT JSON: {\"caption\": \"post matni\"}"),
+    'ru': ("Вы SMM-мозг Telegram-канала. Напишите КОРОТКИЙ (3-6 строк) живой пост о товаре "
+           "с эмодзи. Тон темы: {THEME}. Пишите естественно, без рекламных штампов. "
+           "Обязательно укажите цену. В конце призыв к действию («Жмите кнопку для заказа»). "
+           "БЕЗ хэштегов. ОТВЕТ ТОЛЬКО JSON: {\"caption\": \"текст поста\"}"),
+}
+
+_SMM_THEMES = {
+    0: ("yangi hafta g'ayrati — dushanba", "энергия новой недели — понедельник"),
+    1: ("ish haftasi qizg'in — foydali taklif", "рабочая неделя в разгаре — полезное предложение"),
+    2: ("hafta o'rtasi — kichik quvonch", "середина недели — маленькая радость"),
+    3: ("juma yaqin — o'zingizni siylang", "скоро пятница — побалуйте себя"),
+    4: ("juma kayfiyati — dam olishga tayyorlaning", "пятничное настроение — готовьтесь к выходным"),
+    5: ("shanba xaridi — oila uchun", "субботний шопинг — для семьи"),
+    6: ("yakshanba — yangi haftaga hozirlik", "воскресенье — подготовка к новой неделе"),
+}
+
+
+async def generate_smm_caption(*, name, price_text, category="", description="",
+                               shop_name="", weekday=0, lang="uz") -> str:
+    """Kunlik SMM post matni. Qaytaradi caption (str) yoki None (chaqiruvchi zaxira
+    sifatida generate_ad_caption'ga qaytadi)."""
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    theme = _SMM_THEMES.get(int(weekday) % 7, _SMM_THEMES[0])[0 if lng == 'uz' else 1]
+    system = _SMM_SYSTEM[lng].replace("{THEME}", theme)
+    parts = [f"Mahsulot: {name}", f"Narx: {price_text}"]
+    if category:
+        parts.append(f"Kategoriya: {category}")
+    if description:
+        parts.append(f"Tavsif: {str(description)[:400]}")
+    if shop_name:
+        parts.append(f"Do'kon: {shop_name}")
+    parsed = await _json_call(system, "\n".join(parts),
+                              max_tokens=500, temperature=0.9, tag="SMM post")
+    cap = (parsed or {}).get("caption")
+    cap = _strip_hashtags(str(cap).strip()) if cap else None
+    return cap or None
+
+
+# ============================================================
+# ISTAK MOSLIGI (deal hunter) — yangi mahsulot istaklarga mos keladimi
+# ============================================================
+_WISH_SYSTEM = (
+    "You match a NEW marketplace product against buyer wish requests (Uzbek/Russian text). "
+    "A wish matches ONLY if the product genuinely satisfies what the buyer asked for "
+    "(same kind of item; brand/model if specified must match). Price is already filtered. "
+    "Respond ONLY JSON: {\"match_ids\": [wish_id, ...]} — empty list if none match."
+)
+
+
+async def wish_match(*, product, wishes) -> list:
+    """product: {'name','category','description','price'}; wishes: [{'id','query'}].
+    Qaytaradi mos wish id'lar ro'yxati. AI o'chiq/xato bo'lsa None (chaqiruvchi
+    keyword-zaxiraga o'tadi)."""
+    if not wishes:
+        return []
+    lines = [f"PRODUCT: name={product.get('name')} | category={product.get('category') or '-'} "
+             f"| price={product.get('price')} | desc={(product.get('description') or '')[:200]}",
+             "WISHES:"]
+    for w in wishes[:30]:
+        lines.append(f"- id={w['id']}: {str(w['query'])[:100]}")
+    parsed = await _json_call(_WISH_SYSTEM, "\n".join(lines),
+                              max_tokens=200, temperature=0.0, tag="Istak moslik")
+    if parsed is None:
+        return None
+    ids = parsed.get("match_ids") or []
+    valid = {w['id'] for w in wishes}
+    out = []
+    for i in ids:
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if i in valid:
+            out.append(i)
+    return out
+
+
+# ============================================================
+# AI SUPPORT BIRINCHI-LINIYA — murojaatga darhol javob (yoki eskalatsiya)
+# ============================================================
+_SUPPORT_FL_SYSTEM = {
+    'uz': ("Siz TezBozor marketplace'ining birinchi-liniya support AI'sisiz. Quyida "
+           "foydalanuvchining murojaati va uning REAL ma'lumotlari (buyurtmalari, qarzlari). "
+           "Agar savolga shu ma'lumotlar asosida ANIQ va foydali javob bera olsangiz — "
+           "javob yozing (qisqa, samimiy, o'zbekcha). Agar savol pul qaytarish, nizo, "
+           "shikoyat, texnik nosozlik yoki ma'lumotlarda javobi YO'Q mavzu bo'lsa — javob "
+           "BERMANG (odam-admin hal qiladi). Hech narsani o'ylab topmang.\n"
+           "JAVOB FAQAT JSON: {\"can_answer\": true/false, \"answer\": \"javob matni yoki bo'sh\"}"),
+    'ru': ("Вы AI первой линии поддержки маркетплейса TezBozor. Ниже обращение пользователя "
+           "и его РЕАЛЬНЫЕ данные (заказы, долги). Если можете дать ТОЧНЫЙ полезный ответ "
+           "на основе этих данных — напишите его (кратко, дружелюбно, по-русски). Если вопрос "
+           "про возврат денег, спор, жалобу, тех.сбой или ответа НЕТ в данных — НЕ отвечайте "
+           "(решит человек-админ). Ничего не выдумывайте.\n"
+           "ОТВЕТ ТОЛЬКО JSON: {\"can_answer\": true/false, \"answer\": \"текст или пусто\"}"),
+}
+
+
+async def support_first_line(*, reason_label="", messages=None, user_facts=None,
+                             lang="uz") -> dict:
+    """Murojaatga AI birinchi javobi. Qaytaradi {"can_answer": bool, "answer": str}
+    yoki None (AI o'chiq/xato — admin oqimi o'zgarmaydi)."""
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    parts = []
+    if reason_label:
+        parts.append(f"Murojaat sababi: {reason_label}")
+    for m in (messages or [])[-6:]:
+        who = "Foydalanuvchi" if m.get("sender_role") == "user" else "Admin"
+        parts.append(f"{who}: {str(m.get('text') or '')[:300]}")
+    if user_facts:
+        parts.append("\nFOYDALANUVCHI MA'LUMOTLARI (JSON):")
+        parts.append(json.dumps(user_facts, ensure_ascii=False, default=str))
+    parsed = await _json_call(_SUPPORT_FL_SYSTEM[lng], "\n".join(parts),
+                              max_tokens=400, temperature=0.3, tag="Support AI")
+    if not parsed:
+        return None
+    ans = str(parsed.get("answer") or "").strip()
+    can = bool(parsed.get("can_answer")) and len(ans) >= 5
+    return {"can_answer": can, "answer": ans[:1500]}
+
+
+# ============================================================
 # SUHBAT XOTIRASI
 # ============================================================
 def reset_history(user_data: dict) -> None:
@@ -2043,7 +2373,8 @@ def _get_history(user_data: dict) -> list:
 # ASOSIY: AGENT CHAQIRUVI (tool-call sikli)
 # ============================================================
 async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
-              *, seller_id=None, user_name: str = "", shop_filter=None, shop_name="") -> dict:
+              *, seller_id=None, user_name: str = "", shop_filter=None, shop_name="",
+              buyer_id=None, channel: str = 'bot') -> dict:
     """Foydalanuvchi xabariga agent javobini qaytaradi.
 
     shop_filter — do'kon (sotuvchi) id si: berilsa, xaridor qidiruvi FAQAT shu
@@ -2056,7 +2387,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
         return {"text": _msg_disabled(lang), "products": None, "draft": None}
 
     role = role if role in ('admin', 'seller', 'buyer') else 'buyer'
-    actor = {'lang': lang, 'role': role, 'seller_id': seller_id, 'shop_filter': shop_filter}
+    actor = {'lang': lang, 'role': role, 'seller_id': seller_id, 'shop_filter': shop_filter,
+             'buyer_id': buyer_id}
 
     history = _get_history(user_data)
 
@@ -2078,12 +2410,13 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
     messages.extend(history)
     messages.append({"role": "user", "content": user_text})
 
-    tools = _tools_for(role)
+    tools = _tools_for(role, channel)
     ui_products = None
     ui_draft = None
     ui_reactivated = None
     ui_order_actions = []
     ui_review_replies = []
+    ui_cart_adds = []   # App: agent savatga solgan mahsulotlar (client bajaradi)
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
     try:
@@ -2106,7 +2439,7 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                 if err is not None:
                     return {"text": err, "products": ui_products, "draft": ui_draft,
                             "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
-                            "review_replies": ui_review_replies}
+                            "review_replies": ui_review_replies, "cart_adds": ui_cart_adds}
 
                 data = resp.json()
                 msg = data["choices"][0]["message"]
@@ -2123,7 +2456,7 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                         del history[:len(history) - MAX_HISTORY]
                     return {"text": answer, "products": ui_products, "draft": ui_draft,
                             "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
-                            "review_replies": ui_review_replies}
+                            "review_replies": ui_review_replies, "cart_adds": ui_cart_adds}
 
                 # Tool'larni bajaramiz
                 messages.append({
@@ -2149,6 +2482,8 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                         ui_order_actions.append(ui)
                     elif ui and ui.get("type") == "review_reply":
                         ui_review_replies.append(ui)
+                    elif ui and ui.get("type") == "cart_add":
+                        ui_cart_adds.append(ui)
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.get("id"),
@@ -2160,7 +2495,7 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
             fallback = _msg_steps(lang)
             return {"text": fallback, "products": ui_products, "draft": ui_draft,
                     "reactivated_id": ui_reactivated, "order_actions": ui_order_actions,
-                    "review_replies": ui_review_replies}
+                    "review_replies": ui_review_replies, "cart_adds": ui_cart_adds}
 
     except httpx.TimeoutException:
         log.warning("DeepSeek timeout")

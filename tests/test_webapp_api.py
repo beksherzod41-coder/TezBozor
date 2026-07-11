@@ -1647,6 +1647,171 @@ def test_perm_publish_ad_toggle_key(client):
     assert r.json()["value"] is True
 
 
+# ===== 🎯 ISTAKLAR (deal hunter) =====
+def test_wishes_crud(client):
+    r = client.post("/api/my/wishes", headers=hdr(5001),
+                    json={"text": "iphone 13", "max_price": 5000000})
+    assert r.status_code == 200
+    wid = r.json()["id"]
+    items = client.get("/api/my/wishes", headers=hdr(5001)).json()["items"]
+    assert any(w["id"] == wid for w in items)
+    # juda qisqa matn -> 400
+    assert client.post("/api/my/wishes", headers=hdr(5001), json={"text": "ab"}).status_code == 400
+    # boshqa odam o'chira olmaydi -> 404
+    assert client.delete(f"/api/my/wishes/{wid}", headers=hdr(5003)).status_code == 404
+    assert client.delete(f"/api/my/wishes/{wid}", headers=hdr(5001)).status_code == 200
+    assert not any(w["id"] == wid
+                   for w in client.get("/api/my/wishes", headers=hdr(5001)).json()["items"])
+
+
+def test_wish_limit_five(client):
+    db = webapp_server.db
+    uid = db.create_user(telegram_id=6101, phone_number="998900006101", name="W5", role="buyer")
+    for i in range(5):
+        assert client.post("/api/my/wishes", headers=hdr(6101),
+                           json={"text": f"istak {i} narsa"}).status_code == 200
+    assert client.post("/api/my/wishes", headers=hdr(6101),
+                       json={"text": "oltinchi istak"}).status_code == 409
+
+
+def test_wish_hit_once(client):
+    """record_wish_hit — bitta mahsulot haqida faqat BIR marta True."""
+    db = webapp_server.db
+    uid = db.get_user_by_telegram_id(5001)["id"]
+    wid = db.create_wish(uid, "krossovka", None)
+    assert db.record_wish_hit(wid, client.pid) is True
+    assert db.record_wish_hit(wid, client.pid) is False
+
+
+# ===== 🧠 AI DIREKTOR =====
+def test_ai_director_disabled_503(client, monkeypatch):
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
+    assert client.get("/api/seller/ai-director", headers=hdr(5002)).status_code == 503
+
+
+def test_ai_director_report_and_apply(client, monkeypatch):
+    db = webapp_server.db
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    pid = db.create_product(seller_id=owner_id, name="AIDir sinov", price=1000, status="active")
+    db.update_product_fields(pid, in_stock=1)
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: True)
+
+    async def fake_report(*, facts, lang="uz"):
+        assert facts["shop_stats"]["active_products"] >= 1
+        return {"summary": "Do'kon yaxshi ketmoqda", "recs": [
+            {"icon": "💸", "text": "Narxni tushiring",
+             "action": {"type": "price", "product_id": pid, "value": 800}},
+            {"icon": "📢", "text": "Reklama joylang",
+             "action": {"type": "ad", "product_id": pid, "value": None}},
+        ]}
+    monkeypatch.setattr(webapp_server.ai_assistant, "director_report", fake_report)
+    d = client.get("/api/seller/ai-director", headers=hdr(5002)).json()
+    assert d["available"] is True and len(d["recs"]) == 2
+    # 1-tap: narx tushirish (old_price avvalgi narxga yoziladi — chegirma ko'rinadi)
+    a = client.post("/api/seller/ai-director/apply", headers=hdr(5002),
+                    json={"type": "price", "product_id": pid, "value": 800})
+    assert a.status_code == 200
+    p = db.get_product_by_id(pid)
+    assert float(p["price"]) == 800 and float(p["old_price"]) == 1000
+    # himoya: 50%dan ko'p tushirish -> 400
+    assert client.post("/api/seller/ai-director/apply", headers=hdr(5002),
+                       json={"type": "price", "product_id": pid, "value": 100}).status_code == 400
+    # 1-tap: reklama -> pending scheduled post
+    ad = client.post("/api/seller/ai-director/apply", headers=hdr(5002),
+                     json={"type": "ad", "product_id": pid, "value": None})
+    assert ad.status_code == 200
+    assert any(sp["product_id"] == pid for sp in db.get_pending_scheduled_posts())
+    # begona mahsulot -> 403
+    assert client.post("/api/seller/ai-director/apply", headers=hdr(5001),
+                       json={"type": "ad", "product_id": pid}).status_code == 403
+
+
+# ===== 🤖 AI SMM =====
+def test_smm_get_set(client):
+    s = client.get("/api/seller/smm", headers=hdr(5002)).json()
+    assert not s["is_active"]
+    r = client.post("/api/seller/smm", headers=hdr(5002), json={"is_active": True, "hour": 19})
+    assert r.status_code == 200
+    s2 = client.get("/api/seller/smm", headers=hdr(5002)).json()
+    assert s2["is_active"] == 1 and s2["hour"] == 19
+    assert client.post("/api/seller/smm", headers=hdr(5002), json={"hour": 99}).status_code == 400
+    # rotatsiya: keyingi mahsulot sikl bo'ylab tanlanadi
+    db = webapp_server.db
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    nxt = db.get_next_smm_product(owner_id, None)
+    assert nxt and nxt["seller_id"] == owner_id
+    client.post("/api/seller/smm", headers=hdr(5002), json={"is_active": False})  # tozalash
+
+
+# ===== 🤖 AI SUPPORT birinchi-liniya =====
+def test_support_ai_first_line(client, monkeypatch):
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: True)
+
+    async def fake_fl(*, reason_label="", messages=None, user_facts=None, lang="uz"):
+        assert "orders" in (user_facts or {})
+        return {"can_answer": True, "answer": "Buyurtmangiz tayyorlanmoqda, xavotir olmang."}
+    monkeypatch.setattr(webapp_server.ai_assistant, "support_first_line", fake_fl)
+    r = client.post("/api/contact-admin", headers=hdr(5001),
+                    json={"reason": "order", "text": "Buyurtmam qayerda qoldi"})
+    assert r.status_code == 200
+    tid = r.json()["thread_id"]
+    msgs = webapp_server.db.get_support_messages(tid)
+    assert any(m["sender_role"] == "ai" and "tayyorlanmoqda" in m["text"] for m in msgs)
+
+
+def test_support_ai_silent_when_cannot(client, monkeypatch):
+    """AI javob berolmasa — suhbatga AI xabari QO'SHILMAYDI (admin ko'radi xolos)."""
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: True)
+
+    async def fake_fl(**kw):
+        return {"can_answer": False, "answer": ""}
+    monkeypatch.setattr(webapp_server.ai_assistant, "support_first_line", fake_fl)
+    r = client.post("/api/contact-admin", headers=hdr(5001),
+                    json={"reason": "payment", "text": "Pulim qaytmadi nima qilay"})
+    tid = r.json()["thread_id"]
+    assert not any(m["sender_role"] == "ai"
+                   for m in webapp_server.db.get_support_messages(tid))
+
+
+# ===== 🛒 AI AGENT (xaridor tool'lari) =====
+def test_agent_add_to_cart_tool(client):
+    import ai_assistant as aia
+    db = webapp_server.db
+    buyer_id = db.get_user_by_telegram_id(5001)["id"]
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    actor = {"lang": "uz", "role": "buyer", "buyer_id": buyer_id, "shop_filter": None}
+    res, ui = aia._exec_tool(db, actor, "add_to_cart",
+                             {"product_id": client.pid, "quantity": 2})
+    assert res["status"] == "added" and ui["type"] == "cart_add" and ui["qty"] == 2
+    assert ui["product"]["id"] == client.pid
+    # o'z mahsulotini o'zi ololmaydi
+    actor2 = {"lang": "uz", "role": "buyer", "buyer_id": owner_id}
+    res2, ui2 = aia._exec_tool(db, actor2, "add_to_cart", {"product_id": client.pid})
+    assert res2["status"] == "error" and ui2 is None
+
+
+def test_agent_buyer_tools_gating(client):
+    """add_to_cart faqat App kanalида; my_orders/my_debts ikkalasida ham."""
+    import ai_assistant as aia
+    app_names = [t["function"]["name"] for t in aia._tools_for("buyer", "app")]
+    bot_names = [t["function"]["name"] for t in aia._tools_for("buyer", "bot")]
+    assert "add_to_cart" in app_names and "add_to_cart" not in bot_names
+    assert "my_orders" in app_names and "my_orders" in bot_names
+    assert "my_debts" in bot_names
+
+
+def test_agent_my_orders_tool(client):
+    import ai_assistant as aia
+    db = webapp_server.db
+    buyer_id = db.get_user_by_telegram_id(5001)["id"]
+    actor = {"lang": "uz", "role": "buyer", "buyer_id": buyer_id}
+    res, ui = aia._exec_tool(db, actor, "my_orders", {})
+    assert "orders" in res and ui is None
+    # buyer_id yo'q -> error (bot eski chaqiruvлар buzilmasin)
+    res2, _ = aia._exec_tool(db, {"lang": "uz", "role": "buyer"}, "my_orders", {})
+    assert res2["status"] == "error"
+
+
 def test_cancel_respond_deny_disputes(client):
     """Sotuvchi so'ragan -> xaridor rad -> nizo (disputed)."""
     oid = _confirmed_order(client)

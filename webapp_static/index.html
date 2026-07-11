@@ -588,6 +588,21 @@
     <div id="joincodeBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="aidirview">
+    <div class="cohead"><span id="ttl_aidirview">🧠 AI direktor</span><span class="x" id="aidirClose">✕</span></div>
+    <div id="aidirBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="smmview">
+    <div class="cohead"><span id="ttl_smmview">🤖 AI SMM</span><span class="x" id="smmClose">✕</span></div>
+    <div id="smmBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
+  <div class="checkout" id="wishview">
+    <div class="cohead"><span id="ttl_wishview">🎯 Istaklarim</span><span class="x" id="wishClose">✕</span></div>
+    <div id="wishBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="contactform">
     <div class="cohead"><span id="ttl_contactform">📞 Admin bilan bog'lanish</span><span class="x" id="caClose">✕</span></div>
     <div id="contactBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -1501,6 +1516,27 @@ const I18N = {
   sp_src_camera_hint:{uz:"Kamera ochilmadi — Telegram ilovasini yangilang yoki rasm/videoni Galereyadan tanlang.",ru:"Не удалось открыть камеру — обновите Telegram или выберите фото/видео из Галереи."},
   sp_video_format_bad:{uz:"Bu video formati qabul qilinmadi. Galereyadan tanlab ko'ring.",ru:"Этот формат видео не принят. Попробуйте выбрать из Галереи."},
   sp_not_image:{uz:"Faqat rasm fayli tanlang.",ru:"Выберите только изображение."}, sp_not_video:{uz:"Faqat video fayli tanlang.",ru:"Выберите только видеофайл."},
+  sp_ov_aidir:{uz:"🧠 AI direktor",ru:"🧠 AI директор"}, sp_ov_smm:{uz:"🤖 AI SMM",ru:"🤖 AI SMM"},
+  aidir_loading:{uz:"AI do'koningizni tahlil qilmoqda...",ru:"AI анализирует ваш магазин..."},
+  aidir_empty:{uz:"Tahlil uchun hali ma'lumot kam — mahsulot qo'shing va savdo qiling.",ru:"Пока мало данных для анализа — добавьте товары и продавайте."},
+  aidir_apply_price:{uz:"Narxni {p} qilish",ru:"Установить цену {p}"},
+  aidir_apply_ad:{uz:"Kanalga reklama joylash",ru:"Разместить рекламу в канале"},
+  aidir_apply_restock:{uz:"Zaxirani to'ldirish",ru:"Пополнить запас"},
+  aidir_applied:{uz:"Bajarildi",ru:"Готово"},
+  aidir_note:{uz:"Tavsiyalar do'koningizning real ma'lumotlari asosida AI tomonidan tuzildi. Har dushanba yangi hisobot tayyor bo'ladi.",ru:"Рекомендации составлены AI на основе реальных данных магазина. Каждый понедельник — новый отчёт."},
+  smm_hint:{uz:"AI har kuni tanlangan soatda do'koningiz mahsulotlaridan birini yangi mavzuli matn bilan kanal/guruhlaringizga AVTOMATIK joylaydi. Mahsulotlar navbat bilan aylanadi — kanal har kuni jonli bo'ladi.",ru:"AI каждый день в выбранный час АВТОМАТИЧЕСКИ публикует один из товаров с новым тематическим текстом в ваши каналы/группы. Товары чередуются — канал живёт каждый день."},
+  smm_no_channel:{uz:"⚠️ Ulangan kanal/guruh yo'q — post markaziy kanalga chiqadi. O'z kanalingizni ulash: Do'kon → Kanal.",ru:"⚠️ Нет подключённого канала — пост выйдет в центральный канал. Подключить свой: Магазин → Канал."},
+  smm_status:{uz:"Holat",ru:"Статус"}, smm_turn_on:{uz:"▶️ Yoqish",ru:"▶️ Включить"}, smm_turn_off:{uz:"⏸ O'chirish (hozir YOQIQ)",ru:"⏸ Выключить (сейчас ВКЛ)"},
+  smm_hour:{uz:"Post soati (Toshkent)",ru:"Час поста (Ташкент)"}, smm_last:{uz:"Oxirgi post",ru:"Последний пост"},
+  wish_title:{uz:"Istaklarim",ru:"Мои желания"},
+  wish_hint:{uz:"Nima qidirayotganingizni yozing — mos mahsulot sotuvga chiqishi bilan sizga xabar beramiz! (ko'pi bilan 5 ta istak)",ru:"Напишите, что ищете — как только подходящий товар появится, мы вам сообщим! (до 5 желаний)"},
+  wish_what:{uz:"Nima kerak?",ru:"Что нужно?"}, wish_ph:{uz:"Masalan: iPhone 13, qishki kurtka 48 razmer",ru:"Например: iPhone 13, зимняя куртка 48 размер"},
+  wish_budget:{uz:"Budjet (ixtiyoriy)",ru:"Бюджет (необязательно)"}, wish_budget_ph:{uz:"Maksimal narx, so'm",ru:"Максимальная цена, сум"},
+  wish_add:{uz:"Istak qo'shish",ru:"Добавить желание"}, wish_added:{uz:"🎯 Istak saqlandi!",ru:"🎯 Желание сохранено!"},
+  wish_empty:{uz:"Hali istak yo'q",ru:"Пока нет желаний"},
+  wish_limit:{uz:"Ko'pi bilan 5 ta faol istak. Avval birini o'chiring.",ru:"Максимум 5 активных желаний. Сначала удалите одно."},
+  wish_too_short:{uz:"Kamida 3 ta belgi yozing.",ru:"Введите минимум 3 символа."},
+  sup_ai_label:{uz:"AI yordamchi",ru:"AI-помощник"},
   sp_order_by:{uz:"Joylagan",ru:"Сотрудник"},
   reorder_btn:{uz:"🔄 Qayta buyurtma",ru:"🔄 Заказать снова"},
   pf_main:{uz:"Asosiy",ru:"Основное"}, pf_shop:{uz:"Do'kon",ru:"Магазин"}, pf_channels:{uz:"Ulangan kanallar",ru:"Подключённые каналы"},
@@ -3108,6 +3144,122 @@ async function submitJoinCode(){
 }
 document.getElementById('jcClose').onclick=()=>document.getElementById('joincodeview').classList.remove('open');
 
+// ---------- 🧠 AI DIREKTOR (sotuvchi aqlli hisoboti + 1-tap amallar) ----------
+async function openAIDirector(){
+  document.getElementById('aidirview').classList.add('open');
+  const b=document.getElementById('aidirBody');
+  b.innerHTML=`<div class="loading" style="padding:34px;text-align:center">🧠 ${L('aidir_loading')}</div>`;
+  try{
+    const d=await api('/api/seller/ai-director');
+    if(!d.available){ b.innerHTML=`<div class="empty"><span class="big">🧠</span>${L('aidir_empty')}</div>`; return; }
+    const recs=(d.recs||[]).map((r,i)=>{
+      let btn='';
+      if(r.action){
+        const a=r.action;
+        if(a.type==='price' && a.value) btn=`<button class="oact ok" data-aidir="${i}" style="width:100%;margin-top:8px">💸 ${L('aidir_apply_price').replace('{p}', money(a.value))}</button>`;
+        else if(a.type==='ad') btn=`<button class="oact ok" data-aidir="${i}" style="width:100%;margin-top:8px">📢 ${L('aidir_apply_ad')}</button>`;
+        else if(a.type==='restock') btn=`<button class="oact soft" data-aidir="${i}" style="width:100%;margin-top:8px">📦 ${L('aidir_apply_restock')}</button>`;
+      }
+      return `<div class="ocard"><div style="font-size:14px;line-height:1.5">${esc(r.icon||'💡')} ${esc(r.text||'')}</div>${btn}</div>`;
+    }).join('');
+    b.innerHTML=`<div class="cobody" style="overflow-y:auto">
+      ${d.summary?`<div class="cosec" style="background:var(--accent-soft)"><div style="font-size:13.5px;line-height:1.5;color:var(--accent);font-weight:600">${esc(d.summary)}</div></div>`:''}
+      <div class="olist" style="padding:0">${recs}</div>
+      <div style="font-size:11.5px;color:var(--hint);padding:8px 2px;line-height:1.4">${L('aidir_note')}</div></div>`;
+    b.querySelectorAll('[data-aidir]').forEach(btn=>btn.onclick=()=>aidirApply(d.recs[Number(btn.dataset.aidir)], btn));
+  }catch(e){
+    const m=(e.message==='ai_disabled')?L('bp_ai_disabled'):e.message;
+    b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(m)}</div>`;
+  }
+}
+async function aidirApply(rec, btn){
+  if(!rec||!rec.action) return;
+  const a=rec.action;
+  if(a.type==='restock'){
+    // Zaxira — mahsulot formasini ochamiz (son kiritish u yerda)
+    document.getElementById('aidirview').classList.remove('open');
+    try{ const prods=await api('/api/seller/products'); SELLER_PRODUCTS=prods;
+      const p=prods.find(x=>x.id===a.product_id); if(p) openProductForm(p); }catch(e){}
+    return;
+  }
+  btn.disabled=true; btn.textContent='...';
+  try{
+    await apiSend('/api/seller/ai-director/apply','POST',{type:a.type, product_id:a.product_id, value:a.value||null});
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    btn.textContent='✅ '+L('aidir_applied'); btn.classList.remove('ok'); btn.style.opacity=.7;
+  }catch(e){ btn.disabled=false; btn.textContent='⚠️ '+e.message; }
+}
+document.getElementById('aidirClose').onclick=()=>document.getElementById('aidirview').classList.remove('open');
+
+// ---------- 🤖 AI SMM (kunlik avtomatik kanal posti) ----------
+async function openSMM(){
+  document.getElementById('smmview').classList.add('open');
+  const b=document.getElementById('smmBody');
+  b.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const s=await api('/api/seller/smm');
+    const hours=[8,9,10,11,12,14,16,18,19,20];
+    const on=!!s.is_active;
+    b.innerHTML=`<div class="cobody" style="overflow-y:auto">
+      <div class="cosec"><div style="font-size:13px;line-height:1.55;color:var(--hint)">${L('smm_hint')}</div></div>
+      ${!s.channels?`<div class="cosec" style="border:1.5px solid #ffd9a0;background:#fff7ec"><div style="font-size:12.5px;color:#d98300">${L('smm_no_channel')}</div></div>`:''}
+      <div class="cosec"><div class="lbl">${L('smm_status')}</div>
+        <button class="oact ${on?'no':'ok'}" id="smmToggle" style="width:100%">${on?L('smm_turn_off'):L('smm_turn_on')}</button></div>
+      <div class="cosec"><div class="lbl">${L('smm_hour')}</div>
+        <div class="chips" id="smmHours" style="padding:0;flex-wrap:wrap">${hours.map(h=>`<div class="chip ${Number(s.hour)===h?'active':''}" data-smmh="${h}">${h}:00</div>`).join('')}</div></div>
+      ${s.last_posted_at?`<div style="font-size:12px;color:var(--hint);padding:0 2px">${L('smm_last')}: ${fmtDate(s.last_posted_at)}</div>`:''}
+    </div>`;
+    document.getElementById('smmToggle').onclick=async()=>{
+      try{ await apiSend('/api/seller/smm','POST',{is_active:!on}); try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){} openSMM(); }
+      catch(e){ tg.showAlert(L('sp_error')+e.message); }
+    };
+    b.querySelectorAll('[data-smmh]').forEach(c=>c.onclick=async()=>{
+      try{ await apiSend('/api/seller/smm','POST',{hour:Number(c.dataset.smmh)}); openSMM(); }
+      catch(e){ tg.showAlert(L('sp_error')+e.message); }
+    });
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('smmClose').onclick=()=>document.getElementById('smmview').classList.remove('open');
+
+// ---------- 🎯 ISTAKLARIM (deal hunter) ----------
+async function openWishes(){
+  document.getElementById('wishview').classList.add('open');
+  const b=document.getElementById('wishBody');
+  b.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
+  try{
+    const d=await api('/api/my/wishes');
+    const items=(d.items||[]).map(w=>`<div class="ocard" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div style="min-width:0"><div style="font-weight:600;font-size:14px">${esc(w.query)}</div>
+      ${w.max_price?`<div style="font-size:12px;color:var(--hint)">≤ ${money(w.max_price)}</div>`:''}</div>
+      <button class="oact no" data-wdel="${w.id}" style="width:auto;padding:7px 12px;background:#fdebef;color:var(--sale)">🗑</button></div>`).join('');
+    b.innerHTML=`<div class="cobody" style="overflow-y:auto">
+      <div class="cosec"><div style="font-size:13px;line-height:1.55;color:var(--hint)">${L('wish_hint')}</div></div>
+      <div class="cosec"><div class="lbl">${L('wish_what')}</div>
+        <input class="coaddr" id="wishText" style="min-height:auto" placeholder="${L('wish_ph')}" maxlength="120">
+        <div class="lbl" style="margin-top:10px">${L('wish_budget')}</div>
+        <input class="coaddr" id="wishPrice" type="text" inputmode="numeric" style="min-height:auto" placeholder="${L('wish_budget_ph')}">
+        <button class="oact ok" id="wishAdd" style="width:100%;margin-top:10px">➕ ${L('wish_add')}</button></div>
+      ${items?`<div class="olist" style="padding:0">${items}</div>`:`<div class="empty" style="padding:22px"><span class="big">🎯</span>${L('wish_empty')}</div>`}
+    </div>`;
+    document.getElementById('wishAdd').onclick=async()=>{
+      const txt=(document.getElementById('wishText').value||'').trim();
+      if(txt.length<3){ tg.showAlert(L('wish_too_short')); return; }
+      const mp=Number(String(document.getElementById('wishPrice').value||'').replace(/\D/g,''))||null;
+      try{
+        await apiSend('/api/my/wishes','POST',{text:txt, max_price:mp});
+        try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+        toast(L('wish_added')); openWishes();
+      }catch(e){ tg.showAlert(e.message==='wish_limit'?L('wish_limit'):(L('sp_error')+e.message)); }
+    };
+    b.querySelectorAll('[data-wdel]').forEach(x=>x.onclick=async()=>{
+      try{ const r=await fetch('/api/my/wishes/'+x.dataset.wdel,{method:'DELETE',headers:{Authorization:AUTH}});
+        if(!r.ok) throw new Error('HTTP '+r.status); openWishes(); }
+      catch(e){ tg.showAlert(L('sp_error')+e.message); }
+    });
+  }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
+}
+document.getElementById('wishClose').onclick=()=>document.getElementById('wishview').classList.remove('open');
+
 // ---------- 2-BOSQICH: staff_<kod> deeplink (App ichida do'konga qo'shilish) ----------
 // Bot web_app tugmasi start_param uzatmaydi → kodni ?staff= query'da beramiz.
 // startapp=staff_<kod> (Main Mini App) bilan kelsa — start_param'dan ham o'qiymiz.
@@ -3997,12 +4149,14 @@ async function loadProfile(){
         ${_modeButtonsHtml()}
         ${CHANNEL_URL?`<button class="oact ok full" id="officialChanBtn">${L('bp_official_channel')}</button>`:''}
         <button class="oact soft full" id="favBtn">${L('fav_title')}</button>
+        <button class="oact soft full" id="wishBtn">🎯 ${L('wish_title')}</button>
         <button class="oact soft full" id="myRevBtn">${L('bp_my_reviews')}</button>
         ${(!canManage())?`<button class="oact soft full" id="becomeSellerBtn">${L('become_seller')}</button>`:''}
         <button class="oact soft full" id="settingsBtn">${L('settings_btn')}</button>
       </div>`;
     document.getElementById('myRevBtn').onclick = openMyReviews;
     const fvb=document.getElementById('favBtn'); if(fvb) fvb.onclick=openFavorites;
+    const wsb=document.getElementById('wishBtn'); if(wsb) wsb.onclick=openWishes;
     const cb=document.getElementById('courierBtn'); if(cb) cb.onclick=openCourierOrders;
     // "Kod bilan qo'shilish" tugmasi OLIB TASHLANDI — xodim taklifi endi faqat LINK orqali
     // (t.me/bot?start=staff_<kod>); openJoinCode/joincodeview zaxira sifatida qoldi.
@@ -4677,8 +4831,11 @@ async function loadSupportThread(){
     const msgs=d.messages||[];
     const closedNote=closed?`<div class="chatempty" style="padding:12px;font-size:12.5px">🔒 ${L('support_closed')}</div>`:'';
     wrap.innerHTML=(msgs.length?msgs.map(m=>{
-      const mine=(m.sender_role==='admin')===SUP_ADMIN;
       const tm=fmtDate(m.created_at); const hm=tm.length>=5?tm.slice(-5):tm;
+      // 🤖 AI birinchi-liniya javobi — alohida belgi bilan (admin emas)
+      if(m.sender_role==='ai')
+        return `<div class="cbub them" style="border-left:3px solid var(--accent)"><div style="font-size:11px;font-weight:700;color:var(--accent);margin-bottom:3px">🤖 ${L('sup_ai_label')}</div>${esc(m.text||'')}<div class="tm">${hm}</div></div>`;
+      const mine=(m.sender_role==='admin')===SUP_ADMIN;
       return `<div class="cbub ${mine?'me':'them'}">${esc(m.text||'')}<div class="tm">${hm}</div></div>`;
     }).join(''):`<div class="chatempty">${L('no_msgs')}</div>`)+closedNote+
       (SUP_ADMIN&&!closed?`<div style="display:flex;gap:8px;margin:10px 8px">
@@ -4781,6 +4938,14 @@ async function aiSend(){
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail==='ai_disabled'?L('bp_ai_disabled'):(d.detail||('HTTP '+r.status))); }
     const res=await r.json();
     aiMsgs[idx]={role:'ai', text:res.text||'', products:res.products||null};
+    // 🤖 AGENT: AI savatga solgan mahsulotlarni CLIENT savatiga qo'shamiz (localStorage)
+    if(res.cart_adds && res.cart_adds.length){
+      res.cart_adds.forEach(ca=>{
+        const p=ca.product; if(!p||!p.id) return;
+        for(let i=0;i<Math.max(1,Number(ca.qty)||1);i++) cartAdd(p);
+      });
+      try{ updateCartFab(); }catch(e){}
+    }
   }catch(e){ aiMsgs[idx]={role:'ai', text:"⚠️ "+e.message}; }
   renderAI();
 }
@@ -4801,7 +4966,8 @@ function loadSeller(){
   const owner = !!(ME && ME.is_owner);
   const canStaff = !!(ME && ME.can_manage_staff);
   const myCard = !!(ME && ME.is_staff && ME.payment_mode==='staff');
-  const acts=[['sharelink','sp_ov_sharelink'],['dlvmin','sp_ov_dlvmin'],
+  const acts=[['aidir','sp_ov_aidir'],['smm','sp_ov_smm'],
+              ['sharelink','sp_ov_sharelink'],['dlvmin','sp_ov_dlvmin'],
               ['route','sp_ov_route'],['sched','sp_ov_sched'],
               ...(canStaff?[['staff','sp_ov_staff']]:[]),['chan','sp_ov_chan'],
               ['ai','sp_ov_ai'],...(myCard?[['mycard','sp_ov_mycard']]:[]),
@@ -4817,7 +4983,7 @@ function loadSeller(){
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission, sharelink:shareShopLink, dlvmin:openDeliveryMin};
+  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission, sharelink:shareShopLink, dlvmin:openDeliveryMin, aidir:openAIDirector, smm:openSMM};
   v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>{ if(typeof markSlotSeen==='function') markSlotSeen('sact:'+o.dataset.act); actMap[o.dataset.act](); });
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();

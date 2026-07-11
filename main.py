@@ -15444,6 +15444,183 @@ async def webapp_autorepost_scan_job(context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"Mini App auto-repost ulandi: {rp['id']} (soat {hour})")
 
 
+# ============================================================
+# 🎯 ISTAK-SKAN (deal hunter) — yangi mahsulot xaridor istagiga mos kelsa PUSH
+# ============================================================
+def _wish_tokens(q):
+    return [w for w in _re.split(r'[^\w]+', (q or '').lower()) if len(w) >= 3]
+
+
+def _wish_overlap(query, product):
+    """(mos_so'zlar, jami_so'zlar) — istak so'zlari mahsulot matnida qanchalik bor."""
+    hay = ' '.join(str(product.get(k) or '') for k in ('name', 'description', 'category_name')).lower()
+    toks = _wish_tokens(query)
+    return sum(1 for t in toks if t in hay), len(toks)
+
+
+async def wish_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har ~2 daqiqada: yangi sotuvga chiqqan mahsulotlarni faol istaklar bilan
+    solishtiradi (arzon keyword-filtr → AI tasdiq; AI o'chiq bo'lsa kuchli keyword).
+    Mosi topilsa xaridorga push + app-banner + «Sotib olish» tugmasi."""
+    try:
+        last = db.get_setting('wish_scan_last_id')
+        if last is None:
+            # Birinchi ishga tushish — mavjud mahsulotlar haqida spam qilmaymiz
+            db.set_setting('wish_scan_last_id', str(db.get_max_product_id()))
+            return
+        prods = db.get_new_active_products_after(int(last), limit=30)
+    except Exception as e:
+        logging.error(f"wish_scan_job o'qish xatosi: {e}")
+        return
+    if not prods:
+        return
+    try:
+        wishes = db.get_active_wishes()
+    except Exception:
+        wishes = []
+    max_id = int(last)
+    for p in prods:
+        max_id = max(max_id, int(p['id']))
+        if not wishes:
+            continue
+        # 1) Arzon filtr: narx byudjetga sig'sin + kamida bitta so'z mos kelsin
+        cands = []
+        for w in wishes:
+            if w['buyer_id'] in (p.get('seller_id'), p.get('created_by')):
+                continue   # o'z mahsulotiga o'zi push olmasin
+            if w.get('max_price') and float(p.get('price') or 0) > float(w['max_price']):
+                continue
+            hits, total = _wish_overlap(w['query'], p)
+            if hits >= 1:
+                cands.append((w, hits, total))
+        if not cands:
+            continue
+        # 2) AI tasdiq (batch); AI yo'q/xato — kuchli keyword zaxira (60%+ so'z mos)
+        matched = None
+        try:
+            matched = await ai_assistant.wish_match(
+                product={'name': p.get('name'), 'category': p.get('category_name'),
+                         'description': p.get('description'), 'price': p.get('price')},
+                wishes=[{'id': w['id'], 'query': w['query']} for w, _, _ in cands])
+        except Exception:
+            matched = None
+        if matched is None:
+            matched = [w['id'] for w, hits, total in cands
+                       if hits >= max(1, -(-total * 3 // 5))]   # ceil(60%)
+        for w, _, _ in cands:
+            if w['id'] not in matched:
+                continue
+            if not db.record_wish_hit(w['id'], p['id']):
+                continue   # bu mahsulot haqida allaqachon aytilgan
+            buyer = db.get_user_by_id(w['buyer_id'])
+            blang = get_user_lang(buyer) if buyer else 'uz'
+            if blang == 'ru':
+                txt = (f"🎯 <b>Ваше желание найдено!</b>\n\n«{html.escape(str(w['query']))}» — "
+                       f"появился подходящий товар:\n<b>{html.escape(p.get('name') or '')}</b> — "
+                       f"{fmt_price(p.get('price'))}")
+                btn = "🛒 Купить"
+            else:
+                txt = (f"🎯 <b>Istagingiz topildi!</b>\n\n«{html.escape(str(w['query']))}» — "
+                       f"mos mahsulot sotuvga chiqdi:\n<b>{html.escape(p.get('name') or '')}</b> — "
+                       f"{fmt_price(p.get('price'))}")
+                btn = "🛒 Sotib olish"
+            try:
+                db.create_notification(w['buyer_id'], 'wish',
+                                       "🎯 Istagingiz topildi!" if blang != 'ru' else "🎯 Ваше желание найдено!",
+                                       f"{p.get('name')} — {fmt_price(p.get('price'))}", p['id'])
+            except Exception:
+                pass
+            try:
+                kb = None
+                if BOT_USERNAME:
+                    kb = InlineKeyboardMarkup([[InlineKeyboardButton(
+                        btn, url=_product_buy_link(BOT_USERNAME, p['id']))]])
+                await context.bot.send_message(chat_id=w['buyer_tg'], text=txt,
+                                               parse_mode='HTML', reply_markup=kb)
+            except Exception as e:
+                logging.warning(f"istak push ketmadi (wish {w['id']}): {e}")
+    try:
+        db.set_setting('wish_scan_last_id', str(max_id))
+    except Exception as e:
+        logging.error(f"wish_scan_last_id yozilmadi: {e}")
+
+
+# ============================================================
+# 🤖 AI SMM — kunlik avtomatik mavzuli kanal posti
+# ============================================================
+async def smm_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har ~10 daqiqada: shu soat (Toshkent) uchun faol SMM sozlamalarini topib,
+    navbatdagi mahsulotni AI mavzuli matn bilan kanal(lar)ga joylaydi (kuniga 1 marta)."""
+    from datetime import datetime as _dt
+    try:
+        now_t = _dt.now(TZ_TASHKENT)
+        due = db.get_due_smm(now_t.hour)
+    except Exception as e:
+        logging.error(f"smm_scan_job o'qish xatosi: {e}")
+        return
+    for s in due:
+        seller_id = s['seller_id']
+        try:
+            nxt = db.get_next_smm_product(seller_id, s.get('last_product_id'))
+            if not nxt:
+                db.mark_smm_posted(seller_id, None)   # mahsulot yo'q — bugun o'tkazamiz
+                continue
+            product = db.get_product_by_id(nxt['id']) or nxt   # category_name joini bilan
+            owner = db.get_user_by_id(seller_id)
+            olang = get_user_lang(owner) if owner else 'uz'
+            cap = None
+            try:
+                cap = await ai_assistant.generate_smm_caption(
+                    name=product.get('name') or '', price_text=fmt_price(product.get('price')),
+                    category=product.get('category_name') or '',
+                    description=product.get('description') or '',
+                    shop_name=(dict(owner).get('shop_name') if owner else '') or '',
+                    weekday=now_t.weekday(), lang=olang or 'uz')
+            except Exception as e:
+                logging.warning(f"SMM caption AI xato (seller {seller_id}): {e}")
+            # cap=None bo'lsa post_product_to_channel o'zi standart AI reklama matnini quradi
+            await post_product_to_channel(context, nxt['id'],
+                                          caption_override=cap, parse_mode_override=None)
+            db.mark_smm_posted(seller_id, nxt['id'])
+            if owner and dict(owner).get('telegram_id'):
+                try:
+                    msg = ("🤖 SMM: bugungi post kanalga joylandi — "
+                           if olang != 'ru' else "🤖 SMM: сегодняшний пост опубликован — ")
+                    await context.bot.send_message(
+                        chat_id=dict(owner)['telegram_id'],
+                        text=msg + f"«{(product.get('name') or '')[:40]}»")
+                except Exception:
+                    pass
+            logging.info(f"SMM post joylandi: seller {seller_id}, product {nxt['id']}")
+        except Exception as e:
+            logging.error(f"SMM post xatosi (seller {seller_id}): {e}")
+
+
+async def ai_director_weekly_job(context: ContextTypes.DEFAULT_TYPE):
+    """Dushanba 09:00 (Toshkent): faol sotuvchilarga «haftalik AI hisobot tayyor» eslatmasi.
+    Hisobot o'zi App'da OCHILGANDA generatsiya bo'ladi (bekorga AI sarflamaymiz)."""
+    from datetime import datetime as _dt
+    if _dt.now(TZ_TASHKENT).weekday() != 0:   # faqat dushanba
+        return
+    try:
+        sellers = db.get_recent_active_sellers(days=30)
+    except Exception as e:
+        logging.error(f"ai_director_weekly ro'yxat xatosi: {e}")
+        return
+    for u in sellers:
+        try:
+            ru = (u.get('language') == 'ru')
+            txt = ("🧠 Еженедельный AI-отчёт готов! Откройте App → Магазин → AI директор — "
+                   "рекомендации по ценам, рекламе и запасам." if ru else
+                   "🧠 Haftalik AI hisobotingiz tayyor! App → Do'kon → AI direktor'ni oching — "
+                   "narx, reklama va zaxira bo'yicha tavsiyalar.")
+            db.create_notification(u['id'], 'info',
+                                   "🧠 AI direktor" , txt, None)
+            await context.bot.send_message(chat_id=u['telegram_id'], text=txt)
+        except Exception:
+            pass   # bloklagan foydalanuvchi va h.k. — jim
+
+
 async def _post_init(application):
     """Bot ishga tushganda — chat Menu tugmasini to'g'ridan-to'g'ri Mini App'ga ulaymiz.
     Shunda foydalanuvchi buyer panelga kirmasdan, matn maydoni yonidagi doimiy tugma
@@ -15892,6 +16069,21 @@ def main():
         # Mini App yaratgan avto qayta-reklamalarga kunlik jobni ulash (har 60s)
         app.job_queue.run_repeating(webapp_autorepost_scan_job, interval=60, first=25)
         logging.info("Mini App auto-repost scan job rejalashtirildi (har 60s)")
+
+        # 🎯 Istak-skan (deal hunter) — yangi mahsulot istaklarga mos kelsa push (har 2 daqiqa)
+        app.job_queue.run_repeating(wish_scan_job, interval=120, first=40)
+        logging.info("Istak-skan job rejalashtirildi (har 120s)")
+
+        # 🤖 AI SMM — kunlik avtomatik mavzuli kanal posti (har 10 daqiqada soat tekshiruvi)
+        app.job_queue.run_repeating(smm_scan_job, interval=600, first=70)
+        logging.info("AI SMM scan job rejalashtirildi (har 600s)")
+
+        # 🧠 AI direktor — dushanba 09:00 (Toshkent) haftalik hisobot eslatmasi
+        from datetime import time as _ddt_time
+        app.job_queue.run_daily(ai_director_weekly_job,
+                                time=_ddt_time(hour=9, minute=0, tzinfo=TZ_TASHKENT),
+                                name="ai_director_weekly")
+        logging.info("AI direktor haftalik eslatma job rejalashtirildi (dushanba 09:00)")
 
         # Avtomatik backup — har kuni ertalab 06:00 (UTC) = 11:00 Toshkent
         from datetime import time as dt_time

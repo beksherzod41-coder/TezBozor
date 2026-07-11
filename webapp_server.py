@@ -576,8 +576,11 @@ async def api_ai(body: AiAsk, authorization: str = Header(None)):
     ud = AI_SESSIONS.setdefault((user.get("telegram_id"), role), {})
     lang = user.get("language") or "uz"
     res = await ai_assistant.ask(db, lang, role, text, ud,
-                                 seller_id=seller_id, user_name=user.get("name") or "")
-    return {"text": res.get("text"), "products": _rows(res.get("products") or []) or None}
+                                 seller_id=seller_id, user_name=user.get("name") or "",
+                                 buyer_id=user.get("id"), channel="app")
+    # cart_adds — agent savatga solgan mahsulotlar; frontend localStorage savatiga qo'shadi
+    return {"text": res.get("text"), "products": _rows(res.get("products") or []) or None,
+            "cart_adds": res.get("cart_adds") or None}
 
 
 # ============================================================
@@ -710,7 +713,8 @@ class ContactIn(BaseModel):
 
 
 @app.post("/api/contact-admin")
-async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
+async def api_contact_admin(body: ContactIn, background: BackgroundTasks,
+                            authorization: str = Header(None)):
     """Murojaat ochadi (support_thread + birinchi xabar) → adminlarga banner+push.
     Sabab MAJBURIY; matn faqat harf/raqamli bo'lishi shart (belgi/emoji-only rad)."""
     user = dict(_buyer_from_auth(authorization))
@@ -729,7 +733,51 @@ async def api_contact_admin(body: ContactIn, authorization: str = Header(None)):
     rlabel = SUPPORT_REASONS[reason]["uz"]
     await _notify_admins(f"📩 Yangi murojaat — {rlabel}",
                          f"{user.get('name') or ''}: {text[:120]}", kind="support", ref_id=tid)
+    # AI birinchi-liniya: oddiy savolga (buyurtma holati kabi) darhol javob beradi;
+    # yecholmasa jim qoladi — admin baribir xabardor (yuqorida notify bo'ldi).
+    background.add_task(_support_ai_first_line, tid, user["id"])
     return {"ok": True, "thread_id": tid}
+
+
+async def _support_ai_first_line(thread_id, user_id):
+    """AI support: murojaatni foydalanuvchining REAL ma'lumotlari (buyurtma/qarz) bilan
+    o'qib, ishonchli bo'lsa 'ai' nomidan javob yozadi + push. Har qanday xatoda JIM —
+    admin oqimi buzilmaydi."""
+    try:
+        if not ai_assistant.is_enabled():
+            return
+        thread = db.get_support_thread(thread_id)
+        if not thread or thread.get("status") == "closed":
+            return
+        user = db.get_user_by_id(user_id)
+        if not user:
+            return
+        user = dict(user)
+        lang = get_user_lang(user) or DEFAULT_LANG
+        # Foydalanuvchi faktlari — AI faqat shulardan javob beradi (o'ylab topmaydi)
+        orders = [dict(o) for o in (db.get_orders_by_buyer(user_id) or [])[:8]]
+        facts = {
+            "orders": [{"id": o.get("id"), "product": o.get("product_name"),
+                        "status": o.get("status"), "total": o.get("total_price"),
+                        "created": str(o.get("created_at") or "")[:16],
+                        "delivery": o.get("delivery_type")} for o in orders],
+            "open_debts": [{"shop": dict(d).get("shop_name") or dict(d).get("seller_name"),
+                            "due": dict(d).get("total_due")}
+                           for d in (db.get_buyer_open_debts(user_id) or [])],
+        }
+        rlabel = SUPPORT_REASONS.get(thread.get("reason") or "other", {}).get(
+            "ru" if lang == "ru" else "uz", "")
+        res = await ai_assistant.support_first_line(
+            reason_label=rlabel, messages=db.get_support_messages(thread_id),
+            user_facts=facts, lang=lang)
+        if not res or not res.get("can_answer"):
+            return
+        db.add_support_message(thread_id, "ai", None, res["answer"])
+        title = "🤖 AI-помощник ответил" if lang == "ru" else "🤖 AI yordamchi javob berdi"
+        await _notify_user(user_id, title, res["answer"][:120],
+                           kind="support", ref_id=thread_id)
+    except Exception as e:
+        logging.warning(f"support AI first-line xato (thread {thread_id}): {e}")
 
 
 @app.get("/api/support/reasons")
@@ -756,6 +804,48 @@ def api_notif_read(notif_id: int, authorization: str = Header(None)):
 def api_notif_read_all(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     db.mark_all_notifications_read(user["id"])
+    return {"ok": True}
+
+
+# ============================================================
+# ISTAK RO'YXATI (deal hunter) — "shu narsa kerak, chiqsa ayting"
+# Moslikni bot skan-jobi tekshiradi (barcha manbalardan kelgan mahsulotlarni qamraydi)
+# va topilganda push + app-banner yuboradi.
+# ============================================================
+class WishIn(BaseModel):
+    text: str
+    max_price: Optional[float] = None
+
+
+@app.get("/api/my/wishes")
+def api_my_wishes(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    return {"items": db.get_user_wishes(user["id"])}
+
+
+@app.post("/api/my/wishes")
+def api_wish_create(body: WishIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    text = (body.text or "").strip()
+    if len(text) < 3:
+        raise HTTPException(status_code=400, detail="too_short")
+    if len(text) > 120:
+        raise HTTPException(status_code=400, detail="too_long")
+    if db.count_user_wishes(user["id"]) >= 5:
+        raise HTTPException(status_code=409, detail="wish_limit")
+    _rate_limit("wish", user.get("id"), 10, 3600)
+    mp = None
+    if body.max_price is not None and body.max_price > 0:
+        mp = float(body.max_price)
+    wid = db.create_wish(user["id"], text, mp)
+    return {"ok": True, "id": wid}
+
+
+@app.delete("/api/my/wishes/{wish_id}")
+def api_wish_delete(wish_id: int, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if not db.delete_wish(wish_id, user["id"]):
+        raise HTTPException(status_code=404, detail="not_found")
     return {"ok": True}
 
 
@@ -792,7 +882,8 @@ class SupportMsgIn(BaseModel):
 
 
 @app.post("/api/support/thread/{thread_id}/message")
-async def api_support_message(thread_id: int, body: SupportMsgIn, authorization: str = Header(None)):
+async def api_support_message(thread_id: int, body: SupportMsgIn, background: BackgroundTasks,
+                              authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     thread = db.get_support_thread(thread_id)
     is_admin = _support_access_or_403(user, thread)
@@ -811,6 +902,11 @@ async def api_support_message(thread_id: int, body: SupportMsgIn, authorization:
     else:
         await _notify_admins("📩 Murojaatга javob", f"{user.get('name') or ''}: {text[:120]}",
                              kind="support", ref_id=thread_id)
+        # AI birinchi-liniya faqat ODAM-admin hali qo'shilmagan suhbatda davom etadi
+        # (admin yozgan zahoti AI jim bo'ladi — aralashib ketmasin).
+        msgs = db.get_support_messages(thread_id)
+        if not any(m.get("sender_role") == "admin" for m in msgs):
+            background.add_task(_support_ai_first_line, thread_id, user["id"])
     return {"ok": True}
 
 
@@ -3758,6 +3854,133 @@ def api_get_shop(authorization: str = Header(None)):
     # Do'kon ulashish havolasi uchun — mahsulotlar ostida ko'rinadigan EGA id'si (xodim ham shu id ostida)
     out["seller_id"] = _owner_id(user)
     return out
+
+
+# ============================================================
+# 🧠 AI DIREKTOR — sotuvchiga aqlli hisobot + 1-tap amallar
+# ============================================================
+def _director_facts(oid):
+    """AI uchun kompakt, REAL do'kon faktlari. AI faqat shulardan tavsiya beradi."""
+    stats = db.get_seller_stats(oid) or {}
+    perf = {p["id"]: dict(p) for p in db.get_seller_product_performance(oid)}
+    prods = [dict(p) for p in db.get_products_by_seller(oid)]
+    items, stale, low_stock = [], [], []
+    for p in prods:
+        if p.get("status") != "active":
+            continue
+        sold = (perf.get(p["id"]) or {}).get("sold", 0)
+        it = {"product_id": p["id"], "name": p.get("name"), "price": p.get("price"),
+              "sold": sold, "stock": p.get("stock_count"),
+              "created": str(p.get("created_at") or "")[:10]}
+        items.append(it)
+        if sold == 0:
+            stale.append(it)
+        sc = p.get("stock_count")
+        if sc is not None and 0 < sc <= 2:
+            low_stock.append(it)
+    items.sort(key=lambda x: -(x["sold"] or 0))
+    return {
+        "shop_stats": {"total_orders": stats.get("total_orders"),
+                       "pending_orders": stats.get("pending"),
+                       "week_orders": stats.get("week_orders"),
+                       "week_revenue": stats.get("week_revenue"),
+                       "month_revenue": stats.get("month_revenue"),
+                       "active_products": len(items)},
+        "top_products": items[:5],
+        "not_selling_products": stale[:6],
+        "low_stock_products": low_stock[:5],
+        "open_debts_count": len(db.get_seller_open_debts(oid) or []),
+    }
+
+
+@app.get("/api/seller/ai-director")
+async def api_ai_director(authorization: str = Header(None)):
+    """🧠 AI direktor hisoboti: summary + tavsiyalar (har birida 1-tap action bo'lishi mumkin)."""
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    _rate_limit("ai_director", user.get("id"), 10, 3600)
+    oid = _owner_id(user)
+    facts = _director_facts(oid)
+    if not facts["shop_stats"]["active_products"] and not facts["shop_stats"]["total_orders"]:
+        return {"available": False}
+    lang = get_user_lang(user) or DEFAULT_LANG
+    rep = await ai_assistant.director_report(facts=facts, lang=lang)
+    if not rep:
+        raise HTTPException(status_code=502, detail="ai_error")
+    # Amallar xavfsizligi: product_id lar shu do'konnikimi — tekshirib chiqamiz
+    own_ids = {p["product_id"] for p in facts["top_products"]} | \
+              {p["product_id"] for p in facts["not_selling_products"]} | \
+              {p["product_id"] for p in facts["low_stock_products"]}
+    for r in rep["recs"]:
+        a = r.get("action")
+        if a and a.get("product_id") not in own_ids:
+            r["action"] = None
+    return {"available": True, **rep}
+
+
+class DirectorApplyIn(BaseModel):
+    type: str                 # 'price' | 'ad'  ('restock' — client o'zi formani ochadi)
+    product_id: int
+    value: Optional[float] = None   # price uchun yangi narx
+
+
+@app.post("/api/seller/ai-director/apply")
+def api_ai_director_apply(body: DirectorApplyIn, authorization: str = Header(None)):
+    """AI direktor tavsiyasini 1 bosishda qo'llash: narx tushirish yoki reklama joylash."""
+    user = dict(_buyer_from_auth(authorization))
+    prod = _own_product_or_403(user, body.product_id)
+    if body.type == "price":
+        newp = float(body.value or 0)
+        oldp = float(prod.get("price") or 0)
+        if newp <= 0 or newp >= oldp:
+            raise HTTPException(status_code=400, detail="bad_price")
+        if newp < oldp * 0.5:   # AI adashsa ham narx 50%dan ko'p tushmasin (himoya)
+            raise HTTPException(status_code=400, detail="too_low")
+        db.update_product_fields(body.product_id, price=newp, old_price=oldp)
+        return {"ok": True, "applied": "price", "new_price": newp}
+    if body.type == "ad":
+        sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        db.create_scheduled_post(body.product_id, prod["seller_id"], sa,
+                                 created_by=user["id"], caption=None,
+                                 parse_mode=None, image_id=None)
+        return {"ok": True, "applied": "ad"}
+    raise HTTPException(status_code=400, detail="bad_type")
+
+
+# ============================================================
+# 🤖 AI SMM — kanalga kunlik avtomatik mavzuli post (sozlama)
+# ============================================================
+class SmmIn(BaseModel):
+    is_active: Optional[bool] = None
+    hour: Optional[int] = None
+
+
+@app.get("/api/seller/smm")
+def api_smm_get(authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    oid = _owner_id(user)
+    s = db.get_smm_settings(oid) or {"hour": 10, "is_active": 0,
+                                     "last_posted_at": None, "last_product_id": None}
+    chans = len(db.get_active_seller_channels(oid) or [])
+    return {**s, "channels": chans, "ai_enabled": ai_assistant.is_enabled()}
+
+
+@app.post("/api/seller/smm")
+def api_smm_set(body: SmmIn, authorization: str = Header(None)):
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    oid = _owner_id(user)
+    hour = None
+    if body.hour is not None:
+        hour = int(body.hour)
+        if not (0 <= hour <= 23):
+            raise HTTPException(status_code=400, detail="bad_hour")
+    s = db.upsert_smm_settings(oid, hour=hour, is_active=body.is_active)
+    return {"ok": True, **(s or {})}
 
 
 class ShopEdit(BaseModel):
