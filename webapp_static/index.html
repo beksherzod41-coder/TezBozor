@@ -495,7 +495,8 @@
     <div id="giftBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
-  <div class="checkout" id="regionview">
+  <!-- z-index:125 — registratsiya (regview 120) ichidan ham ochilsin (hudud tanlash) -->
+  <div class="checkout" id="regionview" style="z-index:125">
     <div class="cohead"><span id="ttl_regionview">🌍 Hudud</span><span class="x" id="regionClose">✕</span></div>
     <div id="regionBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
@@ -1688,6 +1689,10 @@ const I18N = {
   reg_name:{uz:"Ism familiya",ru:"Имя и фамилия"}, reg_name_ph:{uz:"Masalan: Ali Valiyev",ru:"Например: Иван Иванов"},
   reg_phone:{uz:"Telefon raqam",ru:"Номер телефона"}, reg_phone_ph:{uz:"+998 90 123 45 67",ru:"+998 90 123 45 67"},
   reg_lang:{uz:"Til",ru:"Язык"}, reg_submit:{uz:"✅ Ro'yxatdan o'tish",ru:"✅ Зарегистрироваться"},
+  reg_region:{uz:"Hududingiz (viloyat/tuman)",ru:"Ваш регион (область/район)"},
+  reg_region_pick:{uz:"📍 Hududni tanlang",ru:"📍 Выберите регион"},
+  reg_region_hint:{uz:"Yaqin-atrofdagi mahsulot va do'konlarni ko'rsatish uchun kerak.",ru:"Нужно, чтобы показывать товары и магазины рядом с вами."},
+  reg_region_req:{uz:"Hududingizni tanlang.",ru:"Выберите ваш регион."},
   reg_bad_name:{uz:"Ism familiyangizni to'liq kiriting.",ru:"Введите имя и фамилию полностью."},
   reg_bad_phone:{uz:"Telefon raqami noto'g'ri.",ru:"Неверный номер телефона."},
   reg_success:{uz:"✅ Ro'yxatdan o'tdingiz!",ru:"✅ Вы зарегистрированы!"},
@@ -4359,7 +4364,7 @@ function showRegistration(){
   const rl = String(u.language_code||'').toLowerCase().startsWith('ru') ? 'ru' : 'uz';
   LANG = rl; applyStaticI18n();
   regState = { name: [u.first_name,u.last_name].filter(Boolean).join(' '), phone:'', lang: rl, role:'buyer', ref:_regRefCode(),
-               staffInvite:_pendingStaffCode(), staffShop:'' };
+               staffInvite:_pendingStaffCode(), staffShop:'', region_id:null, region_label:'' };
   renderRegistration();
   document.getElementById('regview').classList.add('open');
   // Staff taklifi bilan kelgan yangi user — do'kon nomini olib, ko'rsatamiz
@@ -4384,6 +4389,9 @@ function renderRegistration(){
         <div class="opt ${regState.lang==='uz'?'on':''}" data-rl="uz">🇺🇿 O‘zbekcha</div>
         <div class="opt ${regState.lang==='ru'?'on':''}" data-rl="ru">🇷🇺 Русский</div>
       </div></div>
+    <div class="cosec"><div class="lbl">${L('reg_region')}</div>
+      <button class="oact ${regState.region_id?'ok':'soft'}" id="regRegion" type="button" style="width:100%;text-align:left${regState.region_id?';background:var(--accent-soft);color:var(--accent)':''}">${regState.region_label?('📍 '+esc(regState.region_label)):L('reg_region_pick')}</button>
+      <div style="font-size:11.5px;color:var(--hint);margin-top:5px">${L('reg_region_hint')}</div></div>
     ${regState.staffInvite
       ? `<div class="cosec"><div style="font-size:12.5px;color:var(--accent);line-height:1.5">👥 ${L('reg_staff_hint').replace('{shop}', esc(regState.staffShop||'…'))}</div></div>`
       : `<div class="cosec"><div class="lbl">${L('reg_role')}</div>
@@ -4396,6 +4404,11 @@ function renderRegistration(){
   <div class="cobar"><button id="regSubmit">${regState.staffInvite?L('bp_join_submit'):(regState.role==='seller'?L('reg_role_seller'):L('reg_submit'))}</button></div>`;
   document.getElementById('regName').oninput=e=>regState.name=e.target.value;
   document.getElementById('regPhone').oninput=e=>regState.phone=e.target.value;
+  // Hudud tanlash — mavjud picker overlay (z-index 125, registratsiya ustида ochiladi)
+  document.getElementById('regRegion').onclick=()=>openRegionPicker((id,lbl)=>{
+    if(id){ regState.region_id=id; regState.region_label=lbl; }
+    renderRegistration();
+  });
   b.querySelectorAll('[data-rl]').forEach(o=>o.onclick=()=>{ regState.lang=o.dataset.rl; LANG=regState.lang; applyStaticI18n(); renderRegistration(); });
   b.querySelectorAll('[data-role]').forEach(o=>o.onclick=()=>{ regState.role=o.dataset.role; renderRegistration(); });
   document.getElementById('regSubmit').onclick=submitRegistration;
@@ -4404,9 +4417,10 @@ async function submitRegistration(){
   const name=(regState.name||'').trim();
   if(name.length<3){ tg.showAlert(L('reg_bad_name')); return; }
   if(!(regState.phone||'').trim()){ tg.showAlert(L('reg_bad_phone')); return; }
+  if(!regState.region_id){ tg.showAlert(L('reg_region_req')); return; }
   const btn=document.getElementById('regSubmit'); btn.disabled=true; btn.textContent=L('sending');
   try{
-    const payload={name, phone:regState.phone.trim(), language:regState.lang};
+    const payload={name, phone:regState.phone.trim(), language:regState.lang, region_id:regState.region_id};
     if(regState.ref) payload.ref=regState.ref;
     await apiSend('/api/register','POST',payload);
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}

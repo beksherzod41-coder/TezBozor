@@ -1860,6 +1860,25 @@ def test_register_bad_phone_400(client):
     assert r.status_code == 400
 
 
+def test_register_with_region(client):
+    """Ro'yxatdan o'tishda hudud tanlanadi — user.region_id saqlanadi."""
+    db = webapp_server.db
+    rid = db.get_connection().cursor().execute(
+        "SELECT id FROM regions WHERE parent_id IS NOT NULL LIMIT 1").fetchone()[0]
+    r = client.post("/api/register", headers=hdr(6201),
+                    json={"name": "Hududli Xaridor", "phone": "901234571",
+                          "language": "uz", "region_id": rid})
+    assert r.status_code == 200
+    u = db.get_user_by_telegram_id(6201)
+    assert u["region_id"] == rid
+    # yaroqsiz region — ro'yxatdan o'tish BUZILMAYDI, region shunchaki saqlanmaydi
+    r2 = client.post("/api/register", headers=hdr(6202),
+                     json={"name": "Xato Hudud", "phone": "901234572",
+                           "language": "uz", "region_id": 999999})
+    assert r2.status_code == 200
+    assert db.get_user_by_telegram_id(6202)["region_id"] is None
+
+
 def test_register_idempotent_for_existing(client):
     # Mavjud foydalanuvchi (5001) — qayta yaratilmaydi, ok qaytaradi
     r = client.post("/api/register", headers=hdr(5001),

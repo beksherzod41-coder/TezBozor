@@ -1564,6 +1564,7 @@ class RegisterIn(BaseModel):
     phone: str
     language: str = "uz"
     ref: Optional[str] = None   # referral kodi (/start REF... → ?ref=... → App)
+    region_id: Optional[int] = None   # hudud (viloyat/tuman) — ro'yxatdan o'tishda tanlanadi
 
 
 @app.post("/api/register")
@@ -1592,6 +1593,14 @@ async def api_register(body: RegisterIn, authorization: str = Header(None)):
     uname = tg_user.get("username")
     if uname:
         fields["telegram_username"] = uname
+    # Hudud — ro'yxatdan o'tishda tanlanadi (profil keyin "to'ldiring" deb so'ramasin).
+    # Yaroqsiz id kelsa jim o'tamiz (ro'yxatdan o'tish buzilmasin).
+    if body.region_id:
+        try:
+            if db.get_region_label(int(body.region_id)):
+                fields["region_id"] = int(body.region_id)
+        except Exception:
+            pass
     db.update_user(uid, **fields)
 
     # Referral — /start REF... orqali kelgan bo'lsa (bot complete_registration parite)
