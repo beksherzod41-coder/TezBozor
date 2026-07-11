@@ -6679,6 +6679,7 @@ PERM_KEYS = {
     'conf':  'perm_confirm_orders',
     'price': 'perm_edit_price',
     'rev':   'perm_reply_reviews',
+    'ad':    'perm_publish_ad',
 }
 
 
@@ -9444,8 +9445,12 @@ async def _save_product(update, context):
             context.user_data.pop(k, None)
         return ConversationHandler.END
 
+    # perm_publish_ad — "reklamani tasdiqsiz o'zi joylash" ruxsatli xodim ega tasdig'ini
+    # CHETLAB O'TADI va reklama AVTOMATIK kanalga chiqadi (quyida).
+    can_auto_ad = bool(is_staff and staff.get('perm_publish_ad'))
     # Moderatsiya: ega tasdig'i talab qilinsa — pending_owner holatida saqlanadi
-    needs_owner_approval = bool(is_staff and shop and shop.get('moderation') == 'owner_approve')
+    needs_owner_approval = bool(is_staff and shop and shop.get('moderation') == 'owner_approve'
+                                and not can_auto_ad)
 
     product_id = db.create_product(
         seller_id=owner_id,
@@ -9515,6 +9520,17 @@ async def _save_product(update, context):
     else:
         await update.callback_query.message.reply_text(msg)
 
+    # perm_publish_ad'li xodim: reklama AVTOMATIK chiqadi (tasdiqsiz, preview'siz) —
+    # markaziy kanal + do'konning barcha ulangan kanal/guruhlariga.
+    if can_auto_ad and product_id:
+        try:
+            await post_product_to_channel(context, product_id)
+            _reply2 = update.message.reply_text if update.message else update.callback_query.message.reply_text
+            await _reply2(t(lang, 'ad_auto_published'))
+        except Exception as e:
+            logging.error(f"perm_publish_ad avto-reklama joylanmadi (product {product_id}): {e}")
+        return ConversationHandler.END
+
     # Kanalga joylashdan OLDIN — reklama ko'rinishini ko'rsatamiz (tasdiq/tahrir)
     if product_id:
         await show_ad_preview(update, context, product_id)
@@ -9549,6 +9565,15 @@ async def owner_review_product(update: Update, context: ContextTypes.DEFAULT_TYP
     staff_user = db.get_user_by_id(product.get('created_by')) if product.get('created_by') else None
     if approve:
         db.set_product_status(product_id, 'active')
+        # TASDIQ = "e'lon qil" ruxsati. Xodim pending_owner tufayli reklama ekraniga
+        # o'tolmagan — shuning uchun tasdiqda reklamani AVTOMATIK markaziy kanal + sotuvchining
+        # ulangan kanal/guruhlariga joylaymiz (aks holda tayyor reklama hech qayerga chiqmasdi).
+        # caption/image berilmaydi -> AI reklama dizayni + matnini bot o'zi quradi. Xato bo'lsa
+        # asosiy tasdiq oqimiga ta'sir qilmaydi.
+        try:
+            await post_product_to_channel(context, product_id)
+        except Exception as e:
+            logging.error(f"Tasdiqda avto-reklama joylanmadi (product {product_id}): {e}")
         await query.edit_message_text(t(lang, 'owner_approved_done', pname=html.escape(product['name'] or '')))
         if staff_user and staff_user.get('telegram_id'):
             try:

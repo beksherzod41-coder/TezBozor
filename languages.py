@@ -4059,6 +4059,10 @@ _TEXTS = {
     'perm_conf': {'uz': "Buyurtma tasdiqlash", 'ru': "Подтверждение заказов"},
     'perm_price': {'uz': "Narx o'zgartirish", 'ru': "Изменение цены"},
     'perm_rev': {'uz': "Sharhga javob", 'ru': "Ответ на отзывы"},
+    'perm_ad': {'uz': "Reklamani tasdiqsiz joylash", 'ru': "Публикация рекламы без подтверждения"},
+    'ad_auto_published': {
+        'uz': "📢 Reklama avtomatik joylandi — kanal va do'kon guruh/kanallariga chiqdi.",
+        'ru': "📢 Реклама опубликована автоматически — в канал и группы/каналы магазина."},
     'btn_staff_freeze': {'uz': "⏸ Muzlatish", 'ru': "⏸ Заморозить"},
     'btn_staff_activate': {'uz': "✅ Faollashtirish", 'ru': "✅ Активировать"},
     'btn_staff_perms': {'uz': "🔐 Ruxsatlar", 'ru': "🔐 Права"},

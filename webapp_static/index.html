@@ -352,12 +352,18 @@
          align-items:center; justify-content:center; cursor:pointer; color:var(--accent);
          font-size:30px; background:var(--card); flex:0 0 auto;}
   /* ---------- SAVAT ---------- */
-  .cartfab{position:fixed; right:14px; bottom:84px; z-index:25; cursor:pointer; font-weight:700;
+  .cartfab{position:fixed; right:14px; bottom:84px; z-index:55; cursor:pointer; font-weight:700;
            background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;
            border-radius:16px; padding:12px 15px; display:none; align-items:center; gap:9px;
            box-shadow:0 8px 22px rgba(21,146,226,.38);}
   .cartfab{transition:transform .12s ease;} .cartfab:active{transform:scale(.95);}
   .cartfab .cnt{background:#fff; color:var(--accent); border-radius:10px; padding:1px 8px; font-size:13px;}
+  /* Savatga qo'shildi va sh.k. — qisqa muddatli bildirishnoma (har qanday overlay ustida) */
+  .toast{position:fixed; left:50%; bottom:150px; transform:translateX(-50%) translateY(10px); z-index:9998;
+         background:rgba(20,20,25,.94); color:#fff; padding:11px 20px; border-radius:24px; font-size:14px;
+         font-weight:600; box-shadow:0 8px 26px rgba(0,0,0,.35); opacity:0; pointer-events:none; max-width:82%;
+         text-align:center; transition:opacity .2s ease, transform .2s ease;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
   .citem{display:flex; gap:11px; align-items:flex-start; background:var(--card); border-radius:14px;
          padding:10px; box-shadow:var(--shadow);}
   .citem img,.citem .ph{width:58px; height:58px; border-radius:10px; object-fit:cover;
@@ -451,7 +457,7 @@
     <div id="detailBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
-  <div class="detail" id="shopview">
+  <div class="detail" id="shopview" style="z-index:45">
     <div class="dtop">
       <div class="bk" id="shopClose">‹ Orqaga</div>
       <span id="shopTitle" style="font-weight:700;margin-left:4px;font-size:15px"></span>
@@ -750,6 +756,7 @@ window.addEventListener('unhandledrejection',function(e){ showFatal('Promise: '+
 
 const AUTH = "tma " + (tg.initData || "");
 let activeCat = null, searchTimer = null, botUsername = null;
+const IS_ANDROID = /android/i.test(navigator.userAgent||'');
 
 // ---------- TIL (i18n: uz/ru) ----------
 let LANG = (function(){ try{ const lc=((tg.initDataUnsafe||{}).user||{}).language_code||''; return String(lc).startsWith('ru')?'ru':'uz'; }catch(e){ return 'uz'; } })();
@@ -841,6 +848,7 @@ const I18N = {
   sp_dlv_yes:{uz:"🚚 Yetkazib beriladi",ru:"🚚 С доставкой"},
   sp_dlv_no:{uz:"🚶 Faqat olib ketish",ru:"🚶 Только самовывоз"},
   sp_dlv_min:{uz:"🚚 Yetkazish uchun eng kam summa",ru:"🚚 Мин. сумма для доставки"},
+  sp_dlv_min_hint:{uz:"Yetkazib berish uchun xaridor buyurtmasi shu summadan kam bo'lmasligi kerak. Bo'sh yoki 0 — cheklov yo'q.",ru:"Заказ покупателя должен быть не меньше этой суммы для доставки. Пусто или 0 — без ограничения."},
   bp_video:{uz:"Video",ru:"Видео"},
   sp_video:{uz:"Video (ixtiyoriy)",ru:"Видео (необязательно)"},
   sp_video_hint:{uz:"Qisqa video ishonchni oshiradi va savdoni ko'taradi (60 soniyagacha, 20 MB gacha).",ru:"Короткое видео повышает доверие и продажи (до 60 секунд, до 20 МБ)."},
@@ -1473,6 +1481,8 @@ const I18N = {
   sp_ov_chan:{uz:"📢 Kanal va guruhlar",ru:"📢 Каналы и группы"}, sp_ov_staff:{uz:"👥 Xodimlar",ru:"👥 Сотрудники"},
   sp_ov_sched:{uz:"📅 Rejalashtirilgan postlar",ru:"📅 Запланированные посты"}, sp_ov_deliver:{uz:"📦 Berish va to'lov",ru:"📦 Выдача и оплата"},
   sp_ov_ai:{uz:"🤖 AI yordamchi",ru:"🤖 AI помощник"},
+  sp_ov_sharelink:{uz:"🔗 Do'kon havolasi",ru:"🔗 Ссылка магазина"},
+  sp_ov_dlvmin:{uz:"🚚 Yetkazish eng kam summa",ru:"🚚 Мин. сумма доставки"},
   sp_cancel_incoming:{uz:"🚫 Xaridor bekor qilishni so'radi:",ru:"🚫 Покупатель запросил отмену:"},
   sp_cancel_wait:{uz:"⏳ Bekor so'rovi yuborildi — xaridor javobini kuting.",ru:"⏳ Запрос на отмену отправлен — ждите ответа покупателя."},
   sp_staff_detail:{uz:"Batafsil",ru:"Подробнее"}, sp_staff_detail_title:{uz:"👤 Xodim",ru:"👤 Сотрудник"},
@@ -1483,6 +1493,12 @@ const I18N = {
   sp_perm_add:{uz:"Mahsulot qo'shish",ru:"Добавлять товары"}, sp_perm_conf:{uz:"Buyurtma tasdiqlash",ru:"Подтверждать заказы"},
   sp_perm_price:{uz:"Narx tahrirlash",ru:"Менять цену"}, sp_perm_rev:{uz:"Sharhga javob",ru:"Отвечать на отзывы"},
   sp_perm_staff:{uz:"Xodim qo'shish (menejer)",ru:"Добавлять сотрудников (менеджер)"},
+  sp_perm_ad:{uz:"Reklamani tasdiqsiz joylash",ru:"Публиковать рекламу без подтверждения"},
+  sp_ad_auto_published:{uz:"📢 Reklama avtomatik joylandi — kanal va do'kon guruh/kanallariga chiqdi.",ru:"📢 Реклама опубликована автоматически — в канал и группы/каналы магазина."},
+  sp_media_src_photo:{uz:"Rasm qo'shish",ru:"Добавить фото"}, sp_media_src_video:{uz:"Video qo'shish",ru:"Добавить видео"},
+  sp_src_camera:{uz:"Suratga olish",ru:"Сделать фото"}, sp_src_record:{uz:"Video yozib olish",ru:"Записать видео"},
+  sp_src_gallery:{uz:"Galereya",ru:"Галерея"}, sp_src_file:{uz:"Fayl tanlash",ru:"Выбрать файл"}, sp_src_cancel:{uz:"Bekor qilish",ru:"Отмена"},
+  sp_not_image:{uz:"Faqat rasm fayli tanlang.",ru:"Выберите только изображение."}, sp_not_video:{uz:"Faqat video fayli tanlang.",ru:"Выберите только видеофайл."},
   sp_order_by:{uz:"Joylagan",ru:"Сотрудник"},
   reorder_btn:{uz:"🔄 Qayta buyurtma",ru:"🔄 Заказать снова"},
   pf_main:{uz:"Asosiy",ru:"Основное"}, pf_shop:{uz:"Do'kon",ru:"Магазин"}, pf_channels:{uz:"Ulangan kanallar",ru:"Подключённые каналы"},
@@ -1580,6 +1596,11 @@ const I18N = {
   bp_n_orders:{uz:"{n} ta buyurtma",ru:"{n} заказов"}, bp_n_products:{uz:"{n} mahsulot",ru:"{n} товаров"},
   bp_view_products:{uz:"Mahsulotlarni ko'rish ›",ru:"Смотреть товары ›"}, bp_no_shops:{uz:"Do'kon topilmadi",ru:"Магазины не найдены"},
   bp_shop_word:{uz:"Do'kon",ru:"Магазин"}, bp_no_products_short:{uz:"Mahsulot yo'q",ru:"Нет товаров"},
+  added_cart:{uz:"✅ Savatga qo'shildi",ru:"✅ Добавлено в корзину"},
+  sp_share_shop:{uz:"🔗 Do'kon havolasini ulashish",ru:"🔗 Поделиться ссылкой на магазин"},
+  sp_share_shop_hint:{uz:"Havolani kanal/guruhingizga qadang yoki mijozlarga yuboring — bosgan odam to'g'ridan-to'g'ri do'koningizni ochadi.",ru:"Закрепите ссылку в канале/группе или отправьте клиентам — по ней сразу откроется ваш магазин."},
+  sp_share_shop_text:{uz:"🏪 {shop} — do'konimizni ko'ring:",ru:"🏪 {shop} — загляните в наш магазин:"},
+  sp_share_shop_err:{uz:"Havola hozircha mavjud emas",ru:"Ссылка пока недоступна"},
   bp_contact_seller:{uz:"💬 Sotuvchi bilan bog'lanish",ru:"💬 Связаться с продавцом"},
   bp_seller_word:{uz:"Sotuvchi",ru:"Продавец"},
   bp_my_reviews:{uz:"⭐ Mening sharhlarim",ru:"⭐ Мои отзывы"},
@@ -2613,7 +2634,29 @@ function cartCount(){ return Object.values(CART.items).reduce((s,i)=>s+i.qty,0);
 function cartTotal(){ return Object.values(CART.items).reduce((s,i)=>s+i.qty*Number(i.price||0),0); }
 function updateCartFab(){
   const fab=document.getElementById('cartFab'); if(!fab) return;
-  const n=cartCount(); document.getElementById('cartFabCnt').textContent=n; fab.style.display=n>0?'flex':'none';
+  const n=cartCount();
+  const cntEl=document.getElementById('cartFabCnt'); if(cntEl) cntEl.textContent=n;
+  // Ko'rinish qoidasi: savatda mahsulot bo'lsa VA — mahsulot detali ochiq bo'lmasa
+  // (detalning o'z tugmasi bor) VA (do'kon ichida YOKI katalog mahsulot rejimida) FAB ko'rinadi.
+  let show=false;
+  if(n>0){
+    const det=document.getElementById('detail'), shp=document.getElementById('shopview');
+    const detOpen=det&&det.classList.contains('open');
+    const shopOpen=shp&&shp.classList.contains('open');
+    if(detOpen) show=false;
+    else if(shopOpen) show=true;
+    else { try{ show=(_curTab==='catalog')&&(catMode==='products'||catMode==='optom'); }
+           catch(e){ show=true; } }   // boot payti (TDZ) — count>0 bo'lsa ko'rsatamiz
+  }
+  fab.style.display=show?'flex':'none';
+}
+// Qisqa muddatli bildirishnoma (har qanday overlay ustida ko'rinadi)
+let _toastTimer=null;
+function toast(msg){
+  let el=document.getElementById('tbToast');
+  if(!el){ el=document.createElement('div'); el.id='tbToast'; el.className='toast'; document.body.appendChild(el); }
+  el.textContent=msg; el.classList.add('show');
+  clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>el.classList.remove('show'), 1600);
 }
 function _cartPut(p){
   const k=String(p.id);
@@ -2624,6 +2667,7 @@ function _cartPut(p){
   if(p.delivery_min_total!=null) CART.dmin=Number(p.delivery_min_total)||0;   // do'kon min summasi
   _saveCart();
   try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+  toast(L('added_cart'));   // ko'rinadigan tasdiq — do'kon ichida ham chiqadi
 }
 function cartAdd(p){
   // Optom (pachka) — savatga emas, to'g'ridan-to'g'ri pachka/rang checkout'iga
@@ -3133,7 +3177,8 @@ document.getElementById('backBtn').onclick = closeDetail;
     if(top){ const btn = top.querySelector('.x, .bk'); btn ? btn.click() : top.classList.remove('open'); }
     setTimeout(syncBack, 60);
   });
-  const mo = new MutationObserver(syncBack);
+  // Har qanday overlay ochilib/yopilganda: orqaga-tugma + savat FAB ko'rinishini qayta hisoblaymiz
+  const mo = new MutationObserver(()=>{ syncBack(); try{ updateCartFab(); }catch(e){} });
   document.querySelectorAll('.detail, .checkout').forEach(el=>mo.observe(el,{attributes:true, attributeFilter:['class']}));
   syncBack();
 })();
@@ -3146,7 +3191,7 @@ document.querySelectorAll('#catMode .opt').forEach(o=>o.onclick=()=>{
   document.getElementById('chips').style.display = isProd?'':'none';
   document.getElementById('search').value='';
   document.getElementById('search').placeholder = L(isProd?'search_products':'search_shops');
-  document.getElementById('cartFab').style.display = isProd? (cartCount()>0?'flex':'none') : 'none';
+  updateCartFab();   // ko'rinishni markazlashgan qoida hal qiladi (do'kon/detal holatini ham hisobga oladi)
   if(isProd) loadProducts(); else loadShops();
   saveUiState();
 });
@@ -3184,6 +3229,10 @@ async function openShop(sellerId, name){
   try{
     const items=await api('/api/products?seller_id='+sellerId);
     SHOP_ITEMS=items;
+    // Deep-link (startapp=shop_<id>) — nom uzatilmagan bo'lsa do'kon nomini mahsulotdan olamiz
+    if(name==null && items.length && items[0].shop_name){
+      document.getElementById('shopTitle').textContent='🏪 '+items[0].shop_name;
+    }
     if(!items.length){ body.innerHTML=`<div class="empty"><span class="big">📦</span>${L('bp_no_products_short')}</div>`; return; }
     body.innerHTML=`<div class="grid">${items.map(cardHtml).join('')}</div>`;
     body.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
@@ -3320,8 +3369,8 @@ function restoreUiOnBoot(){
   const st=_bootUiState;
   if(!ME || !st) return;
   // Deep-link (mahsulot/chat/taklif/referral) bilan kirilsa — o'sha kontent ochilsin, tiklamaymiz
-  try{ const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||''; if(/^(product|chat|staff|ref)[_-]/i.test(String(sp))) return; }catch(e){}
-  try{ const qs=new URLSearchParams(location.search||''); if(qs.get('product')||qs.get('staff')||qs.get('ref')) return; }catch(e){}
+  try{ const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||''; if(/^(product|chat|staff|ref|shop)[_-]/i.test(String(sp))) return; }catch(e){}
+  try{ const qs=new URLSearchParams(location.search||''); if(qs.get('product')||qs.get('staff')||qs.get('ref')||qs.get('shop')) return; }catch(e){}
   // 1) TAB — faqat ko'rinadigan/ruxsat berilgan tab (rol o'zgargan bo'lsa xavfsiz o'tkazamiz)
   if(st.tab && st.tab!==_curTab){
     const nav=document.querySelector('.navitem[data-tab="'+st.tab+'"]');
@@ -3875,7 +3924,7 @@ async function loadProfile(){
         _pfRow('🎯 '+L('sp_landmark'), f.shop_landmark, canEditShop?{key:'shop_landmark',type:'text',kind:'shop'}:null) +
         _pfRow('🕐 '+L('sp_work_hours'), f.working_hours, canEditShop?{key:'working_hours',type:'text',kind:'shop'}:null) +
         _pfRow('📆 '+L('sp_work_days'), f.working_days, canEditShop?{key:'working_days',type:'text',kind:'shop'}:null) +
-        _pfRow(L('sp_dlv_min'), (Number(f.delivery_min_total||0)>0?money(f.delivery_min_total):''), canEditShop?{key:'delivery_min_total',type:'text',kind:'shop'}:null) +
+        // Yetkazish eng kam summasi PROFILDAN → Sotuvchi (Do'kon) menyusidagi "🚚 Yetkazish eng kam summa" tugmasiga ko'chirildi
         (canEditShop && f.shop_lat==null ? `<div class="locwarn">${L('sp_loc_warn')}</div>` : '') +
         _pfRow('📍 '+L('sp_shop_location'), (f.shop_lat!=null?L('sp_loc_saved'):''), canEditShop?{key:'__location__',type:'location',kind:'shop'}:null) +
         `</div>`;
@@ -4268,10 +4317,14 @@ let _modeRestored=false;
 function restoreModeOnBoot(){
   if(_modeRestored) return; _modeRestored=true;
   if(!ME) return;  // ro'yxatdan o'tmagan — registratsiya oqimi ishlaydi
-  // Reklama/deep-link bilan kirilsa (product_/chat_) — o'sha kontentga yo'naltiramiz, rejimni majburlamaymiz.
+  // Reklama/deep-link bilan kirilsa (product_/chat_/shop_) — o'sha kontentga yo'naltiramiz,
+  // rejimni majburlamaymiz. DIQQAT: shop_ havolasi XARIDOR ko'rinishi (do'kon+savat) — sotuvchi
+  // rejimiga o'tkazsak viewCatalog display:none bo'lib savat FAB'i ko'rinmay qoladi.
   try{
     const sp=(tg.initDataUnsafe&&tg.initDataUnsafe.start_param)||'';
-    if(/^(product|chat)_\d+$/.test(String(sp))) return;
+    if(/^(product|chat|shop)_\d+$/.test(String(sp))) return;
+    const qs=new URLSearchParams(location.search||'');
+    if(qs.get('product')||qs.get('shop')) return;
   }catch(e){}
   let saved='buyer';
   try{ saved=localStorage.getItem('tezbozor_mode')||'buyer'; }catch(e){}
@@ -4746,7 +4799,8 @@ function loadSeller(){
   const owner = !!(ME && ME.is_owner);
   const canStaff = !!(ME && ME.can_manage_staff);
   const myCard = !!(ME && ME.is_staff && ME.payment_mode==='staff');
-  const acts=[['route','sp_ov_route'],['sched','sp_ov_sched'],
+  const acts=[['sharelink','sp_ov_sharelink'],['dlvmin','sp_ov_dlvmin'],
+              ['route','sp_ov_route'],['sched','sp_ov_sched'],
               ...(canStaff?[['staff','sp_ov_staff']]:[]),['chan','sp_ov_chan'],
               ['ai','sp_ov_ai'],...(myCard?[['mycard','sp_ov_mycard']]:[]),
               ...((owner && ME && ME.monetization && ME.monetization.commission)?[['commission','sp_ov_commission']]:[]),
@@ -4761,7 +4815,7 @@ function loadSeller(){
     </div>
     <div id="sellerBody"></div>`;
   v.querySelectorAll('#sellerSeg [data-sub]').forEach(o=>o.onclick=()=>{ sellerSub=o.dataset.sub; loadSeller(); });
-  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission};
+  const actMap={shop:openShopSettings, chan:openChannels, staff:openStaff, sched:openScheduled, ai:()=>openAI('seller'), route:openRoute, mycard:openMyCard, payments:openPayments, commission:openCommission, sharelink:shareShopLink, dlvmin:openDeliveryMin};
   v.querySelectorAll('#sellerSeg [data-act]').forEach(o=>o.onclick=()=>{ if(typeof markSlotSeen==='function') markSlotSeen('sact:'+o.dataset.act); actMap[o.dataset.act](); });
   if(sellerSub==='orders') loadSellerOrders();
   else if(sellerSub==='products') loadSellerProducts();
@@ -5042,7 +5096,7 @@ async function openStaffDetail(sid){
       </div>
       ${(ME&&ME.is_owner)?`
       <div style="font-weight:700;margin:8px 0 4px">${L('sp_perms_title')}</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${[...['add','conf','price','rev'], ...(s.staff_role==='manager'?['staff']:[])].map(permRow).join('')}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${[...['add','conf','price','rev','ad'], ...(s.staff_role==='manager'?['staff']:[])].map(permRow).join('')}</div>
       <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
         <button class="oact ${s.is_active?'no':'ok'}" id="sdToggle" style="width:100%">${s.is_active?L('sp_pause'):L('sp_activate')}</button>
         <button class="oact ok" id="sdRole" style="width:100%;background:var(--bg);color:var(--accent)">${s.staff_role==='manager'?L('sp_make_staff'):L('sp_make_manager')}</button>
@@ -5218,12 +5272,51 @@ async function openShopSettings(){
       card_number:s.card_number||'', card_owner:s.card_owner||'', card_type:s.card_type||'',
       payment_mode:s.payment_mode||'shop', is_owner:!!s.is_owner,
       region_id:s.region_id||null, region_label:s.region_label||'',
-      telegram_username:s.telegram_username||'',
+      telegram_username:s.telegram_username||'', seller_id:s.seller_id||null,
       lat:s.shop_lat||null, lon:s.shop_lon||null };
     renderShopSettings();
   }catch(e){ document.getElementById('shopFormBody').innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 function _fld(label,id,val,ph){ return `<div class="cosec"><div class="lbl">${label}</div><input class="coaddr" id="${id}" style="min-height:auto" placeholder="${ph||''}" value="${esc(val||'')}"></div>`; }
+// Do'kon ulashish havolasi: startapp=shop_<seller_id> — bosgan odam Mini App'da to'g'ridan-to'g'ri do'konni ochadi.
+// Sotuvchi menyusidan mustaqil chaqiriladi (ega+xodim) — seller_id/nomni o'zi /api/seller/shop'dan oladi.
+async function shareShopLink(){
+  if(!BOT_USERNAME){ try{ const cfg=await api('/api/config'); BOT_USERNAME=cfg.bot_username; CHANNEL_URL=cfg.channel_url||null; }catch(e){} }
+  let sid=null, sname='';
+  try{ const s=await api('/api/seller/shop'); sid=s.seller_id; sname=s.shop_name||''; }catch(e){}
+  if(!sid || !BOT_USERNAME){ tg.showAlert(L('sp_share_shop_err')); return; }
+  const link=`https://t.me/${BOT_USERNAME}?startapp=shop_${sid}`;
+  const txt=L('sp_share_shop_text').replace('{shop}', sname||L('bp_shop_word'));
+  try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+  try{ tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(txt)}`); }
+  catch(e){ tg.showAlert(link); }
+}
+// Yetkazish eng kam summasi — Sotuvchi menyusi tugmasi (ega tahrirlaydi, xodim faqat ko'radi).
+// fieldeditview overlay'ini qayta ishlatadi; saqlash saveField('delivery_min_total',...,'shop') → PATCH /api/seller/shop.
+async function openDeliveryMin(){
+  document.getElementById('ttl_fieldeditview').textContent='✏️ '+L('sp_dlv_min');
+  document.getElementById('fieldeditview').classList.add('open');
+  const b=document.getElementById('fieldeditBody');
+  b.innerHTML=`<div class="cobody"><div class="loading">${L('sp_loading')}</div></div>`;
+  try{
+    const s=await api('/api/seller/shop');
+    const cur=Number(s.delivery_min_total||0)>0?String(s.delivery_min_total):'';
+    if(s.is_owner){
+      b.innerHTML=`<div class="cobody"><div class="cosec"><div class="lbl">${L('sp_dlv_min')}</div>
+        <input class="coaddr" id="feInput" inputmode="numeric" style="min-height:auto" placeholder="0" value="${esc(cur)}">
+        <div style="font-size:11.5px;color:var(--hint);margin-top:6px;line-height:1.5">${L('sp_dlv_min_hint')}</div></div></div>
+        <div class="cobar"><button id="feSave">${L('s_save')}</button></div>`;
+      const inp=document.getElementById('feInput'); inp.oninput=()=>{ inp.value=inp.value.replace(/[^\d]/g,''); };
+      document.getElementById('feSave').onclick=()=>saveField('delivery_min_total', inp.value, 'shop');
+    }else{
+      b.innerHTML=`<div class="cobody">
+        <div class="cosec" style="background:var(--accent-soft);border-radius:10px;padding:10px"><div style="font-size:13px;color:var(--accent)">🔒 ${L('sp_owner_only')}</div></div>
+        <div class="cosec"><div class="lbl">${L('sp_dlv_min')}</div>
+        <div style="font-size:16px;font-weight:700">${cur?money(cur):'—'}</div>
+        <div style="font-size:11.5px;color:var(--hint);margin-top:6px;line-height:1.5">${L('sp_dlv_min_hint')}</div></div></div>`;
+    }
+  }catch(e){ b.innerHTML=`<div class="cobody"><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div></div>`; }
+}
 function renderShopSettings(){
   const b=document.getElementById('shopFormBody');
   const ro=!shopForm.is_owner;   // #10 — faqat EGA tahrirlay oladi; xodimga read-only
@@ -6248,7 +6341,7 @@ function renderProductForm(){
   }
   const optom = (pf.sale_mode==='optom');
   const addTile = pf.images.length<MAX_IMAGES
-    ? `<label class="pfadd">＋<input type="file" id="pfFile" accept="image/*" style="display:none"></label>` : '';
+    ? `<div class="pfadd" id="pfAddImg" role="button" tabindex="0">＋</div>` : '';
   // ── Rasmlar bo'limi (oddiy galereya — ikkala rejim uchun bir xil) ──
   const thumbs = pf.images.map((fid,i)=>
     `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
@@ -6262,7 +6355,7 @@ function renderProductForm(){
          <button class="oact no" id="pfVidRm" type="button" style="width:100%;margin-top:8px">${L('sp_video_remove')}</button>`
       : (pf.videoUploading
         ? `<div class="loading" style="padding:14px 0">${L('sp_video_uploading')}</div>`
-        : `<label class="oact soft full" style="display:block;text-align:center;cursor:pointer;margin:0">${L('sp_video_add')}<input type="file" id="pfVideo" accept="video/*" style="display:none"></label>`)}
+        : `<button class="oact soft full" id="pfAddVideo" type="button" style="display:block;width:100%;text-align:center;cursor:pointer;margin:0">${L('sp_video_add')}</button>`)}
     </div>`;
   // ── Optom: ranglar + pachka soni + razmerlar (TOZA TUGMALI: preset bo'lsa chip + "boshqa",
   //    preset bo'lmasa erkin matn zaxira) ──
@@ -6349,8 +6442,8 @@ function renderProductForm(){
   </div>
   <div class="cobar"><button id="pfSave">${isEdit?L('s_save'):L('sp_add_ad')}</button></div>`;
 
-  const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
-  const vidInp = document.getElementById('pfVideo'); if(vidInp) vidInp.onchange = onVideoPick;
+  const addImg = document.getElementById('pfAddImg'); if(addImg) addImg.onclick = ()=>addMedia('image');
+  const addVid = document.getElementById('pfAddVideo'); if(addVid) addVid.onclick = ()=>addMedia('video');
   const vidRm = document.getElementById('pfVidRm');
   if(vidRm) vidRm.onclick = ()=>{ pf.video_file_id=''; renderProductForm(); };
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
@@ -6472,8 +6565,70 @@ async function loadPriceInsight(id){
   catch(e){ if((e.message||'')==='pro_required'){ pf.priceInsightLocked=true; _renderPriceInsight(); } }
 }
 
+// ── Media manbasini tanlash (Android'da kamera/galereya/fayl; iOS native varaqa) ──
+// Android'da <input accept="image/*"> System Photo Picker'ni ochadi (faqat galereya) —
+// shuning uchun manba tanlashni o'zimiz beramiz. Har variant tugmasi FOYDALANUVCHI
+// harakati (gesture) ichida input.click() chaqiradi — Android buni bloklamaydi.
+function pickInput(kind, mode){
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.style.display = 'none';
+  if(mode === 'file'){
+    // Hujjatlar/Fayllar brauzeri — accept qo'ymaymiz (Photo Picker o'rniga Files ochilsin).
+    // Tur tekshiruvi onPhotoPick/onVideoPick ichida.
+    inp.setAttribute('data-anyfile', kind);
+  } else {
+    inp.accept = (kind === 'video') ? 'video/*' : 'image/*';
+    if(mode === 'camera') inp.setAttribute('capture', 'environment');   // to'g'ridan kamera
+  }
+  inp.onchange = (kind === 'video') ? onVideoPick : onPhotoPick;
+  document.body.appendChild(inp);
+  inp.click();
+  setTimeout(()=>{ try{ inp.remove(); }catch(e){} }, 60000);
+}
+function addMedia(kind){
+  // iOS: bitta input native varaqani (Kamera/Galereya/Fayl) o'zi beradi — o'zgartirmaymiz.
+  if(!IS_ANDROID){ pickInput(kind, null); return; }
+  showMediaSheet(kind);
+}
+function showMediaSheet(kind){
+  const isVid = (kind === 'video');
+  const ov = document.createElement('div');
+  ov.className = 'mediasheet-ov';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.45);display:flex;align-items:flex-end';
+  const close = ()=>{ try{ ov.remove(); }catch(e){} };
+  const rowBtn = (icon, label, mode)=>{
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = icon + '  ' + label;
+    b.style.cssText = 'width:100%;text-align:left;padding:15px 18px;font-size:16px;background:var(--card,#fff);color:var(--text,#111);border:none;border-bottom:1px solid var(--line,#eee);cursor:pointer';
+    b.onclick = ()=>{ close(); pickInput(kind, mode); };
+    return b;
+  };
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'width:100%;background:var(--card,#fff);border-radius:16px 16px 0 0;overflow:hidden;box-shadow:0 -6px 24px rgba(0,0,0,.25)';
+  const title = document.createElement('div');
+  title.textContent = L(isVid ? 'sp_media_src_video' : 'sp_media_src_photo');
+  title.style.cssText = 'padding:14px 18px 10px;font-size:13px;font-weight:700;color:var(--hint,#888)';
+  sheet.appendChild(title);
+  sheet.appendChild(rowBtn('📷', L(isVid ? 'sp_src_record' : 'sp_src_camera'), 'camera'));
+  sheet.appendChild(rowBtn('🖼', L('sp_src_gallery'), 'gallery'));
+  sheet.appendChild(rowBtn('📁', L('sp_src_file'), 'file'));
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.textContent = L('sp_src_cancel');
+  cancel.style.cssText = 'width:100%;padding:15px 18px;font-size:16px;font-weight:600;background:var(--card,#fff);color:var(--accent,#2a6);border:none;cursor:pointer';
+  cancel.onclick = close;
+  sheet.appendChild(cancel);
+  ov.appendChild(sheet);
+  ov.onclick = (e)=>{ if(e.target === ov) close(); };
+  document.body.appendChild(ov);
+}
+
 async function onPhotoPick(e){
   const f = e.target.files[0]; if(!f) return;
+  // "Fayl" manbasi (accept yo'q) — rasm ekanini tekshiramiz
+  if(f.type && !f.type.startsWith('image/')){ tg.showAlert(L('sp_not_image')); e.target.value=''; return; }
   const add = document.querySelector('.pfadd');
   if(add) add.innerHTML = `<div class="loading" style="padding:0;font-size:18px">⏳</div>`;
   const fd = new FormData(); fd.append('file', f);
@@ -6489,6 +6644,7 @@ async function onPhotoPick(e){
 
 async function onVideoPick(e){
   const f = e.target.files && e.target.files[0]; if(!f) return;
+  if(f.type && !f.type.startsWith('video/')){ tg.showAlert(L('sp_not_video')); e.target.value=''; return; }
   if(f.size > 20*1024*1024){ tg.showAlert(L('sp_video_too_big')); e.target.value=''; return; }
   // Davomiylikni lokal tekshiramiz (metadata) — 60s dan uzunini serverga yubormaymiz
   const dur = await new Promise(res=>{ try{
@@ -6573,6 +6729,8 @@ async function saveProduct(){
     if(res.blocked){ tg.showAlert(L('sp_mod_blocked')); return; }
     // Multivendor — xodim joylagan, ega tasdig'i kutilayotgan bo'lsa
     if(res.pending_owner){ tg.showAlert(L('sp_pending_owner')); return; }
+    // perm_publish_ad'li xodim — reklama AVTOMATIK joylandi (reklama ekrani kerak emas)
+    if(res.ad_published){ tg.showAlert(L('sp_ad_auto_published')); return; }
     // Yangi mahsulot — darhol reklama yasash ekraniga o'tamiz (qo'shish = reklama)
     if(wasNew && newId) openAdView(newId);
   }catch(e){
@@ -7905,6 +8063,11 @@ loadPending();   // #23 — kutilayotgan ishlar eslatmasi
     // #13 — chat push tugmasidan (startapp=chat_<order_id>) to'g'ridan-to'g'ri chatni ochamiz
     const mc = /^chat_(\d+)$/.exec(String(sp));
     if(mc) setTimeout(()=>{ try{ openChat(mc[1]); }catch(e){} }, 500);
+    // Do'kon havolasidan (startapp=shop_<seller_id>) — o'sha do'konni ochamiz
+    const msh = /^shop_(\d+)$/.exec(String(sp));
+    if(msh) setTimeout(()=>{ try{ openShop(msh[1]); }catch(e){} }, 450);
+    const qshop = new URLSearchParams(location.search||'').get('shop');
+    if(qshop && /^\d+$/.test(qshop)) setTimeout(()=>{ try{ openShop(qshop); }catch(e){} }, 450);
   }catch(e){}
 })();
 </script>

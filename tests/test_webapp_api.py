@@ -451,6 +451,14 @@ def test_edit_shop_region(client):
     assert bad.status_code == 400
 
 
+def test_seller_shop_returns_seller_id(client):
+    """Do'kon ulashish havolasi uchun: /api/seller/shop javobida seller_id (ega id'si) qaytadi."""
+    db = webapp_server.db
+    sid = db.get_product_by_id(client.pid)["seller_id"]
+    got = client.get("/api/seller/shop", headers=hdr(5002)).json()
+    assert got.get("seller_id") == sid
+
+
 def test_edit_shop_telegram_username(client):
     """Sotuvchi kontakt username (bot edit_telegram pariteti): saqlash, '@'/bo'shliq
     tozalanishi, GET'da qaytishi, yaroqsizi 400, bo'sh qiymat tozalashi."""
@@ -1552,7 +1560,7 @@ def test_staff_detail_200(client):
     assert r.status_code == 200
     body = r.json()
     assert "stats" in body and "perms" in body
-    assert set(body["perms"].keys()) == {"add", "conf", "price", "rev", "staff"}
+    assert set(body["perms"].keys()) == {"add", "conf", "price", "rev", "staff", "ad"}
 
 
 def test_staff_detail_not_owner_403(client):
@@ -1589,6 +1597,38 @@ def test_staff_perm_toggle(client):
     rb = client.post(f"/api/seller/staff/{stid}/perm", headers=hdr(5002),
                      json={"key": "bad"})
     assert rb.status_code == 400
+
+
+def test_perm_publish_ad_bypasses_approval(client, monkeypatch):
+    """perm_publish_ad'li xodim owner_approve do'konda ham TASDIQSIZ mahsulot qo'shadi
+    va reklama AVTOMATIK joylanadi (pending post)."""
+    async def fake_mod(*, name, description="", lang="uz"):
+        return {"flagged": False, "category": "", "reason": ""}
+    monkeypatch.setattr(webapp_server.ai_assistant, "moderate_product", fake_mod)
+    db = webapp_server.db
+    sid, stid, uid = _shop_with_staff(client)
+    db.update_shop(sid, moderation="owner_approve")
+    # perm_publish_ad YOQ — hozircha tasdiq kutadi
+    r0 = client.post("/api/seller/product", headers=hdr(6002), json={"name": "A", "price": 1000})
+    assert r0.json()["pending_owner"] is True and r0.json()["ad_published"] is False
+    # ega perm_publish_ad beradi
+    db.update_staff(stid, perm_publish_ad=1)
+    r = client.post("/api/seller/product", headers=hdr(6002), json={"name": "B", "price": 2000})
+    body = r.json()
+    assert body["pending_owner"] is False and body["ad_published"] is True
+    pid = body["product_id"]
+    assert db.get_product_by_id(pid)["status"] == "active"
+    assert any(p["product_id"] == pid and p["image_id"] is None
+               for p in db.get_pending_scheduled_posts())
+
+
+def test_perm_publish_ad_toggle_key(client):
+    """'ad' ruxsati toggle qilinadi (STAFF_PERM_KEYS'da bor)."""
+    _, stid, _ = _shop_with_staff(client)
+    r = client.post(f"/api/seller/staff/{stid}/perm", headers=hdr(5002), json={"key": "ad"})
+    assert r.status_code == 200 and r.json()["key"] == "ad"
+    # default 0 -> toggle 1
+    assert r.json()["value"] is True
 
 
 def test_cancel_respond_deny_disputes(client):
@@ -1698,6 +1738,52 @@ def test_ad_publish_creates_scheduled_post(client):
     pend = webapp_server.db.get_pending_scheduled_posts()
     assert any(p["product_id"] == client.pid and p["caption"] == "Mening reklama matnim"
                and p["image_id"] is None for p in pend)
+
+
+def test_owner_approve_auto_publishes_ad(client, monkeypatch):
+    """Xodim (owner_approve do'konda) mahsulot qo'shsa -> pending_owner. Ega tasdiqlasa
+    mahsulot active bo'ladi VA reklama avtomatik kanal/guruhlarga chiqadi (pending post)."""
+    async def fake_mod(*, name, description="", lang="uz"):
+        return {"flagged": False, "category": "", "reason": ""}
+    monkeypatch.setattr(webapp_server.ai_assistant, "moderate_product", fake_mod)
+    db = webapp_server.db
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    shop_id = db.create_shop(owner_id)
+    db.update_shop(shop_id, moderation="owner_approve")
+    staff_uid = db.create_user(telegram_id=5017, phone_number="998900000017", name="Xd", role="seller")
+    db.add_staff(shop_id, staff_uid, staff_role="staff", is_active=1)
+    # Xodim mahsulot qo'shadi -> ega tasdig'ini kutadi
+    r = client.post("/api/seller/product", headers=hdr(5017), json={"name": "Krossovka", "price": 200000})
+    assert r.status_code == 200 and r.json()["pending_owner"] is True
+    pid = r.json()["product_id"]
+    assert db.get_product_by_id(pid)["status"] == "pending_owner"
+    # Tasdiqdan OLDIN reklama post yo'q
+    assert not any(p["product_id"] == pid for p in db.get_pending_scheduled_posts())
+    # Ega tasdiqlaydi -> active + avto-reklama post
+    a = client.post(f"/api/seller/product/{pid}/approve", headers=hdr(5002), json={"approve": True})
+    assert a.status_code == 200 and a.json()["approved"] is True
+    assert db.get_product_by_id(pid)["status"] == "active"
+    assert any(p["product_id"] == pid and p["image_id"] is None
+               for p in db.get_pending_scheduled_posts())
+
+
+def test_owner_reject_no_ad(client, monkeypatch):
+    """Ega RAD etsa -> mahsulot o'chadi, reklama post yaratilmaydi."""
+    async def fake_mod(*, name, description="", lang="uz"):
+        return {"flagged": False, "category": "", "reason": ""}
+    monkeypatch.setattr(webapp_server.ai_assistant, "moderate_product", fake_mod)
+    db = webapp_server.db
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    shop_id = db.create_shop(owner_id)
+    db.update_shop(shop_id, moderation="owner_approve")
+    staff_uid = db.create_user(telegram_id=5018, phone_number="998900000018", name="Xd2", role="seller")
+    db.add_staff(shop_id, staff_uid, staff_role="staff", is_active=1)
+    r = client.post("/api/seller/product", headers=hdr(5018), json={"name": "Etik", "price": 300000})
+    pid = r.json()["product_id"]
+    a = client.post(f"/api/seller/product/{pid}/approve", headers=hdr(5002), json={"approve": False})
+    assert a.status_code == 200 and a.json()["approved"] is False
+    assert db.get_product_by_id(pid)["status"] == "deleted"
+    assert not any(p["product_id"] == pid for p in db.get_pending_scheduled_posts())
 
 
 # ===== Mahsulot savollari (atributlar) — 3 rejim =====

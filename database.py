@@ -700,6 +700,7 @@ class Database:
                 perm_edit_price    INTEGER DEFAULT 1,
                 perm_reply_reviews INTEGER DEFAULT 1,
                 perm_add_staff     INTEGER DEFAULT 0,   -- xodim qo'shish (menejer; default O'CHIQ)
+                perm_publish_ad    INTEGER DEFAULT 0,   -- reklamani TASDIQSIZ o'zi joylashi (default O'CHIQ)
                 card_number TEXT,
                 card_owner TEXT,
                 card_type TEXT,
@@ -713,6 +714,11 @@ class Database:
         # perm_add_staff — eski bazalar uchun idempotent qo'shamiz (menejerga xodim qo'shish ruxsati)
         try:
             cursor.execute("ALTER TABLE shop_staff ADD COLUMN perm_add_staff INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        # perm_publish_ad — reklamani ega tasdig'isiz to'g'ridan-to'g'ri joylash (eski bazalarga idempotent)
+        try:
+            cursor.execute("ALTER TABLE shop_staff ADD COLUMN perm_publish_ad INTEGER DEFAULT 0")
         except Exception:
             pass
         cursor.execute("""

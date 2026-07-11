@@ -3040,7 +3040,7 @@ def _staff_in_shop(shop_id, staff_id):
 # #3 — xodim ruxsatlari (bot PERM_KEYS pariteti): kalit -> DB ustuni
 STAFF_PERM_KEYS = {"add": "perm_add_product", "conf": "perm_confirm_orders",
                    "price": "perm_edit_price", "rev": "perm_reply_reviews",
-                   "staff": "perm_add_staff"}
+                   "staff": "perm_add_staff", "ad": "perm_publish_ad"}
 
 
 @app.get("/api/seller/staff")
@@ -3616,8 +3616,25 @@ def api_approve_product(product_id: int, body: ApproveIn, authorization: str = H
         raise HTTPException(status_code=403, detail="not_owner")
     if prod.get("status") != "pending_owner":
         raise HTTPException(status_code=409, detail="not_pending")
-    db.set_product_status(product_id, "active" if body.approve else "deleted")
-    return {"ok": True}
+    if not body.approve:
+        db.set_product_status(product_id, "deleted")
+        return {"ok": True, "approved": False}
+    # TASDIQLANDI — mahsulot faollashadi VA reklama AVTOMATIK kanal/guruhlarga chiqadi.
+    # Ega tasdig'i = "e'lon qil" ruxsati: xodim pending_owner tufayli reklama ekraniga
+    # o'tolmagan, shuning uchun tasdiqda uning o'rniga biz e'lonni yuboramiz (aks holda
+    # tayyor reklama hech qayerga chiqmasdi). api_ad_publish bilan bir xil mexanizm:
+    # hozirgi vaqtga 'pending' post -> bot scan job (~30s) topib post_product_to_channel'ni
+    # ishga tushiradi (markaziy kanal + sotuvchining barcha ulangan kanal/guruhlari).
+    # image_id/caption=None -> bot AI reklama dizayni + matnini o'zi quradi.
+    db.set_product_status(product_id, "active")
+    try:
+        sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        db.create_scheduled_post(product_id, prod["seller_id"], sa,
+                                 created_by=(prod.get("created_by") or user["id"]),
+                                 caption=None, parse_mode=None, image_id=None)
+    except Exception as e:
+        logging.warning(f"tasdiqda avto-reklama post yaratilmadi (pid {product_id}): {e}")
+    return {"ok": True, "approved": True}
 
 
 @app.get("/api/seller/stats")
@@ -3725,6 +3742,8 @@ def api_get_shop(authorization: str = Header(None)):
     shop = db.get_shop_by_owner(user["id"])
     out["payment_mode"] = (dict(shop).get("payment_mode") if shop else None) or "shop"
     out["is_owner"] = bool(shop)
+    # Do'kon ulashish havolasi uchun — mahsulotlar ostida ko'rinadigan EGA id'si (xodim ham shu id ostida)
+    out["seller_id"] = _owner_id(user)
     return out
 
 
@@ -4485,7 +4504,13 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
     if flim > 0 and not _is_pro(owner_id) and db.count_active_products(owner_id) >= flim:
         raise HTTPException(status_code=403, detail="free_limit_reached")
     shop = db.get_shop_for_user(user["id"])
-    needs_owner_approval = bool(is_staff and shop and dict(shop).get("moderation") == "owner_approve")
+    # perm_publish_ad — "reklamani tasdiqsiz o'zi joylash" ruxsatli xodim ega tasdig'ini
+    # CHETLAB O'TADI: mahsuloti darhol faol bo'ladi va reklama AVTOMATIK kanal/guruhlarga
+    # chiqadi (qo'lda "Reklama joylash" tugmasini bosish shart emas).
+    can_auto_ad = bool(is_staff and dict(staff).get("perm_publish_ad"))
+    needs_owner_approval = bool(is_staff and shop
+                               and dict(shop).get("moderation") == "owner_approve"
+                               and not can_auto_ad)
     # #5 AVTO-MODERATSIYA — taqiqlangan tovar/kontent bo'lsa jonli efirga CHIQARMAYMIZ.
     # AI o'chiq yoki xato bo'lsa mod=None → oddiy o'tadi (hammasi bloklanmaydi).
     lang = get_user_lang(user) or DEFAULT_LANG
@@ -4556,8 +4581,22 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
     _save_attrs(pid, p.attributes)
     if blocked:
         background.add_task(_notify_admins_moderation, pid, name, user, mod)
+    # perm_publish_ad'li xodim: reklama AVTOMATIK chiqadi (ega tasdig'isiz). api_ad_publish
+    # bilan bir xil mexanizm — hozirgi vaqtga pending post, bot scan-job (~30s) post_product_to_channel'ni
+    # ishga tushiradi (markaziy kanal + do'konning barcha ulangan kanal/guruhlari). caption/image=None
+    # -> bot AI reklama dizayni + matnini o'zi quradi.
+    ad_published = False
+    if can_auto_ad and not blocked:
+        try:
+            sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            db.create_scheduled_post(pid, owner_id, sa, created_by=user["id"],
+                                     caption=None, parse_mode=None, image_id=None)
+            ad_published = True
+        except Exception as e:
+            logging.warning(f"perm_publish_ad avto-reklama post yaratilmadi (pid {pid}): {e}")
     return {"ok": True, "product_id": pid, "blocked": blocked,
             "pending_owner": bool(needs_owner_approval and not blocked),
+            "ad_published": ad_published,
             "moderation": (mod if blocked else None)}
 
 
