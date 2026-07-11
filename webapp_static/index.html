@@ -850,6 +850,7 @@ const I18N = {
   sp_video_too_big:{uz:"Video juda katta — 20 MB dan oshmasin.",ru:"Видео слишком большое — не более 20 МБ."},
   sp_video_too_long:{uz:"Video juda uzun — 60 soniyadan oshmasin.",ru:"Видео слишком длинное — не более 60 секунд."},
   sp_video_failed:{uz:"Video yuklanmadi: ",ru:"Видео не загружено: "},
+  sp_ad_video_note:{uz:"🎬 Kanalga e'lon shu VIDEO bilan chiqadi",ru:"🎬 Объявление в канал выйдет с этим ВИДЕО"},
   courier:{uz:"🚚 Yetkazib berish",ru:"🚚 Доставка"}, address_ph:{uz:"Manzil: ko'cha, uy, mo'ljal...",ru:"Адрес: улица, дом, ориентир..."},
   send_location:{uz:"📍 Joylashuvni yuborish (majburiy)",ru:"📍 Отправить геолокацию (обязательно)"}, loc_got:{uz:"✓ Joylashuv olindi (qayta olish)",ru:"✓ Геолокация получена (заново)"},
   need_location:{uz:"Yetkazib berish uchun joylashuvni yuboring — kuryer sizni topishi uchun shart.",ru:"Для доставки отправьте геолокацию — это нужно курьеру, чтобы вас найти."},
@@ -6665,6 +6666,7 @@ async function loadAdPreview(){
     adState.caption = d.caption || '';
     adState.image = d.image || null;
     adState.has_design = !!d.has_design;
+    adState.video_file_id = d.video_file_id || null;
   }catch(e){ tg.showAlert(L('sp_ad_failed')+(e.message||e)); }
   adState.loading = false; renderAdView();
 }
@@ -6675,9 +6677,13 @@ function renderAdView(){
     body.innerHTML = `<div class="loading" style="padding:40px;text-align:center">⏳ ${L('sp_ad_loading')}</div>`;
     return;
   }
-  const img = adState.image
-    ? `<img src="${adState.image}" style="width:100%;border-radius:14px;display:block">`
-    : `<div style="padding:14px;background:var(--accent-soft);border-radius:12px;color:var(--hint);font-size:13px">${L('sp_ad_no_design')}</div>`;
+  // Video bor mahsulotda kanal posti VIDEO bilan chiqadi — preview'da ham videoni ko'rsatamiz
+  const img = adState.video_file_id
+    ? `<video src="${vidUrl(adState.video_file_id)}" controls playsinline preload="metadata" style="width:100%;max-height:300px;border-radius:14px;background:#000;display:block"></video>
+       <div style="margin-top:7px;padding:9px 12px;background:var(--accent-soft);border-radius:10px;font-size:12px;font-weight:600;color:var(--accent)">${L('sp_ad_video_note')}</div>`
+    : (adState.image
+      ? `<img src="${adState.image}" style="width:100%;border-radius:14px;display:block">`
+      : `<div style="padding:14px;background:var(--accent-soft);border-radius:12px;color:var(--hint);font-size:13px">${L('sp_ad_no_design')}</div>`);
   body.innerHTML = `<div class="cobody">
     <div class="cosec">${img}</div>
     <div class="cosec"><div class="lbl">${L('sp_ad_length')}</div><div class="seg col">

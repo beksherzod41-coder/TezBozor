@@ -3475,12 +3475,16 @@ async def api_ad_preview(product_id: int, length: str = Query("long"),
     length = length if length in ("long", "short") else "long"
     lang = get_user_lang(user) or DEFAULT_LANG
     caption, parse_mode = await _build_ad_caption_web(prod, length, lang)
-    design = await _build_ad_design_web(prod)
+    # Video bor mahsulotda kanal posti VIDEO bilan chiqadi — dizayn rasm yasalmaydi,
+    # preview'da ham video ko'rsatiladi (post bilan 100% mos bo'lsin).
+    video_fid = prod.get("video_file_id")
+    design = None if video_fid else await _build_ad_design_web(prod)
     image = None
     if design:
         image = "data:image/jpeg;base64," + base64.b64encode(design).decode("ascii")
     return {"caption": caption, "parse_mode": parse_mode,
-            "image": image, "has_design": bool(design)}
+            "image": image, "has_design": bool(design),
+            "has_video": bool(video_fid), "video_file_id": video_fid}
 
 
 class AdPublishIn(BaseModel):

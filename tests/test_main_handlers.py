@@ -181,3 +181,44 @@ def test_admin_notified_on_new_order(env, monkeypatch):
     calls = ctx.bot.send_message.await_args_list
     assert any(c.kwargs.get("chat_id") == 1 and "Yangi buyurtma" in (c.kwargs.get("text") or "")
                for c in calls), "Adminga (chat_id=1) yangi buyurtma push'i ketmadi"
+
+
+# ==================== KANAL POSTI: video bilan / videosiz ====================
+def _channel_bot():
+    """post_product_to_channel uchun fake bot (hamma send_* chaqiruvlarni yozadi)."""
+    return types.SimpleNamespace(
+        get_me=AsyncMock(return_value=types.SimpleNamespace(username="TestBot")),
+        send_video=AsyncMock(return_value=types.SimpleNamespace(message_id=11)),
+        send_photo=AsyncMock(return_value=types.SimpleNamespace(message_id=12, photo=[])),
+        send_message=AsyncMock(return_value=types.SimpleNamespace(message_id=13)),
+    )
+
+
+def test_channel_post_uses_video_when_present(env, monkeypatch):
+    """Mahsulotda video bo'lsa kanal posti VIDEO + caption + tugma bilan chiqadi
+    (rasm yuborilmaydi, dizayn ham yasalmaydi)."""
+    env.db.update_product_fields(env.product, video_file_id="VID_chan")
+    monkeypatch.setattr(main, "CHANNEL_ID", "@testchan")
+    monkeypatch.setattr(main, "_build_ad_caption", AsyncMock(return_value=("Reklama matni", None)))
+    design_mock = AsyncMock(return_value=None)
+    monkeypatch.setattr(main, "_build_ad_design_bytes", design_mock)
+    bot = _channel_bot()
+    run(main.post_product_to_channel(types.SimpleNamespace(bot=bot), env.product))
+    assert bot.send_video.await_count == 1, "video posti ketishi shart"
+    kw = bot.send_video.await_args.kwargs
+    assert kw["video"] == "VID_chan" and kw["caption"] == "Reklama matni"
+    assert kw["reply_markup"] is not None, "Sotib olish tugmasi bo'lishi shart"
+    assert bot.send_photo.await_count == 0
+    assert design_mock.await_count == 0, "video borida dizayn yasalmasin (CPU tejash)"
+
+
+def test_channel_post_photo_flow_when_no_video(env, monkeypatch):
+    """Videosiz mahsulot — eski oqim (rasm/dizayn), send_video chaqirilmaydi."""
+    monkeypatch.setattr(main, "CHANNEL_ID", "@testchan")
+    monkeypatch.setattr(main, "_build_ad_caption", AsyncMock(return_value=("Matn", None)))
+    monkeypatch.setattr(main, "_build_ad_design_bytes", AsyncMock(return_value=None))
+    bot = _channel_bot()
+    run(main.post_product_to_channel(types.SimpleNamespace(bot=bot), env.product))
+    assert bot.send_video.await_count == 0
+    # fixture mahsulotida rasm yo'q -> matnli post; rasmli bo'lsa send_photo bo'lardi
+    assert bot.send_message.await_count + bot.send_photo.await_count >= 1

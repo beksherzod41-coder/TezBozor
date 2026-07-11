@@ -8398,13 +8398,18 @@ async def post_product_to_channel(context, product_id, *,
                     seen.add(str(cid))
 
         photo = product.get('image_url')
+        # Video MVP: mahsulotda video bo'lsa kanal posti VIDEO + reklama matni bilan
+        # chiqadi (video jonli ko'rsatadi — dizayn rasm kerak emas). file_id bir bot
+        # ichida hamma chatga qayta ishlatiladi.
+        video_id = product.get('video_file_id')
 
         # === REKLAMA DIZAYNI (B) ===
         # image_override berilsa — tayyor file_id ni hamma kanalga qayta ishlatamiz.
         # Aks holda dizaynni yasab, birinchi yuborishdan keyin file_id ni eslab qolamiz.
+        # Video bor bo'lsa dizayn yasalmaydi (bekorga CPU sarflamaymiz).
         reusable_id = image_override
         designed_bytes = None
-        if reusable_id is None:
+        if reusable_id is None and not video_id:
             designed_bytes = await _build_ad_design_bytes(context, product)
 
         # Forum topic bilan bog'liq (vaqtinchalik) xatolar — guruhni o'chirmaymiz, General ga qaytamiz
@@ -8415,8 +8420,41 @@ async def post_product_to_channel(context, product_id, *,
 
         async def _send_to(chat_id, thread_id):
             """Bitta chatga (forum bo'lsa topic ichiga) reklamani yuboradi.
-            Caption 1024 belgidan uzun bo'lsa — rasm va to'liq matnni ajratib yuboradi."""
-            nonlocal reusable_id
+            Caption 1024 belgidan uzun bo'lsa — rasm/video va to'liq matnni ajratib yuboradi."""
+            nonlocal reusable_id, video_id
+            if video_id:
+                # Video posti. file_id eskirgan/buzuq bo'lsa — rasmli oqimga qaytamiz
+                # (kanal o'chirilmasin, post baribir chiqsin).
+                try:
+                    if too_long:
+                        sent = await context.bot.send_video(
+                            chat_id=chat_id, video=video_id, message_thread_id=thread_id,
+                            supports_streaming=True,
+                        )
+                        sent_refs.append({'chat_id': chat_id, 'message_id': sent.message_id})
+                        sent2 = await context.bot.send_message(
+                            chat_id=chat_id, text=caption, parse_mode=caption_parse_mode,
+                            reply_markup=keyboard, message_thread_id=thread_id,
+                        )
+                        sent_refs.append({'chat_id': chat_id, 'message_id': sent2.message_id})
+                    else:
+                        sent = await context.bot.send_video(
+                            chat_id=chat_id, video=video_id,
+                            caption=caption, parse_mode=caption_parse_mode,
+                            reply_markup=keyboard, message_thread_id=thread_id,
+                            supports_streaming=True,
+                        )
+                        sent_refs.append({'chat_id': chat_id, 'message_id': sent.message_id})
+                    return
+                except BadRequest as e:
+                    _m = str(e).lower()
+                    if any(x in _m for x in ("wrong file identifier", "file_id",
+                                             "failed to get http url content",
+                                             "wrong type of the web page content")):
+                        logging.warning(f"Video file_id yaroqsiz (product {product_id}): {e} — rasmli postga qaytamiz")
+                        video_id = None   # quyidagi rasmli oqim davom etadi (asl rasm bilan)
+                    else:
+                        raise
             if reusable_id:
                 send_photo_arg = reusable_id
             elif designed_bytes is not None:
