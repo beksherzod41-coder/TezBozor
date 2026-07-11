@@ -1498,7 +1498,8 @@ const I18N = {
   sp_media_src_photo:{uz:"Rasm qo'shish",ru:"Добавить фото"}, sp_media_src_video:{uz:"Video qo'shish",ru:"Добавить видео"},
   sp_src_camera:{uz:"Suratga olish",ru:"Сделать фото"}, sp_src_record:{uz:"Video yozib olish",ru:"Записать видео"},
   sp_src_gallery:{uz:"Galereya",ru:"Галерея"}, sp_src_file:{uz:"Fayl tanlash",ru:"Выбрать файл"}, sp_src_cancel:{uz:"Bekor qilish",ru:"Отмена"},
-  sp_src_camera_hint:{uz:"📷 Yangi surat/video olish uchun telefon kamerasida oling, so'ng «Galereya»dan tanlang (Android'da Telegram ilova ichidan kamerani ochib bo'lmaydi).",ru:"📷 Чтобы снять новое фото/видео, сделайте снимок камерой телефона, затем выберите его в «Галерее» (в Android камеру нельзя открыть внутри Telegram)."},
+  sp_src_camera_hint:{uz:"Kamera ochilmadi — Telegram ilovasini yangilang yoki rasm/videoni Galereyadan tanlang.",ru:"Не удалось открыть камеру — обновите Telegram или выберите фото/видео из Галереи."},
+  sp_video_format_bad:{uz:"Bu video formati qabul qilinmadi. Galereyadan tanlab ko'ring.",ru:"Этот формат видео не принят. Попробуйте выбрать из Галереи."},
   sp_not_image:{uz:"Faqat rasm fayli tanlang.",ru:"Выберите только изображение."}, sp_not_video:{uz:"Faqat video fayli tanlang.",ru:"Выберите только видеофайл."},
   sp_order_by:{uz:"Joylagan",ru:"Сотрудник"},
   reorder_btn:{uz:"🔄 Qayta buyurtma",ru:"🔄 Заказать снова"},
@@ -6603,7 +6604,7 @@ function showMediaSheet(kind){
     b.type = 'button';
     b.textContent = icon + '  ' + label;
     b.style.cssText = 'width:100%;text-align:left;padding:15px 18px;font-size:16px;background:var(--card,#fff);color:var(--text,#111);border:none;border-bottom:1px solid var(--line,#eee);cursor:pointer';
-    b.onclick = ()=>{ close(); pickInput(kind, mode); };
+    b.onclick = ()=>{ close(); (mode==='camera') ? openCamera(kind) : pickInput(kind, mode); };
     return b;
   };
   const sheet = document.createElement('div');
@@ -6612,15 +6613,13 @@ function showMediaSheet(kind){
   title.textContent = L(isVid ? 'sp_media_src_video' : 'sp_media_src_photo');
   title.style.cssText = 'padding:14px 18px 10px;font-size:13px;font-weight:700;color:var(--hint,#888)';
   sheet.appendChild(title);
-  // DIQQAT: Android Telegram WebView <input capture> ni QO'LLAMAYDI — Mini App ichidan
-  // kamera ochib bo'lmaydi (Telegram Mini Apps issue #681). Shuning uchun kamera varianti
-  // YO'Q; faqat ishlaydigan Galereya + Fayl. (iOS bu varaqani ishlatmaydi — native beradi.)
+  // Android Telegram WebView <input capture> ni QO'LLAMAYDI (issue #681) — shuning uchun
+  // "kamera" bu yerda WebRTC (getUserMedia) bilan O'ZIMIZNING jonli kamera oynamizni ochadi
+  // (Telegram 2023-12+ Android'da Mini App'ga kamera ruxsatini beradi). Ochilmasa —
+  // openCamera o'zi galereyaga qaytaradi. (iOS bu varaqani ishlatmaydi — native beradi.)
+  sheet.appendChild(rowBtn('📷', L(isVid ? 'sp_src_record' : 'sp_src_camera'), 'camera'));
   sheet.appendChild(rowBtn('🖼', L('sp_src_gallery'), 'gallery'));
   sheet.appendChild(rowBtn('📁', L('sp_src_file'), 'file'));
-  const hint = document.createElement('div');
-  hint.textContent = L('sp_src_camera_hint');
-  hint.style.cssText = 'padding:10px 18px;font-size:12px;color:var(--hint,#888);line-height:1.4';
-  sheet.appendChild(hint);
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.textContent = L('sp_src_cancel');
@@ -6632,35 +6631,136 @@ function showMediaSheet(kind){
   document.body.appendChild(ov);
 }
 
-async function onPhotoPick(e){
-  const f = e.target.files[0]; if(!f) return;
-  // "Fayl" manbasi (accept yo'q) — rasm ekanini tekshiramiz
-  if(f.type && !f.type.startsWith('image/')){ tg.showAlert(L('sp_not_image')); e.target.value=''; return; }
+// ── WebRTC KAMERA (Android Mini App) ────────────────────────────────────────
+// <input capture> Android Telegram WebView'da ishlamaydi, LEKIN Telegram 2023-12+
+// (Bot API 7.0) Mini App'ga getUserMedia kamera/mikrofon ruxsatini beradi — shundan
+// foydalanib O'ZIMIZNING kamera oynamizni quramiz: jonli ko'rinish + suratga olish
+// (canvas→JPEG) + video yozish (MediaRecorder, 60s avto-stop) + old/orqa almashtirish.
+// Ruxsat rad etilsa yoki eski Telegram bo'lsa — galereyaga muloyim qaytamiz.
+let _camStream=null, _camRec=null, _camChunks=[], _camTimer=null, _camCancelled=false, _camFacing='environment';
+function _camStop(){
+  try{ if(_camRec && _camRec.state!=='inactive') _camRec.stop(); }catch(e){}
+  try{ ((_camStream&&_camStream.getTracks())||[]).forEach(t=>t.stop()); }catch(e){}
+  _camStream=null; clearInterval(_camTimer); _camTimer=null;
+  const ov=document.getElementById('camOverlay'); if(ov) ov.remove();
+}
+async function openCamera(kind){
+  const isVid = (kind==='video');
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)){
+    tg.showAlert(L('sp_src_camera_hint')); pickInput(kind,'gallery'); return;
+  }
+  _camCancelled=false; _camRec=null;
+  const ov=document.createElement('div'); ov.id='camOverlay';
+  ov.style.cssText='position:fixed;inset:0;z-index:9500;background:#000;display:flex;flex-direction:column';
+  ov.innerHTML=`<video id="camVid" autoplay playsinline muted style="flex:1;width:100%;min-height:0;object-fit:cover;background:#000"></video>
+    <div id="camTimer" style="display:none;position:absolute;top:calc(14px + var(--safe-top,0px));left:50%;transform:translateX(-50%);background:rgba(220,38,38,.92);color:#fff;font-weight:700;padding:4px 14px;border-radius:12px;font-size:14px">● 0:00</div>
+    <button id="camClose" type="button" style="position:absolute;top:calc(10px + var(--safe-top,0px));right:12px;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:20px;width:40px;height:40px;border-radius:50%;cursor:pointer">✕</button>
+    <div style="display:flex;align-items:center;justify-content:space-around;padding:16px 20px calc(20px + var(--safe-bottom,0px));background:#000;flex:0 0 auto">
+      <button id="camSwitch" type="button" style="background:rgba(255,255,255,.15);color:#fff;border:none;font-size:22px;width:48px;height:48px;border-radius:50%;cursor:pointer">🔄</button>
+      <button id="camShot" type="button" style="background:${isVid?'#dc2626':'#fff'};border:4px solid rgba(255,255,255,.45);width:72px;height:72px;border-radius:50%;font-size:26px;cursor:pointer">${isVid?'':'📷'}</button>
+      <div style="width:48px"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('camClose').onclick=()=>{ _camCancelled=true; _camStop(); };
+  const start=async()=>{
+    try{
+      _camStream=await navigator.mediaDevices.getUserMedia(
+        {video:{facingMode:_camFacing, width:{ideal:1280}, height:{ideal:1280}}, audio:isVid});
+    }catch(err){
+      _camStop(); tg.showAlert(L('sp_src_camera_hint')); pickInput(kind,'gallery'); return false;
+    }
+    const v=document.getElementById('camVid'); if(v) v.srcObject=_camStream;
+    return true;
+  };
+  if(!await start()) return;
+  document.getElementById('camSwitch').onclick=async()=>{
+    if(_camRec) return;   // yozuv paytida almashtirmaymiz
+    _camFacing=(_camFacing==='environment'?'user':'environment');
+    try{ ((_camStream&&_camStream.getTracks())||[]).forEach(t=>t.stop()); }catch(e){}
+    await start();
+  };
+  const shot=document.getElementById('camShot');
+  if(!isVid){
+    shot.onclick=()=>{
+      const v=document.getElementById('camVid'); if(!v) return;
+      const c=document.createElement('canvas');
+      c.width=v.videoWidth||1280; c.height=v.videoHeight||720;
+      try{ c.getContext('2d').drawImage(v,0,0,c.width,c.height); }catch(e){ _camStop(); tg.showAlert(L('sp_img_failed')+e.message); return; }
+      c.toBlob(async b=>{
+        _camStop();
+        if(!b){ tg.showAlert(L('sp_img_failed')); return; }
+        await uploadPhotoFile(new File([b],'camera.jpg',{type:'image/jpeg'}));
+      },'image/jpeg',0.88);
+    };
+  } else {
+    shot.onclick=()=>{
+      if(_camRec){ try{ _camRec.stop(); }catch(e){} return; }   // ⏹ — to'xtatish (onstop yuklaydi)
+      let mime='';
+      try{
+        for(const m of ['video/mp4','video/webm;codecs=vp9,opus','video/webm'])
+          if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)){ mime=m; break; }
+      }catch(e){}
+      try{ _camRec=new MediaRecorder(_camStream, mime?{mimeType:mime}:undefined); }
+      catch(err){ _camStop(); tg.showAlert(L('sp_src_camera_hint')); pickInput(kind,'gallery'); return; }
+      _camChunks=[];
+      _camRec.ondataavailable=e=>{ if(e.data && e.data.size) _camChunks.push(e.data); };
+      _camRec.onstop=async()=>{
+        const rec=_camRec; _camRec=null;
+        const type=(rec&&rec.mimeType)||mime||'video/webm';
+        const chunks=_camChunks; _camChunks=[];
+        _camStop();
+        if(_camCancelled || !chunks.length) return;   // ✕ bilan yopilgan — yuklamaymiz
+        const ext=type.indexOf('mp4')>=0?'mp4':'webm';
+        await uploadVideoFile(new File([new Blob(chunks,{type})],'camera.'+ext,{type}));
+      };
+      _camRec.start(250);
+      shot.textContent='⏹'; shot.style.background='#fff';
+      const tEl=document.getElementById('camTimer'); if(tEl) tEl.style.display='block';
+      const t0=Date.now();
+      _camTimer=setInterval(()=>{
+        const s=Math.floor((Date.now()-t0)/1000);
+        if(tEl) tEl.textContent='● '+Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+        if(s>=60){ try{ if(_camRec) _camRec.stop(); }catch(e){} }   // 60s — avto-stop
+      },250);
+    };
+  }
+}
+
+async function uploadPhotoFile(f){
+  // Yagona rasm-yuklash yo'li: galereya/fayl tanlovi HAM, WebRTC kamera kadri HAM shu yerdan o'tadi.
   const add = document.querySelector('.pfadd');
   if(add) add.innerHTML = `<div class="loading" style="padding:0;font-size:18px">⏳</div>`;
-  const fd = new FormData(); fd.append('file', f);
+  const fd = new FormData(); fd.append('file', f, f.name||'photo.jpg');
   try{
     const r = await fetch('/api/seller/product/photo', {method:'POST', headers:{Authorization:AUTH}, body:fd});
     if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
     pf.images.push((await r.json()).file_id);
     if(!pf.imageLabels) pf.imageLabels=[];
     pf.imageLabels.push('');   // rasm bilan parallel rang nomi (optom)
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(err){}
   }catch(err){ tg.showAlert(L('sp_img_failed')+err.message); }
   renderProductForm();
 }
+async function onPhotoPick(e){
+  const f = e.target.files[0]; if(!f) return;
+  // "Fayl" manbasi (accept yo'q) — rasm ekanini tekshiramiz
+  if(f.type && !f.type.startsWith('image/')){ tg.showAlert(L('sp_not_image')); e.target.value=''; return; }
+  await uploadPhotoFile(f);
+}
 
-async function onVideoPick(e){
-  const f = e.target.files && e.target.files[0]; if(!f) return;
-  if(f.type && !f.type.startsWith('video/')){ tg.showAlert(L('sp_not_video')); e.target.value=''; return; }
-  if(f.size > 20*1024*1024){ tg.showAlert(L('sp_video_too_big')); e.target.value=''; return; }
-  // Davomiylikni lokal tekshiramiz (metadata) — 60s dan uzunini serverga yubormaymiz
+async function uploadVideoFile(f){
+  // Yagona video-yuklash yo'li: galereya/fayl tanlovi HAM, WebRTC kamera yozuvi HAM shu yerdan o'tadi.
+  if(f.size > 20*1024*1024){ tg.showAlert(L('sp_video_too_big')); return; }
+  // Davomiylikni lokal tekshiramiz (metadata) — 60s dan uzunini serverga yubormaymiz.
+  // DIQQAT: isFinite sharti — MediaRecorder webm'i duration=Infinity beradi (Chrome bug),
+  // yozuv baribir taymer bilan 60s da to'xtatiladi; server ham Telegram javobidan tekshiradi.
   const dur = await new Promise(res=>{ try{
     const v=document.createElement('video'); v.preload='metadata';
     v.onloadedmetadata=()=>{ try{ URL.revokeObjectURL(v.src); }catch(err){} res(v.duration||0); };
     v.onerror=()=>res(0);
     v.src=URL.createObjectURL(f);
   }catch(err){ res(0); } });
-  if(dur>61){ tg.showAlert(L('sp_video_too_long')); return; }
+  if(isFinite(dur) && dur>61){ tg.showAlert(L('sp_video_too_long')); return; }
   pf.videoUploading=true; renderProductForm();
   try{
     const fd=new FormData(); fd.append('file', f, f.name||'video.mp4');
@@ -6670,10 +6770,16 @@ async function onVideoPick(e){
     try{ tg.HapticFeedback.notificationOccurred('success'); }catch(err){}
   }catch(err){
     const msg = err.message==='video_too_long' ? L('sp_video_too_long')
-              : (err.message==='too_large' ? L('sp_video_too_big') : err.message);
+              : (err.message==='too_large' ? L('sp_video_too_big')
+              : (err.message==='telegram_rejected' ? L('sp_video_format_bad') : err.message));
     tg.showAlert(L('sp_video_failed')+msg);
   }
   pf.videoUploading=false; renderProductForm();
+}
+async function onVideoPick(e){
+  const f = e.target.files && e.target.files[0]; if(!f) return;
+  if(f.type && !f.type.startsWith('video/')){ tg.showAlert(L('sp_not_video')); e.target.value=''; return; }
+  await uploadVideoFile(f);
 }
 
 async function saveProduct(){
