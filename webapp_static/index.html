@@ -3999,13 +3999,13 @@ async function loadProfile(){
         <button class="oact soft full" id="favBtn">${L('fav_title')}</button>
         <button class="oact soft full" id="myRevBtn">${L('bp_my_reviews')}</button>
         ${(!canManage())?`<button class="oact soft full" id="becomeSellerBtn">${L('become_seller')}</button>`:''}
-        ${(me.role!=='admin')?`<button class="oact soft full" id="joinCodeBtn">${L('bp_join_code')}</button>`:''}
         <button class="oact soft full" id="settingsBtn">${L('settings_btn')}</button>
       </div>`;
     document.getElementById('myRevBtn').onclick = openMyReviews;
     const fvb=document.getElementById('favBtn'); if(fvb) fvb.onclick=openFavorites;
     const cb=document.getElementById('courierBtn'); if(cb) cb.onclick=openCourierOrders;
-    const jc=document.getElementById('joinCodeBtn'); if(jc) jc.onclick=openJoinCode;
+    // "Kod bilan qo'shilish" tugmasi OLIB TASHLANDI — xodim taklifi endi faqat LINK orqali
+    // (t.me/bot?start=staff_<kod>); openJoinCode/joincodeview zaxira sifatida qoldi.
     const rb=document.getElementById('refShareBtn'); if(rb) rb.onclick=()=>shareReferral(f.referral_code);
     // Akkordeon — bo'lim sarlavhasi bosilsa ichi ochiladi/yopiladi
     v.querySelectorAll('.pacc-h').forEach(h=>h.onclick=()=>{

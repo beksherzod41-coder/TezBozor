@@ -1606,9 +1606,9 @@ async def buyer_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if MINIAPP_URL:
         keyboard.insert(1, [_open_app_button(lang, 'btn_miniapp_catalog', MINIAPP_URL)])
 
-    # MULTI-SOTUVCHI: do'konga taklif kodi bilan qo'shilish (faqat hali do'konda bo'lmaganlarga)
-    if user and not db.get_staff_by_user(user['id']):
-        keyboard.insert(6, [InlineKeyboardButton(t(lang, 'btn_join_with_code'), callback_data="join_with_code")])
+    # "Kod bilan qo'shilish" tugmasi OLIB TASHLANDI — xodim taklifi endi faqat LINK orqali
+    # (t.me/bot?start=staff_<kod> → _handle_staff_deeplink). join_with_code_start handleri
+    # ESKI xabarlardagi tugmalar ishlashda davom etishi uchun saqlab qolindi.
 
     if CHANNEL_URL:
         keyboard.append([InlineKeyboardButton(t(lang, 'btn_official_channel'), url=CHANNEL_URL)])
