@@ -472,6 +472,7 @@ class Database:
             ("products", "size_note",       "TEXT"),               # optom: razmer matni (butun mahsulotga; xaridor tanlamaydi)
             ("products", "delivery_available", "INTEGER DEFAULT 1"),  # 1=yetkaziladi, 0=faqat olib ketish (sotuvchi belgilaydi)
             ("users",    "delivery_min_total", "REAL"),               # do'kon: yetkazish uchun minimal buyurtma summasi (NULL/0 = cheklov yo'q)
+            ("products", "video_file_id",   "TEXT"),               # ixtiyoriy qisqa video (Telegram file_id; ≤60s, ≤20MB — getFile proksi chegarasi)
         ]
         for _tbl, _col, _defn in _migrations:
             try:

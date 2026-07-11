@@ -841,6 +841,15 @@ const I18N = {
   sp_dlv_yes:{uz:"🚚 Yetkazib beriladi",ru:"🚚 С доставкой"},
   sp_dlv_no:{uz:"🚶 Faqat olib ketish",ru:"🚶 Только самовывоз"},
   sp_dlv_min:{uz:"🚚 Yetkazish uchun eng kam summa",ru:"🚚 Мин. сумма для доставки"},
+  bp_video:{uz:"Video",ru:"Видео"},
+  sp_video:{uz:"Video (ixtiyoriy)",ru:"Видео (необязательно)"},
+  sp_video_hint:{uz:"Qisqa video ishonchni oshiradi va savdoni ko'taradi (60 soniyagacha, 20 MB gacha).",ru:"Короткое видео повышает доверие и продажи (до 60 секунд, до 20 МБ)."},
+  sp_video_add:{uz:"🎬 Video qo'shish",ru:"🎬 Добавить видео"},
+  sp_video_remove:{uz:"✕ Videoni o'chirish",ru:"✕ Удалить видео"},
+  sp_video_uploading:{uz:"⏳ Video yuklanmoqda...",ru:"⏳ Видео загружается..."},
+  sp_video_too_big:{uz:"Video juda katta — 20 MB dan oshmasin.",ru:"Видео слишком большое — не более 20 МБ."},
+  sp_video_too_long:{uz:"Video juda uzun — 60 soniyadan oshmasin.",ru:"Видео слишком длинное — не более 60 секунд."},
+  sp_video_failed:{uz:"Video yuklanmadi: ",ru:"Видео не загружено: "},
   courier:{uz:"🚚 Yetkazib berish",ru:"🚚 Доставка"}, address_ph:{uz:"Manzil: ko'cha, uy, mo'ljal...",ru:"Адрес: улица, дом, ориентир..."},
   send_location:{uz:"📍 Joylashuvni yuborish (majburiy)",ru:"📍 Отправить геолокацию (обязательно)"}, loc_got:{uz:"✓ Joylashuv olindi (qayta olish)",ru:"✓ Геолокация получена (заново)"},
   need_location:{uz:"Yetkazib berish uchun joylashuvni yuboring — kuryer sizni topishi uchun shart.",ru:"Для доставки отправьте геолокацию — это нужно курьеру, чтобы вас найти."},
@@ -1665,6 +1674,7 @@ async function api(path){
 function money(v){ return Math.round(v||0).toLocaleString('ru-RU').replace(/,/g,' ') + " " + L('sum'); }
 function fmtThousands(v){ return String(v).replace(/\D/g,'').replace(/\B(?=(\d{3})+(?!\d))/g,' '); }
 function imgUrl(fid){ return "/api/image/" + encodeURIComponent(fid); }
+function vidUrl(fid){ return "/api/video/" + encodeURIComponent(fid); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 // Alfavit bo'yicha saralash kaliti: boshidagi emoji/belgilarni olib tashlab kichik harfga
 function chipSortKey(s){ return String(s||'').replace(/^[^\p{L}]+/u,'').toLowerCase(); }
@@ -1995,6 +2005,7 @@ async function openDetail(id){
               :(Number(p.delivery_min_total||0)>0?`<span class="pill">${L('dlv_min_info').replace('{m}', money(p.delivery_min_total))}</span>`:'')}
           </div>
         </div>
+        ${p.video_file_id?`<div class="dsec"><h4>🎬 ${L('bp_video')}</h4><div class="dcard" style="padding:8px"><video src="${vidUrl(p.video_file_id)}" controls playsinline preload="metadata" style="width:100%;border-radius:12px;background:#000;max-height:420px;display:block"></video></div></div>`:''}
         ${(p.haggle_on && !p.is_own)?`<div class="dsec"><button class="oact ok full" id="haggleBtn" style="background:linear-gradient(135deg,#f59e0b,#f97316)">${L('hag_btn')}</button></div>`:''}
         <div class="dsec" id="adSec"><h4>📢 ${L('sp_ad')}</h4><div class="dcard adcard"><div class="ddesc" id="adText">${p.ad_caption?(p.ad_caption_pm==='HTML'?p.ad_caption:esc(p.ad_caption)):(p.description?esc(p.description):'')}</div><button class="descmore" id="adMore" hidden>${L('sp_read_more')}</button></div></div>
         ${(p.attributes&&p.attributes.length)?`<div class="dsec"><h4>${L('sp_q_fields')}</h4><div class="dcard">${p.attributes.map(a=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:14px"><span style="color:var(--hint)">${esc(labelRu(a.attr_label||a.attr_key))}</span><b style="text-align:right">${esc(valueRu(a.attr_key, a.attr_value))}</b></div>`).join('')}</div></div>`:''}
@@ -5886,10 +5897,11 @@ function openProductForm(prod, mode){
     optomColorOpts: [], optomSizeOpts: [],
     tiers: _loadTiers(prod),
     delivery_available: (prod.delivery_available==null?1:Number(prod.delivery_available)),
+    video_file_id: prod.video_file_id||'',
     images: prod.image_url ? [prod.image_url] : [], in_stock: prod.in_stock
   }, base) : Object.assign({ id:null, name:'', price:'', category_id:null, description:'', stock_count:'', old_price:'', unit:'', min_price:'', min_order_qty:'',
     sale_mode: (mode==='optom'?'optom':'dona'), modeChosen: !!mode,
-    pack_size:'', size_note:'', imageLabels:[], optomColors:'', optomColorOpts:[], optomSizeOpts:[], tiers:[], images:[], delivery_available:1 }, base);
+    pack_size:'', size_note:'', imageLabels:[], optomColors:'', optomColorOpts:[], optomSizeOpts:[], tiers:[], images:[], delivery_available:1, video_file_id:'' }, base);
   document.getElementById('pfTitle').textContent = pf.id ? L('sp_edit_product') : L('sp_new_product');
   renderProductForm();
   document.getElementById('prodform').classList.add('open');
@@ -5906,6 +5918,7 @@ function openProductForm(prod, mode){
     if(d && d.pack_size!=null && !pf.pack_size){ pf.pack_size = d.pack_size||''; }
     if(d && d.size_note!=null && !pf.size_note){ pf.size_note = d.size_note||''; }
     if(d && d.delivery_available!=null){ pf.delivery_available = Number(d.delivery_available); }
+    if(d && d.video_file_id && !pf.video_file_id){ pf.video_file_id = d.video_file_id; }
     if(d && pf.sale_mode==='optom' && !pf.optomColors){
       const _c=(d.attributes||[]).find(a=>a.attr_key==='color' && (a.attr_value||'').trim());
       if(_c) pf.optomColors = _c.attr_value||'';
@@ -6240,6 +6253,16 @@ function renderProductForm(){
     `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
   const imagesSec = `<div class="cosec"><div class="lbl">${L('sp_images').replace('{n}', pf.images.length).replace('{m}', MAX_IMAGES)}</div>
     <div class="pfimgs">${thumbs}${addTile}</div></div>`;
+  // ── Video (ixtiyoriy, 1 ta) — ishonch/konversiya uchun qisqa klip ──
+  const videoSec = `<div class="cosec"><div class="lbl">${L('sp_video')}</div>
+    <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_video_hint')}</div>
+    ${pf.video_file_id
+      ? `<video src="${vidUrl(pf.video_file_id)}" controls playsinline preload="metadata" style="width:100%;max-height:220px;border-radius:12px;background:#000;display:block"></video>
+         <button class="oact no" id="pfVidRm" type="button" style="width:100%;margin-top:8px">${L('sp_video_remove')}</button>`
+      : (pf.videoUploading
+        ? `<div class="loading" style="padding:14px 0">${L('sp_video_uploading')}</div>`
+        : `<label class="oact soft full" style="display:block;text-align:center;cursor:pointer;margin:0">${L('sp_video_add')}<input type="file" id="pfVideo" accept="video/*" style="display:none"></label>`)}
+    </div>`;
   // ── Optom: ranglar + pachka soni + razmerlar (TOZA TUGMALI: preset bo'lsa chip + "boshqa",
   //    preset bo'lmasa erkin matn zaxira) ──
   const colOptVals = (pf.optomColorOpts||[]).map(o=>optVL(o).value);
@@ -6299,6 +6322,7 @@ function renderProductForm(){
   body.innerHTML = `<div class="cobody">
     ${catHeadSec}
     ${imagesSec}
+    ${videoSec}
     <div class="cosec"><div class="lbl">${L('sp_name')}</div>
       <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
     <div class="cosec"><div class="lbl">${optom?L('sp_price_optom'):L('sp_price')}</div>
@@ -6325,6 +6349,9 @@ function renderProductForm(){
   <div class="cobar"><button id="pfSave">${isEdit?L('s_save'):L('sp_add_ad')}</button></div>`;
 
   const fileInp = document.getElementById('pfFile'); if(fileInp) fileInp.onchange = onPhotoPick;
+  const vidInp = document.getElementById('pfVideo'); if(vidInp) vidInp.onchange = onVideoPick;
+  const vidRm = document.getElementById('pfVidRm');
+  if(vidRm) vidRm.onclick = ()=>{ pf.video_file_id=''; renderProductForm(); };
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
   // Preset YO'Q bo'lganda erkin matn (zaxira); butun qiymatni to'g'ridan yozadi.
   const pcol=document.getElementById('pfColors'); if(pcol) pcol.oninput=e=>{ pf.optomColors=e.target.value; };
@@ -6459,6 +6486,32 @@ async function onPhotoPick(e){
   renderProductForm();
 }
 
+async function onVideoPick(e){
+  const f = e.target.files && e.target.files[0]; if(!f) return;
+  if(f.size > 20*1024*1024){ tg.showAlert(L('sp_video_too_big')); e.target.value=''; return; }
+  // Davomiylikni lokal tekshiramiz (metadata) — 60s dan uzunini serverga yubormaymiz
+  const dur = await new Promise(res=>{ try{
+    const v=document.createElement('video'); v.preload='metadata';
+    v.onloadedmetadata=()=>{ try{ URL.revokeObjectURL(v.src); }catch(err){} res(v.duration||0); };
+    v.onerror=()=>res(0);
+    v.src=URL.createObjectURL(f);
+  }catch(err){ res(0); } });
+  if(dur>61){ tg.showAlert(L('sp_video_too_long')); return; }
+  pf.videoUploading=true; renderProductForm();
+  try{
+    const fd=new FormData(); fd.append('file', f, f.name||'video.mp4');
+    const r=await fetch('/api/seller/product/video',{method:'POST',headers:{Authorization:AUTH},body:fd});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    pf.video_file_id=(await r.json()).file_id;
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(err){}
+  }catch(err){
+    const msg = err.message==='video_too_long' ? L('sp_video_too_long')
+              : (err.message==='too_large' ? L('sp_video_too_big') : err.message);
+    tg.showAlert(L('sp_video_failed')+msg);
+  }
+  pf.videoUploading=false; renderProductForm();
+}
+
 async function saveProduct(){
   const btn = document.getElementById('pfSave');
   if(!(pf.name||'').trim()){ tg.showAlert(L('sp_name_req')); return; }
@@ -6504,6 +6557,7 @@ async function saveProduct(){
     pack_size: optom ? Number(pf.pack_size) : 0,
     size_note: optom ? (pf.size_note||'').trim() : '',
     delivery_available: (pf.delivery_available===0 ? 0 : 1),
+    video_file_id: (pf.video_file_id||''),
   };
   try{
     const url = pf.id ? '/api/seller/product/'+pf.id : '/api/seller/product';

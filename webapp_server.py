@@ -4231,6 +4231,60 @@ async def api_product_photo(file: UploadFile = File(...), authorization: str = H
     return {"file_id": file_id}
 
 
+# Video MVP: 1 ta ixtiyoriy mahsulot videosi. 20MB — Bot API getFile yuklab olish
+# chegarasi (proksi ishlashi uchun undan oshmasin); 60s — mahsulot klipi normasi.
+MAX_VIDEO_BYTES = 20 * 1024 * 1024
+MAX_VIDEO_SECONDS = 60
+
+
+@app.post("/api/seller/product/video")
+async def api_product_video(file: UploadFile = File(...), authorization: str = Header(None)):
+    """Videoni Telegram'ga yuborib file_id oladi (photo endpoint bilan bir uslub).
+    Davomiylik Telegram javobidan tekshiriladi (>60s — rad); xabar darhol o'chiriladi."""
+    user = dict(_buyer_from_auth(authorization))
+    seller_tg = user.get("telegram_id")
+    if not seller_tg:
+        raise HTTPException(status_code=400, detail="no_chat")
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="no_token")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_VIDEO_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    try:
+        async with httpx.AsyncClient(timeout=90) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                data={"chat_id": str(seller_tg), "supports_streaming": "true"},
+                files={"video": (file.filename or "video.mp4", data,
+                                 file.content_type or "video/mp4")},
+            )
+            res = r.json()
+    except Exception as e:
+        logging.error(f"sendVideo xato: {e}")
+        raise HTTPException(status_code=502, detail="upload_failed")
+    msg = (res.get("result") or {}) if res.get("ok") else {}
+    video = msg.get("video")
+    if not video:
+        raise HTTPException(status_code=502, detail="telegram_rejected")
+
+    async def _cleanup():
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                                  json={"chat_id": seller_tg, "message_id": msg["message_id"]})
+        except Exception:
+            pass
+
+    duration = int(video.get("duration") or 0)
+    if duration > MAX_VIDEO_SECONDS + 2:   # +2s — kodeklardagi yaxlitlash farqiga imtiyoz
+        await _cleanup()
+        raise HTTPException(status_code=400, detail="video_too_long")
+    await _cleanup()
+    return {"file_id": video["file_id"], "duration": duration}
+
+
 class AttrItem(BaseModel):
     key: str
     value: Optional[str] = None
@@ -4263,6 +4317,7 @@ class ProductIn(BaseModel):
     pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
     size_note: Optional[str] = None  # optom: razmer matni (butun mahsulotga)
     delivery_available: Optional[int] = None  # 1=yetkaziladi (default), 0=faqat olib ketish
+    video_file_id: Optional[str] = None  # ixtiyoriy qisqa video (Telegram file_id)
 
 
 def _save_attrs(product_id, attributes):
@@ -4487,6 +4542,8 @@ async def api_create_product(p: ProductIn, background: BackgroundTasks,
         fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
     if p.delivery_available is not None:
         fields["delivery_available"] = 1 if p.delivery_available else 0
+    if p.video_file_id is not None:
+        fields["video_file_id"] = p.video_file_id.strip() or None
     fields.update(_wholesale_fields(p.price, p.wholesale_tiers, p.wholesale_price, p.wholesale_min_qty))
     try:
         db.update_product_fields(pid, **fields)
@@ -4520,6 +4577,7 @@ class ProductEdit(BaseModel):
     pack_size: Optional[int] = None  # optom: 1 pachkadagi dona soni
     size_note: Optional[str] = None  # optom: razmer matni
     delivery_available: Optional[int] = None  # 1=yetkaziladi, 0=faqat olib ketish
+    video_file_id: Optional[str] = None  # video (bo'sh satr = o'chirish)
 
 
 @app.patch("/api/seller/product/{product_id}")
@@ -4572,6 +4630,9 @@ async def api_edit_product(product_id: int, p: ProductEdit, background: Backgrou
         fields["min_order_qty"] = int(p.min_order_qty) if p.min_order_qty and p.min_order_qty > 1 else None
     if p.delivery_available is not None:
         fields["delivery_available"] = 1 if p.delivery_available else 0
+    if p.video_file_id is not None:
+        # bo'sh satr = videoni olib tashlash (NULL)
+        fields["video_file_id"] = p.video_file_id.strip() or None
     # Optom narx — berilgan bo'lsa (zinalar yoki eski yagona) validatsiya bilan yangilaymiz.
     # Amaldagi dona narx = yangi narx (berilgan bo'lsa) yoki mavjud narx.
     if p.wholesale_tiers is not None or p.wholesale_price is not None or p.wholesale_min_qty is not None:
@@ -5034,6 +5095,47 @@ async def api_image(file_id: str, request: Request = None):
     except Exception as e:
         logging.warning(f"image proxy xatosi ({file_id[:12]}...): {e}")
         raise HTTPException(status_code=502, detail="image fetch failed")
+
+
+@app.get("/api/video/{file_id}")
+async def api_video(file_id: str, request: Request = None):
+    """Telegram file_id'ni videoga aylantiradi (rasm proksisi bilan bir uslub: getFile →
+    yuklab → disk-cache → stream). Autentifikatsiyasiz (<video src> header yubora olmaydi);
+    cache-miss IP bo'yicha cheklanadi. Bot API getFile ≤20MB — upload shu chegarada."""
+    if not BOT_TOKEN:
+        raise HTTPException(status_code=503, detail="no token")
+    safe = hashlib.sha256(file_id.encode()).hexdigest()
+    cache_path = os.path.join(IMG_CACHE_DIR, safe + ".mp4")
+    if os.path.exists(cache_path):
+        return FileResponse(cache_path, media_type="video/mp4",
+                            headers={"Cache-Control": "public, max-age=604800"})
+    # Video og'ir — cache-miss'ni rasmga qaraganda qattiqroq cheklaymiz (10/min IP)
+    if request is not None:
+        ip = (request.headers.get("x-forwarded-for") or
+              (request.client.host if request.client else "?")).split(",")[0].strip()
+        _rate_limit("vid", ip, 10, 60)
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            meta = await client.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+                params={"file_id": file_id},
+            )
+            data = meta.json()
+            if not data.get("ok"):
+                raise HTTPException(status_code=404, detail="file not found")
+            path = data["result"]["file_path"]
+            vid = await client.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
+            vid.raise_for_status()
+            content = vid.content
+        with open(cache_path, "wb") as f:
+            f.write(content)
+        return Response(content=content, media_type="video/mp4",
+                        headers={"Cache-Control": "public, max-age=604800"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.warning(f"video proxy xatosi ({file_id[:12]}...): {e}")
+        raise HTTPException(status_code=502, detail="video fetch failed")
 
 
 _bot_username_cache = {"value": None}
