@@ -2354,6 +2354,19 @@ def api_me_full(authorization: str = Header(None)):
             out["staff_stats"] = dict(db.get_staff_stats(uid) or {})
         except Exception:
             out["staff_stats"] = {}
+    # XODIM profili — do'kon bo'limi EGA to'ldirgan ma'lumotlarni ko'rsatsin (do'kon
+    # maydonlari EGA yozuvida saqlanadi; xodimnikida bo'sh — "yana to'ldirish kerak"
+    # degan noto'g'ri taassurot berardi). Frontend baribir read-only qiladi (canEditShop).
+    if out["is_staff"]:
+        try:
+            sh = db.get_shop_for_user(uid)
+            owner_u = dict(db.get_user_by_id(dict(sh)["owner_user_id"]) or {}) if sh else {}
+            for k in ("shop_name", "shop_address", "shop_landmark",
+                      "working_hours", "working_days", "shop_lat", "shop_lon"):
+                if owner_u.get(k) is not None:
+                    out[k] = owner_u[k]
+        except Exception as e:
+            logging.warning(f"me/full xodim do'kon overlay xato (uid {uid}): {e}")
     is_seller = bool(u.get("shop_name")) or u.get("role") == "seller"
     if is_seller:
         oid = _owner_id(user)   # faollik/kanallar — DO'KON kesimida

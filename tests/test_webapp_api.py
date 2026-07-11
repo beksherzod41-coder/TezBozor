@@ -1622,6 +1622,22 @@ def test_perm_publish_ad_bypasses_approval(client, monkeypatch):
                for p in db.get_pending_scheduled_posts())
 
 
+def test_staff_profile_shows_owner_shop_info(client):
+    """Xodim profili do'kon bo'limida EGA to'ldirgan ma'lumotlar ko'rinadi
+    (xodimdan qayta to'ldirish so'ralmasin); shaxsiy maydonlari esa o'ziniki qoladi."""
+    db = webapp_server.db
+    _shop_with_staff(client)
+    owner_id = db.get_user_by_telegram_id(5002)["id"]
+    db.update_user(owner_id, shop_name="Ega Do'koni", shop_address="Toshkent, Chilonzor",
+                   working_hours="9:00-18:00")
+    f = client.get("/api/me/full", headers=hdr(6002)).json()
+    assert f["shop_name"] == "Ega Do'koni"
+    assert f["shop_address"] == "Toshkent, Chilonzor"
+    assert f["working_hours"] == "9:00-18:00"
+    assert f["name"] == "Xodim"          # shaxsiy maydon o'zgarmagan
+    assert f["is_staff"] is True
+
+
 def test_perm_publish_ad_toggle_key(client):
     """'ad' ruxsati toggle qilinadi (STAFF_PERM_KEYS'da bor)."""
     _, stid, _ = _shop_with_staff(client)
