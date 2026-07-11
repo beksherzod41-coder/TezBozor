@@ -1498,6 +1498,7 @@ const I18N = {
   sp_media_src_photo:{uz:"Rasm qo'shish",ru:"Добавить фото"}, sp_media_src_video:{uz:"Video qo'shish",ru:"Добавить видео"},
   sp_src_camera:{uz:"Suratga olish",ru:"Сделать фото"}, sp_src_record:{uz:"Video yozib olish",ru:"Записать видео"},
   sp_src_gallery:{uz:"Galereya",ru:"Галерея"}, sp_src_file:{uz:"Fayl tanlash",ru:"Выбрать файл"}, sp_src_cancel:{uz:"Bekor qilish",ru:"Отмена"},
+  sp_src_camera_hint:{uz:"📷 Yangi surat/video olish uchun telefon kamerasida oling, so'ng «Galereya»dan tanlang (Android'da Telegram ilova ichidan kamerani ochib bo'lmaydi).",ru:"📷 Чтобы снять новое фото/видео, сделайте снимок камерой телефона, затем выберите его в «Галерее» (в Android камеру нельзя открыть внутри Telegram)."},
   sp_not_image:{uz:"Faqat rasm fayli tanlang.",ru:"Выберите только изображение."}, sp_not_video:{uz:"Faqat video fayli tanlang.",ru:"Выберите только видеофайл."},
   sp_order_by:{uz:"Joylagan",ru:"Сотрудник"},
   reorder_btn:{uz:"🔄 Qayta buyurtma",ru:"🔄 Заказать снова"},
@@ -6611,9 +6612,15 @@ function showMediaSheet(kind){
   title.textContent = L(isVid ? 'sp_media_src_video' : 'sp_media_src_photo');
   title.style.cssText = 'padding:14px 18px 10px;font-size:13px;font-weight:700;color:var(--hint,#888)';
   sheet.appendChild(title);
-  sheet.appendChild(rowBtn('📷', L(isVid ? 'sp_src_record' : 'sp_src_camera'), 'camera'));
+  // DIQQAT: Android Telegram WebView <input capture> ni QO'LLAMAYDI — Mini App ichidan
+  // kamera ochib bo'lmaydi (Telegram Mini Apps issue #681). Shuning uchun kamera varianti
+  // YO'Q; faqat ishlaydigan Galereya + Fayl. (iOS bu varaqani ishlatmaydi — native beradi.)
   sheet.appendChild(rowBtn('🖼', L('sp_src_gallery'), 'gallery'));
   sheet.appendChild(rowBtn('📁', L('sp_src_file'), 'file'));
+  const hint = document.createElement('div');
+  hint.textContent = L('sp_src_camera_hint');
+  hint.style.cssText = 'padding:10px 18px;font-size:12px;color:var(--hint,#888);line-height:1.4';
+  sheet.appendChild(hint);
   const cancel = document.createElement('button');
   cancel.type = 'button';
   cancel.textContent = L('sp_src_cancel');
