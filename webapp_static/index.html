@@ -1693,6 +1693,8 @@ const I18N = {
   reg_region_pick:{uz:"📍 Hududni tanlang",ru:"📍 Выберите регион"},
   reg_region_hint:{uz:"Yaqin-atrofdagi mahsulot va do'konlarni ko'rsatish uchun kerak.",ru:"Нужно, чтобы показывать товары и магазины рядом с вами."},
   reg_region_req:{uz:"Hududingizni tanlang.",ru:"Выберите ваш регион."},
+  rgp_text:{uz:"Hududingizni tanlang — yaqin-atrofdagi mahsulotlarni ko'rsatamiz!",ru:"Выберите свой регион — покажем товары рядом с вами!"},
+  rgp_btn:{uz:"Tanlash",ru:"Выбрать"},
   reg_bad_name:{uz:"Ism familiyangizni to'liq kiriting.",ru:"Введите имя и фамилию полностью."},
   reg_bad_phone:{uz:"Telefon raqami noto'g'ri.",ru:"Неверный номер телефона."},
   reg_success:{uz:"✅ Ro'yxatdan o'tdingiz!",ru:"✅ Вы зарегистрированы!"},
@@ -3410,6 +3412,40 @@ function afterRegionChange(){ updateRegionBtn(); (catMode==='shops'?loadShops():
 // onPick(id,label) berilsa — qidiruv o'rniga shu callback chaqiriladi (shop settings hudud uchun). #2
 let _onRegionPick=null;
 async function openRegionPicker(onPick){ _onRegionPick=onPick||null; document.getElementById('regionview').classList.add('open'); document.getElementById('regionview').scrollTop=0; await renderRegionPicker(null,''); }
+
+// ---------- ESKI foydalanuvchilar uchun bir martalik "hudud tanlang" banneri ----------
+// Registratsiyada hudud endi majburiy, lekin eski userlarda yo'q — katalog tepasida
+// muloyim taklif: tanlasa profilga saqlanadi + katalog filtri darhol qo'llanadi.
+function maybeRegionPrompt(){
+  try{
+    if(!ME || ME.region_id) return;
+    if(localStorage.getItem('tb_region_dismiss')) return;
+    if(document.getElementById('regionPrompt')) return;
+    const vc=document.getElementById('viewCatalog'); if(!vc) return;
+    const el=document.createElement('div');
+    el.id='regionPrompt';
+    el.style.cssText='margin:6px 12px;padding:11px 12px;border-radius:13px;background:var(--accent-soft);display:flex;align-items:center;gap:10px';
+    el.innerHTML=`<div style="flex:1;min-width:0;font-size:13px;line-height:1.45;color:var(--accent);font-weight:600">📍 ${L('rgp_text')}</div>
+      <button id="rgpPick" type="button" style="flex:0 0 auto;background:var(--accent);color:#fff;border:none;border-radius:10px;padding:9px 13px;font-weight:700;font-size:13px;cursor:pointer">${L('rgp_btn')}</button>
+      <button id="rgpX" type="button" style="flex:0 0 auto;background:none;border:none;color:var(--hint);font-size:17px;cursor:pointer;padding:4px">✕</button>`;
+    const chips=document.getElementById('chips');
+    vc.insertBefore(el, chips);
+    document.getElementById('rgpX').onclick=()=>{ try{ localStorage.setItem('tb_region_dismiss','1'); }catch(e){} el.remove(); };
+    document.getElementById('rgpPick').onclick=()=>openRegionPicker(async(id,lbl)=>{
+      if(!id) return;
+      try{
+        await apiSend('/api/me','PATCH',{region_id:id});
+        ME.region_id=id;
+        el.remove();
+        try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+        toast('📍 '+lbl);
+        // Katalog filtrini ham darhol qo'llaymiz — foyda shu zahoti ko'rinsin
+        REGION_ID=id; REGION_LABEL=lbl; updateRegionBtn();
+        (catMode==='shops'?loadShops():loadProducts());
+      }catch(e){ tg.showAlert(L('sp_error')+(e.message||e)); }
+    });
+  }catch(e){}
+}
 async function renderRegionPicker(parentId, parentLabel){
   const body=document.getElementById('regionBody'); body.innerHTML=`<div class="loading" style="padding:30px;text-align:center">⏳</div>`;
   try{
@@ -8340,7 +8376,7 @@ function admBroadcast(){
 document.getElementById('bcastClose').onclick=()=>document.getElementById('bcastview').classList.remove('open');
 
 applyStaticI18n();
-loadMe().then(()=>{ restoreModeOnBoot(); restoreUiOnBoot(); maybeHandleStaffInvite(); });
+loadMe().then(()=>{ restoreModeOnBoot(); restoreUiOnBoot(); maybeHandleStaffInvite(); maybeRegionPrompt(); });
 loadCategories();
 loadProducts();
 loadPending();   // #23 — kutilayotgan ishlar eslatmasi

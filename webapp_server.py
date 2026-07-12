@@ -1674,6 +1674,7 @@ def api_me(authorization: str = Header(None)):
     return {
         "id": b.get("id"), "name": b.get("name"), "phone": b.get("phone_number"),
         "username": b.get("telegram_username"), "role": b.get("role"),
+        "region_id": b.get("region_id"),   # hudud banneri: yo'q bo'lsa frontend so'raydi
         "language": b.get("language"), "created_at": b.get("created_at"),
         "is_approved": b.get("is_approved"), "shop_name": shop_name, "is_owner": is_owner,
         "is_staff": is_staff, "payment_mode": payment_mode, "can_manage_staff": can_manage_staff,
