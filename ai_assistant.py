@@ -118,6 +118,54 @@ def is_enabled() -> bool:
     return bool(API_KEY)
 
 
+def _json_from_text(content: str):
+    """Model javobidan BIRINCHI to'liq JSON obyektini ajratib, dict qaytaradi.
+
+    Nega kerak: ilgari `re.search(r"\\{.*\\}", ..., DOTALL)` ishlatilgan edi —
+    u ochko'z (greedy), ya'ni oxirgi `}` gacha yutadi. Model JSON dan keyin
+    izoh yozib, o'sha izohda qavs uchrasa, natija buzilgan bo'lib
+    `json.decoder.JSONDecodeError: Extra data` xatosini berardi (vaqti-vaqti
+    bilan — modelning kayfiyatiga qarab). Bu yerda qavslar sanaladi va qator
+    ichidagi ("...{...}...") qavslar hisobga olinmaydi.
+    Xato bo'lsa None — chaqiruvchilar allaqachon None ni kutadi (fail-soft).
+    """
+    if not content:
+        return None
+    txt = content.strip()
+    # ```json ... ``` bloklarini tozalaymiz
+    if txt.startswith("```"):
+        txt = re.sub(r"^```[a-zA-Z]*\s*", "", txt)
+        txt = re.sub(r"\s*```\s*$", "", txt)
+    start = txt.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(txt)):
+        ch = txt[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(txt[start:i + 1])
+                except Exception:
+                    return None
+    return None
+
+
 # ============================================================
 # SYSTEM PROMPT (rol + til)
 # ============================================================
@@ -1211,8 +1259,9 @@ async def generate_product_questions(*, name, category="", description="",
             if not content:
                 return None
             # JSON ni ajratamiz (ba'zan ```json ... ``` bilan o'raladi)
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             result = _coerce_questions(parsed, smart)
             if not result["questions"] and not result["known"]:
                 return None
@@ -1273,8 +1322,9 @@ async def moderate_product(*, name, description="", lang="uz") -> dict:
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if not content:
                 return None
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             return {
                 "flagged": bool(parsed.get("flagged")),
                 "category": str(parsed.get("category") or "")[:60],
@@ -1394,8 +1444,9 @@ async def haggle(*, listed_price, floor_price, history, buyer_message, lang="uz"
                     log.warning(f"Haggle bo'sh content (urinish {attempt + 1}), "
                                 f"finish_reason={choice.get('finish_reason')}")
                     continue  # qayta urinib ko'ramiz
-                m = re.search(r"\{.*\}", content, re.DOTALL)
-                parsed = json.loads(m.group(0) if m else content)
+                parsed = _json_from_text(content)
+                if parsed is None:
+                    raise ValueError("JSON topilmadi")
                 try:
                     offer = int(float(parsed.get("offer_price") or listed_price))
                 except (TypeError, ValueError):
@@ -1708,8 +1759,9 @@ async def interpret_search_query(query, categories=None, lang="uz") -> dict:
                 log.warning(f"Slang qidiruv API xatosi {resp.status_code}")
                 return None
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             kws = parsed.get("keywords") or []
             if isinstance(kws, str):
                 kws = [kws]
@@ -1864,8 +1916,9 @@ async def analyze_sentiment(reviews, lang="uz") -> dict:
                 log.warning(f"Sentiment API xatosi {resp.status_code}")
                 return None
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
 
             def _lst(key):
                 v = parsed.get(key) or []
@@ -1982,8 +2035,9 @@ async def dynamic_price_advice(*, name, price, signals, competitor=None,
                 log.warning(f"Dinamik narx API xatosi {resp.status_code}")
                 return None
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             verdict = str(parsed.get("verdict") or "keep").lower()
             if verdict not in ("raise", "lower", "keep"):
                 verdict = "keep"
@@ -2079,8 +2133,9 @@ async def gift_advisor(*, recipient="", occasion="", budget=None, notes="",
                 log.warning(f"Sovg'a yordamchisi API xatosi {resp.status_code}")
                 return None
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             ideas = []
             for it in (parsed.get("ideas") or [])[:5]:
                 if not isinstance(it, dict):
@@ -2165,8 +2220,9 @@ async def suggest_cancel_reasons(*, party, product_name="", status="", lang="uz"
                 log.warning(f"Bekor sabab API xatosi {resp.status_code}")
                 return []
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            parsed = json.loads(m.group(0) if m else content)
+            parsed = _json_from_text(content)
+            if parsed is None:
+                raise ValueError("JSON topilmadi")
             arr = parsed.get("reasons") or []
             if isinstance(arr, str):
                 arr = [arr]
@@ -2208,8 +2264,7 @@ async def _json_call(system, user_msg, *, max_tokens=600, temperature=0.4, tag="
             content = (resp.json()["choices"][0]["message"].get("content") or "").strip()
             if not content:
                 return None
-            m = re.search(r"\{.*\}", content, re.DOTALL)
-            return json.loads(m.group(0) if m else content)
+            return _json_from_text(content)
     except Exception as e:
         log.warning(f"{tag} xato: {e}")
         return None
@@ -2272,6 +2327,81 @@ async def director_report(*, facts, lang="uz") -> dict:
     if not recs:
         return None
     return {"summary": str(parsed.get("summary") or "").strip()[:400], "recs": recs}
+
+
+# ============================================================
+# AI CHUQUR HISOBOT — butun savdo tarixi bo'yicha biznes-tahlil
+# (Gemini katta kontekst: to'liq buyurtmalar ro'yxati bitta so'rovda)
+# ============================================================
+_DEEP_REPORT_SYSTEM = {
+    'uz': ("Siz tajribali biznes-tahlilchisiz. Quyida do'konning TO'LIQ savdo tarixi "
+           "(JSON: barcha buyurtmalar sanasi/soati, mahsulot, soni, summa, holati, "
+           "to'lov usuli va mahsulotlar ro'yxati). Chuqur tahlil qiling:\n"
+           "1) Savdo dinamikasi (o'sish/pasayish, eng yaxshi/yomon davrlar)\n"
+           "2) Qaysi mahsulot QACHON yaxshi sotiladi (hafta kuni, oy vaqti)\n"
+           "3) Xaridor xulqi (o'rtacha chek, takroriy xaridlar, to'lov/yetkazish odati)\n"
+           "4) Yo'qotishlar (bekor bo'lgan buyurtmalar sabab-naqshlari, sotilmayotgan tovar)\n"
+           "5) Keyingi oy uchun 3-5 aniq harakat rejasi\n"
+           "JAVOB FAQAT JSON: {\"summary\": \"2-3 jumla eng muhim xulosa\", "
+           "\"sections\": [{\"icon\": \"emoji\", \"title\": \"bo'lim nomi\", "
+           "\"lines\": [\"aniq kuzatuv (sonlar bilan)\", ...]}], "
+           "\"plan\": [\"harakat 1\", ...]}\n"
+           "Har bo'limda 2-4 qator. FAQAT ma'lumotdagi faktlarga tayaning, "
+           "sonlarni aniq keltiring. O'zbek tilida."),
+    'ru': ("Вы опытный бизнес-аналитик. Ниже ПОЛНАЯ история продаж магазина "
+           "(JSON: все заказы с датой/временем, товаром, количеством, суммой, статусом, "
+           "способом оплаты и список товаров). Сделайте глубокий анализ:\n"
+           "1) Динамика продаж (рост/спад, лучшие/худшие периоды)\n"
+           "2) Какой товар КОГДА продаётся лучше (день недели, время месяца)\n"
+           "3) Поведение покупателей (средний чек, повторные покупки, оплата/доставка)\n"
+           "4) Потери (паттерны отмен, неходовой товар)\n"
+           "5) План из 3-5 конкретных действий на следующий месяц\n"
+           "ОТВЕТ ТОЛЬКО JSON: {\"summary\": \"главный вывод 2-3 предложения\", "
+           "\"sections\": [{\"icon\": \"emoji\", \"title\": \"название раздела\", "
+           "\"lines\": [\"конкретное наблюдение (с цифрами)\", ...]}], "
+           "\"plan\": [\"действие 1\", ...]}\n"
+           "В каждом разделе 2-4 строки. ТОЛЬКО факты из данных, цифры точные. На русском."),
+}
+
+
+async def deep_director_report(*, facts, lang="uz") -> dict:
+    """Butun savdo tarixi (katta JSON) → chuqur biznes-hisobot.
+
+    facts — {'orders': [...hamma buyurtma...], 'products': [...], 'shop_stats': {...}}.
+    Gemini flash 1M token kontekstga ega — minglab buyurtma bemalol sig'adi
+    (DeepSeek fallback 64K — juda katta tarixda faqat oxirgi qismi yuboriladi).
+    Qaytaradi {"summary", "sections": [{"icon","title","lines"}], "plan": [...]}
+    yoki None."""
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    payload_txt = json.dumps(facts, ensure_ascii=False, default=str)
+    # DeepSeek fallback chegarasi uchun ehtiyot: ~400K belgi (~100K token)dan
+    # oshsa eng eski buyurtmalarni qisqartiramiz (Gemini o'zi bemalol ko'taradi,
+    # lekin fallback ham ishlashi kerak).
+    if len(payload_txt) > 400_000 and isinstance(facts.get("orders"), list):
+        facts = dict(facts)
+        facts["orders"] = facts["orders"][:3000]
+        facts["note"] = "orders truncated to latest 3000"
+        payload_txt = json.dumps(facts, ensure_ascii=False, default=str)
+    parsed = await _json_call(_DEEP_REPORT_SYSTEM[lng], payload_txt,
+                              max_tokens=1600, temperature=0.3,
+                              tag="AI chuqur hisobot")
+    if not parsed:
+        return None
+    sections = []
+    for s in (parsed.get("sections") or [])[:6]:
+        if not isinstance(s, dict):
+            continue
+        lines = [str(x).strip()[:300] for x in (s.get("lines") or []) if str(x).strip()]
+        if not lines:
+            continue
+        sections.append({"icon": str(s.get("icon") or "📊")[:4],
+                         "title": str(s.get("title") or "").strip()[:80],
+                         "lines": lines[:5]})
+    plan = [str(x).strip()[:300] for x in (parsed.get("plan") or []) if str(x).strip()][:6]
+    summary = str(parsed.get("summary") or "").strip()[:600]
+    if not summary and not sections:
+        return None
+    return {"summary": summary, "sections": sections, "plan": plan}
 
 
 # ============================================================

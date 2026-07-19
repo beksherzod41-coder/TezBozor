@@ -1552,6 +1552,11 @@ const I18N = {
   aidir_apply_restock:{uz:"Zaxirani to'ldirish",ru:"Пополнить запас"},
   aidir_applied:{uz:"Bajarildi",ru:"Готово"},
   aidir_note:{uz:"Tavsiyalar do'koningizning real ma'lumotlari asosida AI tomonidan tuzildi. Har dushanba yangi hisobot tayyor bo'ladi.",ru:"Рекомендации составлены AI на основе реальных данных магазина. Каждый понедельник — новый отчёт."},
+  deep_btn:{uz:"📊 Chuqur tahlil — butun savdo tarixi (AI)",ru:"📊 Глубокий анализ — вся история продаж (ИИ)"},
+  deep_loading:{uz:"🤖 AI butun savdo tarixini o'rganmoqda (1 daqiqagacha)...",ru:"🤖 ИИ изучает всю историю продаж (до 1 минуты)..."},
+  deep_plan:{uz:"🎯 Harakat rejasi",ru:"🎯 План действий"},
+  deep_orders:{uz:"{n} ta buyurtma tahlil qilindi",ru:"Проанализировано заказов: {n}"},
+  deep_no_data:{uz:"Chuqur tahlil uchun kamida 5 ta buyurtma kerak",ru:"Для глубокого анализа нужно минимум 5 заказов"},
   smm_hint:{uz:"AI har kuni tanlangan soatda do'koningiz mahsulotlaridan birini yangi mavzuli matn bilan kanal/guruhlaringizga AVTOMATIK joylaydi. Mahsulotlar navbat bilan aylanadi — kanal har kuni jonli bo'ladi.",ru:"AI каждый день в выбранный час АВТОМАТИЧЕСКИ публикует один из товаров с новым тематическим текстом в ваши каналы/группы. Товары чередуются — канал живёт каждый день."},
   smm_no_channel:{uz:"⚠️ Ulangan kanal/guruh yo'q — post markaziy kanalga chiqadi. O'z kanalingizni ulash: Do'kon → Kanal.",ru:"⚠️ Нет подключённого канала — пост выйдет в центральный канал. Подключить свой: Магазин → Канал."},
   smm_status:{uz:"Holat",ru:"Статус"}, smm_turn_on:{uz:"▶️ Yoqish",ru:"▶️ Включить"}, smm_turn_off:{uz:"⏸ O'chirish (hozir YOQIQ)",ru:"⏸ Выключить (сейчас ВКЛ)"},
@@ -3198,11 +3203,37 @@ async function openAIDirector(){
     }).join('');
     b.innerHTML=`<div class="cobody" style="overflow-y:auto">
       ${d.summary?`<div class="cosec" style="background:var(--accent-soft)"><div style="font-size:13.5px;line-height:1.5;color:var(--accent);font-weight:600">${esc(d.summary)}</div></div>`:''}
+      <button class="oact no" id="aidirDeep" style="width:100%;margin:2px 0 10px;background:var(--accent-soft);color:var(--accent)">${L('deep_btn')}</button>
       <div class="olist" style="padding:0">${recs}</div>
       <div style="font-size:11.5px;color:var(--hint);padding:8px 2px;line-height:1.4">${L('aidir_note')}</div></div>`;
     b.querySelectorAll('[data-aidir]').forEach(btn=>btn.onclick=()=>aidirApply(d.recs[Number(btn.dataset.aidir)], btn));
+    document.getElementById('aidirDeep').onclick=openDeepReport;
   }catch(e){
     const m=(e.message==='ai_disabled')?L('bp_ai_disabled'):e.message;
+    b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(m)}</div>`;
+  }
+}
+// 📊 CHUQUR TAHLIL — butun savdo tarixi bitta AI so'rovida (Gemini katta kontekst):
+// dinamika, "qaysi mahsulot qachon sotiladi", xaridor xulqi, yo'qotishlar, reja.
+async function openDeepReport(){
+  const b=document.getElementById('aidirBody');
+  b.innerHTML=`<div class="loading" style="padding:34px;text-align:center">${L('deep_loading')}</div>`;
+  try{
+    const d=await api('/api/seller/deep-report');
+    if(!d.available){ b.innerHTML=`<div class="empty"><span class="big">📊</span>${L('deep_no_data')}</div>`; return; }
+    const secs=(d.sections||[]).map(s=>
+      `<div class="ocard"><div style="font-weight:700;margin-bottom:6px">${esc(s.icon||'📊')} ${esc(s.title||'')}</div>`+
+      (s.lines||[]).map(l=>`<div style="font-size:13.5px;line-height:1.55;margin:4px 0">• ${esc(l)}</div>`).join('')+`</div>`).join('');
+    const plan=(d.plan&&d.plan.length)
+      ? `<div class="ocard" style="background:var(--accent-soft)"><div style="font-weight:700;color:var(--accent);margin-bottom:6px">${L('deep_plan')}</div>`+
+        d.plan.map((p,i)=>`<div style="font-size:13.5px;line-height:1.55;margin:4px 0;color:var(--accent)">${i+1}. ${esc(p)}</div>`).join('')+`</div>`
+      : '';
+    b.innerHTML=`<div class="cobody" style="overflow-y:auto">
+      ${d.summary?`<div class="cosec" style="background:var(--accent-soft)"><div style="font-size:13.5px;line-height:1.5;color:var(--accent);font-weight:600">${esc(d.summary)}</div></div>`:''}
+      <div style="font-size:11.5px;color:var(--hint);padding:0 2px 8px">${L('deep_orders').replace('{n}', String(d.orders_analyzed||0))}</div>
+      <div class="olist" style="padding:0">${secs}${plan}</div></div>`;
+  }catch(e){
+    const m=(e.message==='ai_disabled')?L('bp_ai_disabled'):(e.message||e);
     b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(m)}</div>`;
   }
 }

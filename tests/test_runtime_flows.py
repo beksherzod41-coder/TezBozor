@@ -56,6 +56,10 @@ def env(tmp_path, monkeypatch):
         async def _doc(*a, **k):
             return True
         monkeypatch.setattr(webapp_server, "_tg_send_document", _doc)
+    # AI standart holatda O'CHIQ: .env da haqiqiy kalit bo'lsa testlar tarmoqqa
+    # chiqib ketmasin va natija kalit borligiga qarab o'zgarmasin. AI xulqini
+    # tekshiradigan testlar buni o'zi is_enabled=True qilib qayta yoqadi.
+    monkeypatch.setattr(webapp_server.ai_assistant, "is_enabled", lambda: False)
 
     seller = d.create_user(telegram_id=7002, phone_number="998900000002", name="Seller", role="seller")
     d.update_user(seller, is_approved=1, shop_name="Do'kon")

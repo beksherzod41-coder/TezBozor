@@ -3934,6 +3934,51 @@ async def api_ai_director(authorization: str = Header(None)):
     return {"available": True, **rep}
 
 
+@app.get("/api/seller/deep-report")
+async def api_deep_report(authorization: str = Header(None)):
+    """📊 Chuqur biznes-hisobot: BUTUN savdo tarixi bitta so'rovda AI'ga —
+    trend, «qaysi mahsulot qachon sotiladi», harakat rejasi (Gemini katta kontekst)."""
+    user = dict(_buyer_from_auth(authorization))
+    _seller_or_403(user)
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    _rate_limit("ai_deep_report", user["id"], 4, 3600)
+    oid = _owner_id(user)
+    orders = db.get_orders_by_seller(oid) or []
+    if len(orders) < 5:
+        return {"available": False, "reason": "not_enough_data",
+                "orders_count": len(orders)}
+    # AI uchun KOMPAKT tarix: shaxsiy ma'lumotlarsiz (ism/telefon yubormaymiz),
+    # takroriy xaridorni aniqlash uchun buyer anonim raqam bilan belgilanadi.
+    buyer_alias = {}
+    hist = []
+    for o in orders:
+        o = dict(o)
+        b = o.get("buyer_id")
+        if b not in buyer_alias:
+            buyer_alias[b] = f"B{len(buyer_alias) + 1}"
+        hist.append({
+            "dt": str(o.get("created_at") or "")[:16],
+            "product": o.get("product_name"),
+            "qty": o.get("quantity"),
+            "total": o.get("total_price"),
+            "status": o.get("status"),
+            "pay": o.get("payment_method"),
+            "delivery": o.get("delivery_type"),
+            "buyer": buyer_alias[b],
+        })
+    perf = [{"name": p.get("name"), "price": p.get("price"),
+             "sold": p.get("sold"), "revenue": p.get("revenue")}
+            for p in (db.get_seller_product_performance(oid) or [])]
+    facts = {"shop_stats": db.get_seller_stats(oid) or {},
+             "products": perf, "orders": hist}
+    rep = await ai_assistant.deep_director_report(facts=facts, lang=lang)
+    if not rep:
+        raise HTTPException(status_code=502, detail="ai_error")
+    return {"available": True, "orders_analyzed": len(hist), **rep}
+
+
 class DirectorApplyIn(BaseModel):
     type: str                 # 'price' | 'ad'  ('restock' — client o'zi formani ochadi)
     product_id: int
