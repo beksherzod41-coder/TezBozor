@@ -1161,6 +1161,31 @@ class Database:
                 FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
+        # SMM Pro migratsiyasi — bir necha soat, hafta kunlari, ohang, strategiya,
+        # brend-ovoz izohi va slot-dedup (kuniga bir necha post uchun).
+        for _col, _defn in [
+            ("hours",       "TEXT"),   # "10,15,20" — kunlik post soatlari (bo'sh = hour)
+            ("days",        "TEXT"),   # "0,1,2,3,4,5,6" — faol hafta kunlari (bo'sh = har kuni)
+            ("tone",        "TEXT"),   # 'friendly'|'premium'|'energetic'|'minimal'
+            ("strategy",    "TEXT"),   # 'rotation'|'random'|'new'|'discount'
+            ("custom_note", "TEXT"),   # egasining uslub/brend talabi (AI promptga kiradi)
+            ("last_slot",   "TEXT"),   # "YYYY-MM-DD/HH" — shu slot bugun joylanganmi
+        ]:
+            try:
+                cursor.execute(f"ALTER TABLE smm_settings ADD COLUMN {_col} {_defn}")
+            except Exception:
+                pass
+        # SMM post tarixi — App'da "oxirgi postlar" ro'yxati uchun
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS smm_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_id INTEGER NOT NULL,
+                product_id INTEGER,
+                caption TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_smm_posts_seller ON smm_posts(seller_id, id)")
         conn.commit()
 
         # ===== INDEKSLAR (tezlik #3) =====
@@ -3977,7 +4002,10 @@ class Database:
         row = cursor.fetchone()
         return dict(row) if row else None
 
-    def upsert_smm_settings(self, seller_id, hour=None, is_active=None):
+    def upsert_smm_settings(self, seller_id, hour=None, is_active=None, hours=None,
+                            days=None, tone=None, strategy=None, custom_note=None):
+        """SMM Pro sozlamalari. hours/days — "10,15" ko'rinishidagi matn (validatsiya
+        API qatlamida); custom_note='' bo'lsa tozalanadi (NULL)."""
         cur = self.get_smm_settings(seller_id)
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -3985,38 +4013,109 @@ class Database:
             cursor.execute("INSERT INTO smm_settings (seller_id, hour, is_active) VALUES (?,?,?)",
                            (seller_id, int(hour if hour is not None else 10),
                             1 if is_active else 0))
-        else:
-            if hour is not None:
-                cursor.execute("UPDATE smm_settings SET hour=? WHERE seller_id=?",
-                               (int(hour), seller_id))
-            if is_active is not None:
-                cursor.execute("UPDATE smm_settings SET is_active=? WHERE seller_id=?",
-                               (1 if is_active else 0, seller_id))
+        updates = []
+        if hour is not None:
+            updates.append(("hour", int(hour)))
+        if is_active is not None:
+            updates.append(("is_active", 1 if is_active else 0))
+        if hours is not None:
+            updates.append(("hours", str(hours) or None))
+        if days is not None:
+            updates.append(("days", str(days) or None))
+        if tone is not None:
+            updates.append(("tone", str(tone) or None))
+        if strategy is not None:
+            updates.append(("strategy", str(strategy) or None))
+        if custom_note is not None:
+            updates.append(("custom_note", str(custom_note).strip()[:200] or None))
+        for col, val in updates:
+            cursor.execute(f"UPDATE smm_settings SET {col}=? WHERE seller_id=?",
+                           (val, seller_id))
         conn.commit()
         return self.get_smm_settings(seller_id)
 
-    def get_due_smm(self, hour):
-        """Shu soat (Toshkent) uchun faol va BUGUN hali joylamagan sozlamalar."""
+    @staticmethod
+    def _smm_hours_list(row):
+        """Sozlamadagi post soatlari: yangi `hours` ("10,15") yoki eski `hour`."""
+        out = []
+        for p in str(row.get("hours") or "").split(","):
+            p = p.strip()
+            if p.isdigit() and 0 <= int(p) <= 23:
+                out.append(int(p))
+        return sorted(set(out)) or [int(row.get("hour") or 10)]
+
+    @staticmethod
+    def _smm_days_list(row):
+        """Faol hafta kunlari (0=dushanba..6=yakshanba); bo'sh = har kuni."""
+        out = []
+        for p in str(row.get("days") or "").split(","):
+            p = p.strip()
+            if p.isdigit() and 0 <= int(p) <= 6:
+                out.append(int(p))
+        return sorted(set(out)) or list(range(7))
+
+    def get_due_smm(self, hour, weekday=None, slot_key=None):
+        """Shu soat (Toshkent) uchun faol, shu hafta kuni yoqilgan va shu slot
+        hali joylanmagan sozlamalar. slot_key — "YYYY-MM-DD/HH" dedup kaliti."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT * FROM smm_settings WHERE is_active=1 AND hour=? "
-            "AND (last_posted_at IS NULL OR date(last_posted_at) < date('now'))", (int(hour),))
-        return [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT * FROM smm_settings WHERE is_active=1")
+        rows = [dict(r) for r in cursor.fetchall()]
+        out = []
+        for row in rows:
+            if int(hour) not in self._smm_hours_list(row):
+                continue
+            if weekday is not None and int(weekday) not in self._smm_days_list(row):
+                continue
+            if slot_key:
+                if row.get("last_slot") == slot_key:
+                    continue
+            elif row.get("last_posted_at"):
+                # eski chaqiruv shakli (slot_key'siz): kuniga 1 post dedup'i
+                cursor.execute("SELECT date(?) < date('now') AS ok", (row["last_posted_at"],))
+                if not dict(cursor.fetchone()).get("ok"):
+                    continue
+            out.append(row)
+        return out
 
-    def mark_smm_posted(self, seller_id, product_id):
+    def mark_smm_posted(self, seller_id, product_id, slot_key=None):
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute("UPDATE smm_settings SET last_posted_at=CURRENT_TIMESTAMP, "
-                       "last_product_id=? WHERE seller_id=?", (product_id, seller_id))
+                       "last_product_id=?, last_slot=? WHERE seller_id=?",
+                       (product_id, slot_key, seller_id))
         conn.commit()
 
-    def get_next_smm_product(self, seller_id, last_product_id=None):
-        """SMM rotatsiyasi: sotuvdagi mahsulotlar ichидан oxirgisidan KEYINGISINI
-        (id bo'yicha siklik) tanlaydi — har kuni boshqa mahsulot chiqadi."""
+    def get_next_smm_product(self, seller_id, last_product_id=None, strategy="rotation"):
+        """SMM mahsulot tanlash. Strategiyalar:
+        rotation — id bo'yicha siklik navbat (standart, har kuni boshqa mahsulot);
+        random   — tasodifiy (imkon qadar oxirgisini takrorlamaydi);
+        new      — eng yangi 5 ta ichida siklik navbat;
+        discount — chegirmali (old_price>price) mahsulotlar ichida navbat,
+                   chegirmalilar tugasa rotation'ga qaytadi."""
         conn = self.get_connection()
         cursor = conn.cursor()
         base = ("SELECT * FROM products WHERE seller_id=? AND status='active' AND in_stock=1 ")
+        if strategy == "random":
+            cursor.execute(base + "AND id!=? ORDER BY RANDOM() LIMIT 1",
+                           (seller_id, int(last_product_id or 0)))
+            row = cursor.fetchone()
+            if row is None:   # yagona mahsulot oxirgisi bo'lishi mumkin
+                cursor.execute(base + "ORDER BY RANDOM() LIMIT 1", (seller_id,))
+                row = cursor.fetchone()
+            return dict(row) if row else None
+        if strategy in ("new", "discount"):
+            extra = ("AND old_price IS NOT NULL AND old_price>price "
+                     if strategy == "discount" else "")
+            cursor.execute(base + extra + "ORDER BY id DESC LIMIT 5", (seller_id,))
+            pool = [dict(r) for r in cursor.fetchall()]
+            if pool:
+                ids = sorted(p["id"] for p in pool)
+                nxt = next((i for i in ids if last_product_id and i > last_product_id), ids[0])
+                return next(p for p in pool if p["id"] == nxt)
+            if strategy == "new":
+                return None
+            # discount: chegirmali mahsulot yo'q — oddiy navbatga o'tamiz
         row = None
         if last_product_id:
             cursor.execute(base + "AND id>? ORDER BY id ASC LIMIT 1",
@@ -4026,6 +4125,30 @@ class Database:
             cursor.execute(base + "ORDER BY id ASC LIMIT 1", (seller_id,))
             row = cursor.fetchone()
         return dict(row) if row else None
+
+    def log_smm_post(self, seller_id, product_id, caption=None):
+        """SMM post tarixiga yozadi; har sotuvchida oxirgi 30 tasi saqlanadi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO smm_posts (seller_id, product_id, caption) VALUES (?,?,?)",
+                       (seller_id, product_id, (caption or "")[:600] or None))
+        cursor.execute("DELETE FROM smm_posts WHERE seller_id=? AND id NOT IN "
+                       "(SELECT id FROM smm_posts WHERE seller_id=? ORDER BY id DESC LIMIT 30)",
+                       (seller_id, seller_id))
+        conn.commit()
+
+    def get_smm_posts(self, seller_id, limit=5):
+        """Oxirgi SMM postlar (mahsulot nomi bilan) + jami soni."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT sp.id, sp.product_id, sp.caption, sp.created_at, p.name AS product_name "
+            "FROM smm_posts sp LEFT JOIN products p ON p.id=sp.product_id "
+            "WHERE sp.seller_id=? ORDER BY sp.id DESC LIMIT ?", (seller_id, int(limit)))
+        items = [dict(r) for r in cursor.fetchall()]
+        cursor.execute("SELECT COUNT(*) AS c FROM smm_posts WHERE seller_id=?", (seller_id,))
+        total = dict(cursor.fetchone()).get("c") or 0
+        return {"items": items, "total": total}
 
     # ===== TO'LOVLAR (monetizatsiya #18) =====
     def create_payment(self, user_id, purpose, amount, ref_id=None, provider=None):

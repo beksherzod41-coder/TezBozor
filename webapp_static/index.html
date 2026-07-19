@@ -1562,10 +1562,26 @@ const I18N = {
   deep_plan:{uz:"🎯 Harakat rejasi",ru:"🎯 План действий"},
   deep_orders:{uz:"{n} ta buyurtma tahlil qilindi",ru:"Проанализировано заказов: {n}"},
   deep_no_data:{uz:"Chuqur tahlil uchun kamida 5 ta buyurtma kerak",ru:"Для глубокого анализа нужно минимум 5 заказов"},
-  smm_hint:{uz:"AI har kuni tanlangan soatda do'koningiz mahsulotlaridan birini yangi mavzuli matn bilan kanal/guruhlaringizga AVTOMATIK joylaydi. Mahsulotlar navbat bilan aylanadi — kanal har kuni jonli bo'ladi.",ru:"AI каждый день в выбранный час АВТОМАТИЧЕСКИ публикует один из товаров с новым тематическим текстом в ваши каналы/группы. Товары чередуются — канал живёт каждый день."},
+  smm_hint:{uz:"AI siz tanlagan kunlar va soatlarda (istalgancha soat, kechayu kunduz) do'koningiz mahsulotlarini yangi mavzuli matn bilan kanal/guruhlaringizga AVTOMATIK joylaydi. Ohang, mahsulot tanlash usuli va brend ovozini o'zingiz belgilaysiz — kanal har kuni jonli bo'ladi.",ru:"AI в выбранные вами дни и часы (сколько угодно часов, круглосуточно) АВТОМАТИЧЕСКИ публикует товары с новым тематическим текстом в ваши каналы/группы. Тон, способ выбора товара и голос бренда задаёте вы — канал живёт каждый день."},
   smm_no_channel:{uz:"⚠️ Ulangan kanal/guruh yo'q — post markaziy kanalga chiqadi. O'z kanalingizni ulash: Do'kon → Kanal.",ru:"⚠️ Нет подключённого канала — пост выйдет в центральный канал. Подключить свой: Магазин → Канал."},
   smm_status:{uz:"Holat",ru:"Статус"}, smm_turn_on:{uz:"▶️ Yoqish",ru:"▶️ Включить"}, smm_turn_off:{uz:"⏸ O'chirish (hozir YOQIQ)",ru:"⏸ Выключить (сейчас ВКЛ)"},
   smm_hour:{uz:"Post soati (Toshkent)",ru:"Час поста (Ташкент)"}, smm_last:{uz:"Oxirgi post",ru:"Последний пост"},
+  smm_hours:{uz:"Post soatlari (Toshkent) — istalgancha tanlang",ru:"Часы постов (Ташкент) — выбирайте сколько угодно"},
+  smm_days:{uz:"Hafta kunlari",ru:"Дни недели"},
+  smm_tone:{uz:"Post ohangi",ru:"Тон постов"},
+  smm_tone_friendly:{uz:"😊 Do'stona",ru:"😊 Дружелюбный"}, smm_tone_premium:{uz:"💎 Premium",ru:"💎 Премиум"},
+  smm_tone_energetic:{uz:"⚡ Quvnoq",ru:"⚡ Задорный"}, smm_tone_minimal:{uz:"✂️ Lo'nda",ru:"✂️ Лаконичный"},
+  smm_strategy:{uz:"Mahsulot tanlash",ru:"Выбор товара"},
+  smm_st_rotation:{uz:"🔁 Navbat bilan",ru:"🔁 По очереди"}, smm_st_random:{uz:"🎲 Tasodifiy",ru:"🎲 Случайный"},
+  smm_st_new:{uz:"🆕 Yangilar",ru:"🆕 Новинки"}, smm_st_discount:{uz:"🏷 Chegirmalilar",ru:"🏷 Со скидкой"},
+  smm_note:{uz:"Brend ovozi (ixtiyoriy)",ru:"Голос бренда (необязательно)"},
+  smm_note_ph:{uz:"Masalan: postlar oxirida telefon raqamimizni eslatilsin; «arzon» so'zi ishlatilmasin",ru:"Например: в конце постов напоминать наш номер; не использовать слово «дёшево»"},
+  smm_note_save:{uz:"💾 Saqlash",ru:"💾 Сохранить"},
+  smm_preview:{uz:"👁 Namuna ko'rish",ru:"👁 Предпросмотр"},
+  smm_post_now:{uz:"🚀 Hozir joylash",ru:"🚀 Опубликовать сейчас"},
+  smm_post_now_ok:{uz:"Post navbatga qo'yildi — 1 daqiqa ichida kanalga chiqadi!",ru:"Пост в очереди — выйдет в канал в течение минуты!"},
+  smm_history:{uz:"Oxirgi postlar",ru:"Последние посты"}, smm_total:{uz:"jami",ru:"всего"},
+  smm_no_products:{uz:"Sotuvda faol mahsulot yo'q — avval mahsulot qo'shing.",ru:"Нет активных товаров — сначала добавьте товар."},
   wish_title:{uz:"Istaklarim",ru:"Мои желания"},
   wish_hint:{uz:"Nima qidirayotganingizni yozing — mos mahsulot sotuvga chiqishi bilan sizga xabar beramiz! (ko'pi bilan 5 ta istak)",ru:"Напишите, что ищете — как только подходящий товар появится, мы вам сообщим! (до 5 желаний)"},
   wish_what:{uz:"Nima kerak?",ru:"Что нужно?"}, wish_ph:{uz:"Masalan: iPhone 13, qishki kurtka 48 razmer",ru:"Например: iPhone 13, зимняя куртка 48 размер"},
@@ -3268,25 +3284,77 @@ async function openSMM(){
   b.innerHTML=`<div class="loading">${L('sp_loading')}</div>`;
   try{
     const s=await api('/api/seller/smm');
-    const hours=[8,9,10,11,12,14,16,18,19,20];
+    const allHours=Array.from({length:24},(_,i)=>i);   // 0:00 - 23:00, to'liq sutka
     const on=!!s.is_active;
+    const selH=(s.hours||[10]).map(Number);
+    const selD=(s.days&&s.days.length)?s.days.map(Number):[0,1,2,3,4,5,6];
+    const dayN=LANG==='ru'?['Пн','Вт','Ср','Чт','Пт','Сб','Вс']:['Du','Se','Ch','Pa','Ju','Sh','Ya'];
+    const tones=[['friendly','smm_tone_friendly'],['premium','smm_tone_premium'],['energetic','smm_tone_energetic'],['minimal','smm_tone_minimal']];
+    const strats=[['rotation','smm_st_rotation'],['random','smm_st_random'],['new','smm_st_new'],['discount','smm_st_discount']];
     b.innerHTML=`<div class="cobody" style="overflow-y:auto">
       <div class="cosec"><div style="font-size:13px;line-height:1.55;color:var(--hint)">${L('smm_hint')}</div></div>
       ${!s.channels?`<div class="cosec" style="border:1.5px solid #ffd9a0;background:#fff7ec"><div style="font-size:12.5px;color:#d98300">${L('smm_no_channel')}</div></div>`:''}
       <div class="cosec"><div class="lbl">${L('smm_status')}</div>
         <button class="oact ${on?'no':'ok'}" id="smmToggle" style="width:100%">${on?L('smm_turn_off'):L('smm_turn_on')}</button></div>
-      <div class="cosec"><div class="lbl">${L('smm_hour')}</div>
-        <div class="chips" id="smmHours" style="padding:0;flex-wrap:wrap">${hours.map(h=>`<div class="chip ${Number(s.hour)===h?'active':''}" data-smmh="${h}">${h}:00</div>`).join('')}</div></div>
+      <div class="cosec"><div class="lbl">${L('smm_hours')}</div>
+        <div class="chips" style="padding:0;flex-wrap:wrap">${allHours.map(h=>`<div class="chip ${selH.includes(h)?'active':''}" data-smmh="${h}">${h}:00</div>`).join('')}</div></div>
+      <div class="cosec"><div class="lbl">${L('smm_days')}</div>
+        <div class="chips" style="padding:0;flex-wrap:wrap">${dayN.map((d,i)=>`<div class="chip ${selD.includes(i)?'active':''}" data-smmd="${i}">${d}</div>`).join('')}</div></div>
+      <div class="cosec"><div class="lbl">${L('smm_tone')}</div>
+        <div class="chips" style="padding:0;flex-wrap:wrap">${tones.map(([k,lb])=>`<div class="chip ${(s.tone||'friendly')===k?'active':''}" data-smmt="${k}">${L(lb)}</div>`).join('')}</div></div>
+      <div class="cosec"><div class="lbl">${L('smm_strategy')}</div>
+        <div class="chips" style="padding:0;flex-wrap:wrap">${strats.map(([k,lb])=>`<div class="chip ${(s.strategy||'rotation')===k?'active':''}" data-smms="${k}">${L(lb)}</div>`).join('')}</div></div>
+      <div class="cosec"><div class="lbl">${L('smm_note')}</div>
+        <textarea class="coaddr" id="smmNote" maxlength="200" placeholder="${esc(L('smm_note_ph'))}" style="min-height:56px">${esc(s.custom_note||'')}</textarea>
+        <button class="oact" id="smmNoteSave" style="width:100%;margin-top:6px">${L('smm_note_save')}</button></div>
+      ${s.ai_enabled?`<div class="cosec"><div style="display:flex;gap:8px">
+        <button class="oact" id="smmPrev" style="flex:1">${L('smm_preview')}</button>
+        <button class="oact ok" id="smmNow" style="flex:1">${L('smm_post_now')}</button></div>
+        <div id="smmPrevBox"></div></div>`:''}
+      ${(s.history&&s.history.length)?`<div class="cosec"><div class="lbl">${L('smm_history')} (${s.total_posts} ${L('smm_total')})</div>
+        ${s.history.map(h=>`<div style="font-size:12px;padding:5px 2px;border-bottom:1px solid var(--line,#eee)"><b>${esc(h.product_name||('#'+(h.product_id||'')))}</b> · <span style="color:var(--hint)">${fmtDate(h.created_at)}</span></div>`).join('')}</div>`:''}
       ${s.last_posted_at?`<div style="font-size:12px;color:var(--hint);padding:0 2px">${L('smm_last')}: ${fmtDate(s.last_posted_at)}</div>`:''}
     </div>`;
-    document.getElementById('smmToggle').onclick=async()=>{
-      try{ await apiSend('/api/seller/smm','POST',{is_active:!on}); try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){} openSMM(); }
+    const save=async(patch)=>{
+      try{ await apiSend('/api/seller/smm','POST',patch); try{ tg.HapticFeedback.selectionChanged(); }catch(e){} openSMM(); }
       catch(e){ tg.showAlert(L('sp_error')+e.message); }
     };
-    b.querySelectorAll('[data-smmh]').forEach(c=>c.onclick=async()=>{
-      try{ await apiSend('/api/seller/smm','POST',{hour:Number(c.dataset.smmh)}); openSMM(); }
-      catch(e){ tg.showAlert(L('sp_error')+e.message); }
+    document.getElementById('smmToggle').onclick=()=>save({is_active:!on});
+    b.querySelectorAll('[data-smmh]').forEach(c=>c.onclick=()=>{
+      const h=Number(c.dataset.smmh);
+      const hs=selH.includes(h)?selH.filter(x=>x!==h):[...selH,h];
+      if(!hs.length) return;   // hech bo'lmasa 1 soat qolsin
+      save({hours:hs});
     });
+    b.querySelectorAll('[data-smmd]').forEach(c=>c.onclick=()=>{
+      const d=Number(c.dataset.smmd);
+      const ds=selD.includes(d)?selD.filter(x=>x!==d):[...selD,d];
+      if(!ds.length) return;
+      save({days:ds.length===7?[]:ds});   // hammasi = har kuni (bo'sh saqlanadi)
+    });
+    b.querySelectorAll('[data-smmt]').forEach(c=>c.onclick=()=>save({tone:c.dataset.smmt}));
+    b.querySelectorAll('[data-smms]').forEach(c=>c.onclick=()=>save({strategy:c.dataset.smms}));
+    document.getElementById('smmNoteSave').onclick=()=>save({custom_note:document.getElementById('smmNote').value.trim()});
+    const pv=document.getElementById('smmPrev');
+    if(pv) pv.onclick=async()=>{
+      const box=document.getElementById('smmPrevBox');
+      box.innerHTML=`<div class="loading" style="padding:10px 0">${L('sp_loading')}</div>`;
+      try{
+        const r=await api('/api/seller/smm/preview');
+        box.innerHTML=r.available
+          ?`<div style="margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line,#eee);font-size:13px;line-height:1.5;white-space:pre-wrap"><b>${esc(r.product_name||'')}</b>\n\n${esc(r.caption)}</div>`
+          :`<div style="font-size:12.5px;color:var(--hint);padding:8px 0">${L('smm_no_products')}</div>`;
+      }catch(e){ box.innerHTML=''; tg.showAlert(L('sp_error')+e.message); }
+    };
+    const nw=document.getElementById('smmNow');
+    if(nw) nw.onclick=async()=>{
+      nw.disabled=true;
+      try{
+        await apiSend('/api/seller/smm/post-now','POST',{});
+        try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+        tg.showAlert(L('smm_post_now_ok')); openSMM();
+      }catch(e){ nw.disabled=false; tg.showAlert(L('sp_error')+e.message); }
+    };
   }catch(e){ b.innerHTML=`<div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div>`; }
 }
 document.getElementById('smmClose').onclick=()=>document.getElementById('smmview').classList.remove('open');

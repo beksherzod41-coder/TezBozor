@@ -2408,13 +2408,15 @@ async def deep_director_report(*, facts, lang="uz") -> dict:
 # AI SMM — kunlik mavzuli kanal posti matni
 # ============================================================
 _SMM_SYSTEM = {
-    'uz': ("Siz Telegram-kanal uchun SMM-mozgsiz. Mahsulot ma'lumotidan QISQA (3-6 qator), "
-           "jonli, emoji'li sotuv posti yozing. Mavzu ohangi: {THEME}. Har kuni takrorlanmas, "
+    'uz': ("Siz Telegram-kanal uchun professional SMM-mozgsiz. Mahsulot ma'lumotidan QISQA "
+           "(3-6 qator), jonli, emoji'li sotuv posti yozing. Mavzu ohangi: {THEME}. "
+           "Yozish uslubi: {TONE}. Post tuzilishi: {FORMAT}. Har kuni takrorlanmas, "
            "tabiiy yozing — reklama shabloniga o'xshamasin. Narxni albatta ko'rsating. "
            "Oxirida harakatga chaqiriq («Buyurtma uchun tugmani bosing» kabi). "
            "Hashtag YOZMANG. JAVOB FAQAT JSON: {\"caption\": \"post matni\"}"),
-    'ru': ("Вы SMM-мозг Telegram-канала. Напишите КОРОТКИЙ (3-6 строк) живой пост о товаре "
-           "с эмодзи. Тон темы: {THEME}. Пишите естественно, без рекламных штампов. "
+    'ru': ("Вы профессиональный SMM-мозг Telegram-канала. Напишите КОРОТКИЙ (3-6 строк) "
+           "живой пост о товаре с эмодзи. Тон темы: {THEME}. Стиль письма: {TONE}. "
+           "Структура поста: {FORMAT}. Пишите естественно, без рекламных штампов. "
            "Обязательно укажите цену. В конце призыв к действию («Жмите кнопку для заказа»). "
            "БЕЗ хэштегов. ОТВЕТ ТОЛЬКО JSON: {\"caption\": \"текст поста\"}"),
 }
@@ -2429,15 +2431,56 @@ _SMM_THEMES = {
     6: ("yakshanba — yangi haftaga hozirlik", "воскресенье — подготовка к новой неделе"),
 }
 
+# Sotuvchi tanlaydigan yozish ohangi (SMM Pro)
+SMM_TONES = ("friendly", "premium", "energetic", "minimal")
+_SMM_TONE_TEXT = {
+    "friendly":  ("iliq, do'stona, qo'shnidek samimiy",
+                  "тёплый, дружелюбный, по-соседски искренний"),
+    "premium":   ("bosiq, ishonchli, sifat va qadr-qimmatga urg'u — premium brend ovozi",
+                  "сдержанный, уверенный, акцент на качество — голос премиум-бренда"),
+    "energetic": ("quvnoq, sershovqin, undov va emoji ko'proq — yoshlarcha g'ayratli",
+                  "задорный, громкий, больше восклицаний и эмодзи — молодёжный драйв"),
+    "minimal":   ("juda qisqa va lo'nda, 2-3 qator, ortiqcha so'zsiz, 1-2 emoji",
+                  "очень коротко и по делу, 2-3 строки, без лишних слов, 1-2 эмодзи"),
+}
+
+# Post tuzilishi rotatsiyasi — kanal bir xil qolipda qotib qolmasin
+_SMM_FORMATS = (
+    ("savol bilan boshlang (o'quvchiga to'g'ridan-to'g'ri murojaat), keyin mahsulot javob sifatida",
+     "начните с вопроса читателю, затем товар как ответ"),
+    ("muammo → yechim: kichik kundalik muammoni tasvirlab, mahsulotni yechim qilib ko'rsating",
+     "проблема → решение: опишите бытовую проблему и покажите товар как решение"),
+    ("qiziq fakt yoki amaliy maslahat bilan boshlang, mahsulotni unga bog'lang",
+     "начните с интересного факта или практичного совета, свяжите с товаром"),
+    ("to'g'ridan-to'g'ri taklif: mahsulot afzalliklarini 2-3 qisqa punktda bering",
+     "прямое предложение: 2-3 коротких пункта о преимуществах товара"),
+)
+
 
 async def generate_smm_caption(*, name, price_text, category="", description="",
-                               shop_name="", weekday=0, lang="uz") -> str:
-    """Kunlik SMM post matni. Qaytaradi caption (str) yoki None (chaqiruvchi zaxira
+                               shop_name="", weekday=0, lang="uz", tone="friendly",
+                               custom_note="", old_price_text="", stock_count=None) -> str:
+    """Kunlik SMM post matni (Pro: ohang + brend-ovoz + chegirma/zaxira urg'usi +
+    tuzilish rotatsiyasi). Qaytaradi caption (str) yoki None (chaqiruvchi zaxira
     sifatida generate_ad_caption'ga qaytadi)."""
+    import random as _random
     lng = lang if lang in ('uz', 'ru') else 'uz'
-    theme = _SMM_THEMES.get(int(weekday) % 7, _SMM_THEMES[0])[0 if lng == 'uz' else 1]
-    system = _SMM_SYSTEM[lng].replace("{THEME}", theme)
+    li = 0 if lng == 'uz' else 1
+    theme = _SMM_THEMES.get(int(weekday) % 7, _SMM_THEMES[0])[li]
+    tone_txt = _SMM_TONE_TEXT.get(tone or "friendly", _SMM_TONE_TEXT["friendly"])[li]
+    fmt = _random.choice(_SMM_FORMATS)[li]
+    system = (_SMM_SYSTEM[lng].replace("{THEME}", theme)
+              .replace("{TONE}", tone_txt).replace("{FORMAT}", fmt))
+    if custom_note:
+        system += ("\nDo'kon egasining brend talabi (albatta hisobga oling): "
+                   if lng == 'uz' else
+                   "\nТребование владельца магазина к стилю (обязательно учтите): ")
+        system += str(custom_note)[:200]
     parts = [f"Mahsulot: {name}", f"Narx: {price_text}"]
+    if old_price_text:
+        parts.append(f"Eski narx: {old_price_text} (CHEGIRMA — tejamni urg'ulang!)")
+    if stock_count is not None and 0 < int(stock_count) <= 5:
+        parts.append(f"Zaxira: bor-yo'g'i {int(stock_count)} dona qoldi (kamyoblikni ayting)")
     if category:
         parts.append(f"Kategoriya: {category}")
     if description:

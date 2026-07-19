@@ -15947,24 +15947,31 @@ async def wish_scan_job(context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 async def smm_scan_job(context: ContextTypes.DEFAULT_TYPE):
     """Har ~10 daqiqada: shu soat (Toshkent) uchun faol SMM sozlamalarini topib,
-    navbatdagi mahsulotni AI mavzuli matn bilan kanal(lar)ga joylaydi (kuniga 1 marta)."""
+    strategiya bo'yicha tanlangan mahsulotni AI mavzuli matn bilan kanal(lar)ga
+    joylaydi. Pro: kuniga bir necha soat-slot, hafta kunlari filtri, ohang,
+    brend-ovoz, chegirma/zaxira urg'usi, post tarixi."""
     from datetime import datetime as _dt
     try:
         now_t = _dt.now(TZ_TASHKENT)
-        due = db.get_due_smm(now_t.hour)
+        slot_key = f"{now_t.strftime('%Y-%m-%d')}/{now_t.hour:02d}"
+        due = db.get_due_smm(now_t.hour, weekday=now_t.weekday(), slot_key=slot_key)
     except Exception as e:
         logging.error(f"smm_scan_job o'qish xatosi: {e}")
         return
     for s in due:
         seller_id = s['seller_id']
         try:
-            nxt = db.get_next_smm_product(seller_id, s.get('last_product_id'))
+            nxt = db.get_next_smm_product(seller_id, s.get('last_product_id'),
+                                          strategy=s.get('strategy') or 'rotation')
             if not nxt:
-                db.mark_smm_posted(seller_id, None)   # mahsulot yo'q — bugun o'tkazamiz
+                # mahsulot yo'q — shu slotni o'tkazamiz
+                db.mark_smm_posted(seller_id, None, slot_key)
                 continue
             product = db.get_product_by_id(nxt['id']) or nxt   # category_name joini bilan
             owner = db.get_user_by_id(seller_id)
             olang = get_user_lang(owner) if owner else 'uz'
+            old_p = product.get('old_price')
+            has_disc = bool(old_p and float(old_p) > float(product.get('price') or 0))
             cap = None
             try:
                 cap = await ai_assistant.generate_smm_caption(
@@ -15972,13 +15979,21 @@ async def smm_scan_job(context: ContextTypes.DEFAULT_TYPE):
                     category=product.get('category_name') or '',
                     description=product.get('description') or '',
                     shop_name=(dict(owner).get('shop_name') if owner else '') or '',
-                    weekday=now_t.weekday(), lang=olang or 'uz')
+                    weekday=now_t.weekday(), lang=olang or 'uz',
+                    tone=s.get('tone') or 'friendly',
+                    custom_note=s.get('custom_note') or '',
+                    old_price_text=fmt_price(old_p) if has_disc else '',
+                    stock_count=product.get('stock_count'))
             except Exception as e:
                 logging.warning(f"SMM caption AI xato (seller {seller_id}): {e}")
             # cap=None bo'lsa post_product_to_channel o'zi standart AI reklama matnini quradi
             await post_product_to_channel(context, nxt['id'],
                                           caption_override=cap, parse_mode_override=None)
-            db.mark_smm_posted(seller_id, nxt['id'])
+            db.mark_smm_posted(seller_id, nxt['id'], slot_key)
+            try:
+                db.log_smm_post(seller_id, nxt['id'], cap)
+            except Exception:
+                pass
             if owner and dict(owner).get('telegram_id'):
                 try:
                     msg = ("🤖 SMM: bugungi post kanalga joylandi — "

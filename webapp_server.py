@@ -4049,32 +4049,151 @@ def api_ai_director_apply(body: DirectorApplyIn, authorization: str = Header(Non
 # ============================================================
 class SmmIn(BaseModel):
     is_active: Optional[bool] = None
-    hour: Optional[int] = None
+    hour: Optional[int] = None            # eski mijoz mosligi (bitta soat)
+    hours: Optional[List[int]] = None     # Pro: kunlik post soatlari (0-23, istalgancha)
+    days: Optional[List[int]] = None      # Pro: faol hafta kunlari 0-6 ([] = har kuni)
+    tone: Optional[str] = None            # Pro: yozish ohangi
+    strategy: Optional[str] = None        # Pro: mahsulot tanlash strategiyasi
+    custom_note: Optional[str] = None     # Pro: brend-ovoz talabi ('' = tozalash)
+
+
+_SMM_TONES = {"friendly", "premium", "energetic", "minimal"}
+_SMM_STRATEGIES = {"rotation", "random", "new", "discount"}
+
+
+def _smm_settings_out(oid):
+    """Sozlamani App uchun tayyorlaydi: hours/days ro'yxat ko'rinishida."""
+    s = dict(db.get_smm_settings(oid) or
+             {"hour": 10, "is_active": 0, "last_posted_at": None, "last_product_id": None})
+    s["hours"] = db._smm_hours_list(s)
+    days = [p for p in str(s.get("days") or "").split(",") if p.strip().isdigit()]
+    s["days"] = sorted({int(p) for p in days if 0 <= int(p) <= 6})   # [] = har kuni
+    s["tone"] = s.get("tone") or "friendly"
+    s["strategy"] = s.get("strategy") or "rotation"
+    s["custom_note"] = s.get("custom_note") or ""
+    return s
+
+
+def _smm_require_seller(authorization):
+    user = dict(_buyer_from_auth(authorization))
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+    return user
+
+
+async def _smm_build_caption(oid, s, product, user):
+    """Sozlamalarga mos SMM matni (preview va darhol joylash uchun umumiy)."""
+    owner = db.get_user_by_id(oid)
+    prod = dict(db.get_product_by_id(product["id"]) or product)
+    old_p = prod.get("old_price")
+    has_disc = bool(old_p and float(old_p) > float(prod.get("price") or 0))
+    tz_tk = timezone(timedelta(hours=5))   # Toshkent
+    return await ai_assistant.generate_smm_caption(
+        name=prod.get("name") or "", price_text=fmt_price(prod.get("price")),
+        category=prod.get("category_name") or "",
+        description=prod.get("description") or "",
+        shop_name=(dict(owner).get("shop_name") if owner else "") or "",
+        weekday=datetime.now(tz_tk).weekday(),
+        lang=get_user_lang(user) or DEFAULT_LANG,
+        tone=s.get("tone") or "friendly",
+        custom_note=s.get("custom_note") or "",
+        old_price_text=fmt_price(old_p) if has_disc else "",
+        stock_count=prod.get("stock_count"))
 
 
 @app.get("/api/seller/smm")
 def api_smm_get(authorization: str = Header(None)):
     user = dict(_buyer_from_auth(authorization))
     oid = _owner_id(user)
-    s = db.get_smm_settings(oid) or {"hour": 10, "is_active": 0,
-                                     "last_posted_at": None, "last_product_id": None}
+    s = _smm_settings_out(oid)
     chans = len(db.get_active_seller_channels(oid) or [])
-    return {**s, "channels": chans, "ai_enabled": ai_assistant.is_enabled()}
+    hist = db.get_smm_posts(oid, limit=5)
+    prods = [p for p in (db.get_products_by_seller(oid) or [])
+             if dict(p).get("status") == "active" and dict(p).get("in_stock")]
+    return {**s, "channels": chans, "ai_enabled": ai_assistant.is_enabled(),
+            "history": hist["items"], "total_posts": hist["total"],
+            "active_products": len(prods)}
 
 
 @app.post("/api/seller/smm")
 def api_smm_set(body: SmmIn, authorization: str = Header(None)):
-    user = dict(_buyer_from_auth(authorization))
-    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
-        raise HTTPException(status_code=403, detail="not_seller")
+    user = _smm_require_seller(authorization)
     oid = _owner_id(user)
-    hour = None
+    kw = {}
     if body.hour is not None:
-        hour = int(body.hour)
-        if not (0 <= hour <= 23):
+        if not (0 <= int(body.hour) <= 23):
             raise HTTPException(status_code=400, detail="bad_hour")
-    s = db.upsert_smm_settings(oid, hour=hour, is_active=body.is_active)
-    return {"ok": True, **(s or {})}
+        kw["hour"] = int(body.hour)
+    if body.hours is not None:
+        hrs = sorted({int(h) for h in body.hours})
+        if not hrs or any(not (0 <= h <= 23) for h in hrs):
+            raise HTTPException(status_code=400, detail="bad_hours")
+        kw["hours"] = ",".join(str(h) for h in hrs)
+        kw["hour"] = hrs[0]   # eski ustun ham sinxron qoladi
+    if body.days is not None:
+        dys = sorted({int(d) for d in body.days})
+        if any(not (0 <= d <= 6) for d in dys):
+            raise HTTPException(status_code=400, detail="bad_days")
+        kw["days"] = ",".join(str(d) for d in dys)   # bo'sh = har kuni
+    if body.tone is not None:
+        if body.tone not in _SMM_TONES:
+            raise HTTPException(status_code=400, detail="bad_tone")
+        kw["tone"] = body.tone
+    if body.strategy is not None:
+        if body.strategy not in _SMM_STRATEGIES:
+            raise HTTPException(status_code=400, detail="bad_strategy")
+        kw["strategy"] = body.strategy
+    if body.custom_note is not None:
+        kw["custom_note"] = str(body.custom_note).strip()[:200]
+    db.upsert_smm_settings(oid, is_active=body.is_active, **kw)
+    return {"ok": True, **_smm_settings_out(oid)}
+
+
+@app.get("/api/seller/smm/preview")
+async def api_smm_preview(authorization: str = Header(None)):
+    """Navbatdagi post QANDAY chiqishini ko'rsatadi (kanalga yubormaydi)."""
+    user = _smm_require_seller(authorization)
+    if not ai_assistant.is_enabled():
+        raise HTTPException(status_code=503, detail="ai_disabled")
+    _rate_limit("smm_preview", user.get("id"), 6, 3600)
+    oid = _owner_id(user)
+    s = _smm_settings_out(oid)
+    nxt = db.get_next_smm_product(oid, s.get("last_product_id"),
+                                  strategy=s.get("strategy") or "rotation")
+    if not nxt:
+        return {"available": False}
+    cap = await _smm_build_caption(oid, s, nxt, user)
+    if not cap:
+        raise HTTPException(status_code=502, detail="ai_error")
+    return {"available": True, "caption": cap,
+            "product_id": nxt["id"], "product_name": nxt.get("name")}
+
+
+@app.post("/api/seller/smm/post-now")
+async def api_smm_post_now(authorization: str = Header(None)):
+    """Navbatdagi mahsulotni AI matn bilan HOZIROQ kanalga joylaydi (bot
+    scheduled-post oqimi orqali ~30 soniyada chiqadi). Kunlik limit — 3."""
+    user = _smm_require_seller(authorization)
+    _rate_limit("smm_post_now", user.get("id"), 3, 86400)
+    oid = _owner_id(user)
+    s = _smm_settings_out(oid)
+    nxt = db.get_next_smm_product(oid, s.get("last_product_id"),
+                                  strategy=s.get("strategy") or "rotation")
+    if not nxt:
+        raise HTTPException(status_code=400, detail="no_product")
+    cap = None
+    if ai_assistant.is_enabled():
+        try:
+            cap = await _smm_build_caption(oid, s, nxt, user)
+        except Exception:
+            cap = None   # AI xatosi post'ni to'xtatmasin — standart reklama matni chiqadi
+    sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    db.create_scheduled_post(nxt["id"], oid, sa, created_by=user["id"],
+                             caption=cap, parse_mode=None, image_id=None)
+    # rotatsiya oldinga suriladi; bugungi avtomatik slot holati o'zgarmaydi
+    db.mark_smm_posted(oid, nxt["id"], slot_key=dict(db.get_smm_settings(oid) or {}).get("last_slot"))
+    db.log_smm_post(oid, nxt["id"], cap)
+    return {"ok": True, "product_id": nxt["id"], "product_name": nxt.get("name")}
 
 
 class ShopEdit(BaseModel):
