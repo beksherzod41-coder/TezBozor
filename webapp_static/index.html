@@ -826,6 +826,11 @@ const I18N = {
   reels_copy:{uz:"📋 Nusxa olish",ru:"📋 Копировать"},
   reels_copied:{uz:"✅ Nusxa olindi",ru:"✅ Скопировано"},
   reels_regen:{uz:"🔄 Boshqa variant",ru:"🔄 Другой вариант"},
+  clip_btn:{uz:"🎬 AI video-reklama yasash",ru:"🎬 Создать AI видеорекламу"},
+  clip_making:{uz:"🎬 Video yasalmoqda (~1 daqiqa)...",ru:"🎬 Видео создаётся (~1 минута)..."},
+  clip_done:{uz:"✅ Video-reklama tayyor! Post shu video bilan chiqadi.",ru:"✅ Видеореклама готова! Пост выйдет с этим видео."},
+  clip_fail:{uz:"Video yaratilmadi: ",ru:"Видео не создано: "},
+  clip_note:{uz:"🎬 AI video-reklama — post shu video bilan chiqadi",ru:"🎬 AI видеореклама — пост выйдет с этим видео"},
   dynp_btn:{uz:"📊 Dinamik narx (AI)",ru:"📊 Динамическая цена (ИИ)"},
   dynp_title:{uz:"📊 Dinamik narx",ru:"📊 Динамическая цена"},
   dynp_loading:{uz:"AI talab va raqobatni tahlil qilmoqda...",ru:"ИИ анализирует спрос и конкурентов..."},
@@ -7556,10 +7561,12 @@ function renderAdView(){
     body.innerHTML = `<div class="loading" style="padding:40px;text-align:center">⏳ ${L('sp_ad_loading')}</div>`;
     return;
   }
-  // Video bor mahsulotda kanal posti VIDEO bilan chiqadi — preview'da ham videoni ko'rsatamiz
-  const img = adState.video_file_id
-    ? `<video src="${vidUrl(adState.video_file_id)}" controls playsinline preload="metadata" style="width:100%;max-height:300px;border-radius:14px;background:#000;display:block"></video>
-       <div style="margin-top:7px;padding:9px 12px;background:var(--accent-soft);border-radius:10px;font-size:12px;font-weight:600;color:var(--accent)">${L('sp_ad_video_note')}</div>`
+  // Video bor mahsulotda kanal posti VIDEO bilan chiqadi — preview'da ham videoni
+  // ko'rsatamiz. 🎬 Yangi yasalgan AI klip sotuvchi videosidan ustun (backend parite).
+  const advid = adState.clip_fid || adState.video_file_id;
+  const img = advid
+    ? `<video src="${vidUrl(advid)}" controls playsinline preload="metadata" style="width:100%;max-height:300px;border-radius:14px;background:#000;display:block"></video>
+       <div style="margin-top:7px;padding:9px 12px;background:var(--accent-soft);border-radius:10px;font-size:12px;font-weight:600;color:var(--accent)">${adState.clip_fid?L('clip_note'):L('sp_ad_video_note')}</div>`
     : (adState.image
       ? `<img src="${adState.image}" style="width:100%;border-radius:14px;display:block">`
       : `<div style="padding:14px;background:var(--accent-soft);border-radius:12px;color:var(--hint);font-size:13px">${L('sp_ad_no_design')}</div>`);
@@ -7572,7 +7579,8 @@ function renderAdView(){
     <div class="cosec"><div class="lbl">${L('sp_ad_caption')}</div>
       <textarea class="coaddr" id="adCap" style="min-height:150px">${esc(adState.caption)}</textarea></div>
     <button class="oact no" id="adRegen" style="width:100%">${L('sp_ad_regen')}</button>
-    ${adState.video_file_id?'':`<button class="oact no" id="adAiBanner" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('banner_btn')}</button>`}
+    ${adState.video_file_id||adState.clip_fid?'':`<button class="oact no" id="adAiBanner" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('banner_btn')}</button>`}
+    <button class="oact no" id="adClipBtn" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('clip_btn')}</button>
     <div class="cosec" style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">
       <div class="lbl">${L('sp_ad_more')}</div>
       <input class="coaddr" id="adSchWhen" type="datetime-local" style="min-height:auto">
@@ -7589,6 +7597,7 @@ function renderAdView(){
   body.querySelectorAll('[data-adlen]').forEach(o=>o.onclick=()=>{ adState.length=o.dataset.adlen; loadAdPreview(); });
   document.getElementById('adRegen').onclick = loadAdPreview;
   const aiBanBtn = document.getElementById('adAiBanner'); if(aiBanBtn) aiBanBtn.onclick = aiBannerMake;
+  const clipBtn = document.getElementById('adClipBtn'); if(clipBtn) clipBtn.onclick = aiClipMake;
   document.getElementById('adPublish').onclick = publishAd;
   document.getElementById('adSchedule').onclick = adSchedule;
   document.getElementById('adAutorep').onclick = adAutorep;
@@ -7618,7 +7627,8 @@ async function publishAd(){
     try{
       await apiSend('/api/seller/product/'+adState.pid+'/ad-publish','POST',
                     {caption: adState.caption, length: adState.length,
-                     image_id: adState.ai_image_fid || null});
+                     image_id: adState.ai_image_fid || null,
+                     video_id: adState.clip_fid || null});
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
       closeAdView();
       tg.showAlert(L('sp_ad_published'));
@@ -7651,6 +7661,26 @@ async function aiBannerMake(){
     }
     tg.showAlert(L('banner_fail')+((d && d.message) || ''));
   }catch(e){ tg.showAlert(L('banner_fail')+(e.message||e)); }
+  btn.disabled = false; btn.textContent = old;
+}
+
+// 🎬 AI VIDEO-REKLAMA — mahsulot rasmlari + AI hook'dan reels-uslub klip (ffmpeg,
+// serverda). Muvaffaqiyatda preview video bo'ladi va post SHU klip bilan chiqadi.
+async function aiClipMake(){
+  const btn = document.getElementById('adClipBtn');
+  if(!btn || btn.disabled) return;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = L('clip_making');
+  try{
+    const d = await apiSend('/api/seller/product/'+adState.pid+'/adclip','POST',{});
+    if(d && d.ok && d.file_id){
+      adState.clip_fid = d.file_id;
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      renderAdView();
+      tg.showAlert(L('clip_done'));
+      return;
+    }
+    tg.showAlert(L('clip_fail'));
+  }catch(e){ tg.showAlert(L('clip_fail')+(e.message||e)); }
   btn.disabled = false; btn.textContent = old;
 }
 

@@ -8709,8 +8709,10 @@ async def post_product_to_channel(context, product_id, *,
         photo = product.get('image_url')
         # Video MVP: mahsulotda video bo'lsa kanal posti VIDEO + reklama matni bilan
         # chiqadi (video jonli ko'rsatadi — dizayn rasm kerak emas). file_id bir bot
-        # ichida hamma chatga qayta ishlatiladi.
-        video_id = product.get('video_file_id')
+        # ichida hamma chatga qayta ishlatiladi. 🎬 AI video-reklama klipi
+        # (ad_video_file_id) sotuvchi yuklagan videodan USTUN — u aynan reklama
+        # uchun yasalgan (hook + narx + CTA).
+        video_id = product.get('ad_video_file_id') or product.get('video_file_id')
 
         # === REKLAMA DIZAYNI (B) ===
         # image_override berilsa — tayyor file_id ni hamma kanalga qayta ishlatamiz.

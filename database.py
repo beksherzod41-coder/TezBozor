@@ -490,6 +490,7 @@ class Database:
             ("products", "delivery_available", "INTEGER DEFAULT 1"),  # 1=yetkaziladi, 0=faqat olib ketish (sotuvchi belgilaydi)
             ("users",    "delivery_min_total", "REAL"),               # do'kon: yetkazish uchun minimal buyurtma summasi (NULL/0 = cheklov yo'q)
             ("products", "video_file_id",   "TEXT"),               # ixtiyoriy qisqa video (Telegram file_id; ≤60s, ≤20MB — getFile proksi chegarasi)
+            ("products", "ad_video_file_id", "TEXT"),              # 🎬 AI video-reklama klipi (ffmpeg'da yasalgan; kanal posti uchun video_file_id'dan USTUN)
         ]
         for _tbl, _col, _defn in _migrations:
             try:
@@ -3342,6 +3343,15 @@ class Database:
         conn.commit()
 
     # ===== REJALASHTIRILGAN POSTLAR (avtomatik sotuvga qo'yish) =====
+    def set_product_ad_video(self, product_id, file_id):
+        """🎬 AI video-reklama klipini (Telegram file_id) mahsulotga bog'laydi.
+        Kanal posti shu klip bilan chiqadi (video_file_id'dan ustun). None = o'chirish."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE products SET ad_video_file_id=? WHERE id=?",
+                       (file_id, product_id))
+        conn.commit()
+
     def create_scheduled_post(self, product_id, seller_id, scheduled_at, created_by=None,
                               caption=None, parse_mode=None, image_id=None):
         """Yangi rejalashtirilgan post yaratadi. scheduled_at — UTC ('YYYY-MM-DD HH:MM:SS'

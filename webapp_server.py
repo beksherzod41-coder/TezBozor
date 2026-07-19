@@ -45,6 +45,7 @@ from tezbozor_design import (fmt_order_id, fmt_price, best_location_text, effect
 import ai_assistant
 import ai_vision
 import ad_design
+import ad_video
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Rasmiy kanal havolasi (app'dagi "kanalga o'tish" tugmasi — bot bilan bir xil manba)
@@ -3632,8 +3633,9 @@ async def api_ad_preview(product_id: int, length: str = Query("long"),
     lang = get_user_lang(user) or DEFAULT_LANG
     caption, parse_mode = await _build_ad_caption_web(prod, length, lang)
     # Video bor mahsulotda kanal posti VIDEO bilan chiqadi — dizayn rasm yasalmaydi,
-    # preview'da ham video ko'rsatiladi (post bilan 100% mos bo'lsin).
-    video_fid = prod.get("video_file_id")
+    # preview'da ham video ko'rsatiladi (post bilan 100% mos bo'lsin). 🎬 AI
+    # video-reklama klipi sotuvchi videosidan ustun (post_product_to_channel parite).
+    video_fid = prod.get("ad_video_file_id") or prod.get("video_file_id")
     design = None if video_fid else await _build_ad_design_web(prod)
     image = None
     if design:
@@ -3647,6 +3649,7 @@ class AdPublishIn(BaseModel):
     caption: Optional[str] = None
     length: Optional[str] = "long"
     image_id: Optional[str] = None   # 🎨 AI banner file_id (ai-banner endpointi bergan)
+    video_id: Optional[str] = None   # 🎬 AI video-reklama klipi file_id (adclip endpointi bergan)
 
 
 @app.post("/api/seller/product/{product_id}/ad-publish")
@@ -3664,6 +3667,12 @@ def api_ad_publish(product_id: int, body: AdPublishIn, authorization: str = Head
     # Sotuvchi tahrir qilgan matn — oddiy matn sifatida yuboriladi (parse_mode yo'q,
     # buzilgan HTML xavfi yo'q). Bo'sh bo'lsa caption=None -> bot AI matnini quradi.
     image_id = (body.image_id or "").strip()[:200] or None   # AI banner bo'lsa — o'sha rasm
+    # 🎬 AI video-reklama klipi tanlangan bo'lsa — mahsulotga bog'laymiz; bot posti
+    # (post_product_to_channel) uni video sifatida chiqaradi va keyingi qayta
+    # reklamalar (avto-repost ham) shu klip bilan ketadi.
+    video_id = (body.video_id or "").strip()[:200] or None
+    if video_id:
+        db.set_product_ad_video(product_id, video_id)
     sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     db.create_scheduled_post(product_id, prod["seller_id"], sa,
                              created_by=user["id"], caption=caption,
@@ -7452,6 +7461,33 @@ async def _tg_upload_photo(chat_id, data, filename="photo.jpg",
     return msg["photo"][-1]["file_id"]
 
 
+async def _tg_upload_video(chat_id, data, filename="clip.mp4"):
+    """Video baytlarni Telegram'ga yuborib file_id oladi (xabar darhol o'chiriladi
+    — _tg_upload_photo bilan bir uslub). Xatoda None."""
+    if not BOT_TOKEN or not chat_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo",
+                data={"chat_id": str(chat_id), "supports_streaming": "true"},
+                files={"video": (filename, data, "video/mp4")})
+            res = r.json()
+    except Exception as e:
+        logging.warning(f"AI video upload xato: {e}")
+        return None
+    if not res.get("ok") or not (res.get("result") or {}).get("video"):
+        return None
+    msg = res["result"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                              json={"chat_id": chat_id, "message_id": msg["message_id"]})
+    except Exception:
+        pass
+    return msg["video"]["file_id"]
+
+
 def _ai_http_error(code, lang):
     """ai_vision xato kodini HTTPException'ga aylantiradi (401 emas — AI xatosi
     klientni logoutga olib bormasin: hammasi 503, faqat parse 422)."""
@@ -7539,6 +7575,74 @@ async def api_ai_banner(product_id: int, body: AiBannerIn = None,
     if not file_id:
         raise HTTPException(status_code=502, detail="upload_failed")
     return {"ok": True, "file_id": file_id}
+
+
+# 🎬 AI VIDEO-REKLAMA — ffmpeg render CPU-og'ir, bir vaqtda BITTAdan (navbat)
+_ADCLIP_LOCK = asyncio.Lock()
+
+
+class AdClipIn(BaseModel):
+    hook: Optional[str] = None   # sotuvchi o'z hook matnini bersa (bo'sh = AI yozadi)
+
+
+@app.post("/api/seller/product/{product_id}/adclip")
+async def api_ad_clip(product_id: int, body: AdClipIn = None,
+                      authorization: str = Header(None)):
+    """🎬 AI video-reklama: mahsulot rasm(lar)i + AI hook matnidan 8-14 soniyalik
+    reels-uslub klip (ffmpeg, tashqi API'siz). Klip sotuvchi chatiga yuklanib
+    file_id qaytadi; App preview'da ko'rsatadi, ad-publish video_id bilan chiqaradi.
+    Diskdagi nusxa /api/video keshiga oldindan yoziladi — preview darhol ochiladi."""
+    user = dict(_buyer_from_auth(authorization))
+    prod = dict(_own_product_or_403(user, product_id))
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ad_video.is_enabled():
+        raise HTTPException(status_code=503, detail="clip_disabled")
+    _rate_limit("adclip", user["id"], 5, 3600)
+    img_fids = db.get_product_images(product_id)[:3]
+    if not img_fids:
+        raise HTTPException(status_code=400, detail="no_photo")
+    images = []
+    for fid in img_fids:
+        b = await _tg_file_bytes(fid)
+        if b:
+            images.append(b)
+    if not images:
+        raise HTTPException(status_code=502, detail="image_fetch_failed")
+
+    hook = (body.hook if body else "").strip()[:48] if (body and body.hook) else ""
+    if not hook:
+        hook = await ai_assistant.generate_clip_hook(
+            name=prod.get("name") or "", category=prod.get("category_name") or "",
+            lang=lang, seed=product_id)
+    shop = db.get_shop_by_owner(_owner_id(user))
+    shop_name = (dict(shop).get("name") if shop else None) or user.get("shop_name") or BRAND_NAME
+    optom_txt = ""
+    if prod.get("sale_mode") == "optom":
+        _ps = prod.get("pack_size")
+        optom_txt = f"OPTOM · 1 PACHKA = {int(_ps)} DONA" if _ps else "OPTOM"
+    cta = "SOTIB OLISH" if lang != "ru" else "КУПИТЬ"
+
+    async with _ADCLIP_LOCK:
+        clip = await asyncio.to_thread(
+            ad_video.build_ad_clip, images,
+            hook_text=hook,
+            price_text=fmt_price(prod.get("price")),
+            shop_text=str(shop_name or ""),
+            cta_text=cta, optom_text=optom_txt, brand_text=BRAND_NAME)
+    if not clip:
+        raise HTTPException(status_code=502, detail="clip_failed")
+    file_id = await _tg_upload_video(user.get("telegram_id"), clip,
+                                     filename=f"ad_{product_id}.mp4")
+    if not file_id:
+        raise HTTPException(status_code=502, detail="upload_failed")
+    # /api/video disk-keshini oldindan to'ldiramiz — preview getFile'siz darhol ochiladi
+    try:
+        safe = hashlib.sha256(file_id.encode()).hexdigest()
+        with open(os.path.join(IMG_CACHE_DIR, safe + ".mp4"), "wb") as f:
+            f.write(clip)
+    except Exception:
+        pass
+    return {"ok": True, "file_id": file_id, "hook": hook}
 
 
 @app.post("/api/ai/voice-search")

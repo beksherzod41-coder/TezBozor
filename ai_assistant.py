@@ -1849,6 +1849,75 @@ async def generate_video_script(*, name, price_text="", category="",
 
 
 # ============================================================
+# 🎬 VIDEO-REKLAMA HOOK — klip 1-kadri uchun juda qisqa "ilgak" matn
+# ============================================================
+_CLIP_HOOK_SYSTEM = {
+    'uz': (
+        "Sen — reklama copywriter'isan. Mahsulot uchun video-reklamaning "
+        "BIRINCHI kadrida chiqadigan juda qisqa ILGAK (hook) yoz: xaridorni "
+        "to'xtatib qoladigan 3-6 so'z. Qoidalar: emoji YO'Q, tinish belgisiz "
+        "yoki minimal, 48 belgidan oshmasin, narxni takrorlama. "
+        'Faqat JSON qaytar: {"hook": "<matn>"}'
+    ),
+    'ru': (
+        "Ты — рекламный копирайтер. Напиши очень короткий ХУК для первого "
+        "кадра видеорекламы товара: 3-6 слов, которые остановят покупателя. "
+        "Правила: без эмодзи, максимум 48 символов, не повторяй цену. "
+        'Верни только JSON: {"hook": "<текст>"}'
+    ),
+}
+# AI ishlamasa — deterministik zaxira (klip yaratish HECH QACHON to'xtamaydi)
+_CLIP_HOOK_FALLBACK = {
+    'uz': ["Bunaqasi kam topiladi", "Yangi keldi — ulguring",
+           "Sifat va narx bir joyda", "Buni o'tkazib yubormang",
+           "Eng zo'ri endi sizda"],
+    'ru': ["Такое ещё поискать", "Новинка — успейте",
+           "Качество и цена вместе", "Не упустите это",
+           "Лучшее — теперь у вас"],
+}
+
+
+def clip_fallback_hook(name, lang='uz', seed=0):
+    """AI'siz zaxira hook — mahsulot nomidan deterministik tanlanadi."""
+    lng = lang if lang in _CLIP_HOOK_FALLBACK else 'uz'
+    opts = _CLIP_HOOK_FALLBACK[lng]
+    return opts[(len(name or "") + int(seed)) % len(opts)]
+
+
+async def generate_clip_hook(*, name, category="", lang="uz", seed=0) -> str:
+    """Video-reklama uchun qisqa hook. DOIM bo'sh bo'lmagan matn qaytaradi
+    (AI xatosida deterministik zaxiraga tushadi)."""
+    lng = lang if lang in ('uz', 'ru') else 'uz'
+    fallback = clip_fallback_hook(name, lng, seed)
+    if not is_enabled() or not (name or "").strip():
+        return fallback
+    user_msg = f"{'Mahsulot' if lng == 'uz' else 'Товар'}: {name}"
+    if category:
+        user_msg += f"\n{'Kategoriya' if lng == 'uz' else 'Категория'}: {category}"
+    payload = {
+        "messages": [
+            {"role": "system", "content": _CLIP_HOOK_SYSTEM[lng]},
+            {"role": "user", "content": user_msg},
+        ],
+        "max_tokens": 120,
+        "temperature": 0.9,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
+            resp = await _chat_post(client, payload)
+            if resp.status_code >= 400:
+                return fallback
+            content = (resp.json()["choices"][0]["message"].get("content") or "")
+            data = _json_from_text(content)
+            hook = ((data or {}).get("hook") or "").strip()
+            return hook[:48] if hook else fallback
+    except Exception as e:
+        log.warning(f"Klip hook xato: {e}")
+        return fallback
+
+
+# ============================================================
 # #6 — SENTIMENT TAHLIL (sharhlardan admin uchun "nimadan norozi")
 # ============================================================
 _SENTIMENT_SYSTEM = {
