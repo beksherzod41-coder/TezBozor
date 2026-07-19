@@ -6814,6 +6814,37 @@ def api_admin_user_detail(user_id: int, authorization: str = Header(None)):
     return out
 
 
+class AdminContactsIn(BaseModel):
+    shop_phone: Optional[str] = None
+    shop_instagram: Optional[str] = None
+    shop_telegram: Optional[str] = None
+    shop_website: Optional[str] = None
+
+
+@app.patch("/api/admin/user/{user_id}/contacts")
+def api_admin_set_contacts(user_id: int, p: AdminContactsIn, authorization: str = Header(None)):
+    """Super admin sotuvchi "Aloqa bloki"ni panel'dan tahrirlaydi (reklamaga chiqadi).
+    Bo'sh satr ('') → maydonni tozalaydi; None → tegilmaydi. Multivendor: admin
+    ISTALGAN do'konning aloqa kanallarini shu yerdan boshqaradi."""
+    _admin_from_auth(authorization)
+    target = db.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="user_not_found")
+    if p.shop_phone is not None and p.shop_phone.strip():
+        digits = p.shop_phone.strip().lstrip("+").replace(" ", "").replace("-", "")
+        if not digits.isdigit() or not (7 <= len(digits) <= 15):
+            raise HTTPException(status_code=400, detail="bad_phone")
+    for attr in ("shop_instagram", "shop_telegram", "shop_website"):
+        v = getattr(p, attr)
+        if v is not None and len(v.strip()) > 200:
+            raise HTTPException(status_code=400, detail="bad_link")
+    db.update_shop_contacts(
+        user_id, phone=p.shop_phone, instagram=p.shop_instagram,
+        telegram=p.shop_telegram, website=p.shop_website,
+    )
+    return {"ok": True}
+
+
 @app.get("/api/admin/user/{user_id}/fill-preview")
 async def api_admin_fill_preview(user_id: int, authorization: str = Header(None)):
     """AI yetishmagan maydonlar bo'yicha foydalanuvchiga yuboriladigan xabarni TAKLIF qiladi."""

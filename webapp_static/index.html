@@ -702,6 +702,11 @@
     <div id="auserBody" style="flex:1; display:flex; flex-direction:column;"></div>
   </div>
 
+  <div class="checkout" id="admcontview" style="z-index:160">
+    <div class="cohead"><span id="ttl_admcontview">📇 Aloqa bloki</span><span class="x" id="admcontClose">✕</span></div>
+    <div id="admcontBody" style="flex:1; display:flex; flex-direction:column;"></div>
+  </div>
+
   <div class="checkout" id="regview" style="z-index:120">
     <div class="cohead"><span id="ttl_regview">Ro'yxatdan o'tish</span></div>
     <div id="regBody" style="flex:1; display:flex; flex-direction:column;"></div>
@@ -1112,6 +1117,14 @@ const I18N = {
   adm_u_orders:{uz:"Buyurtmalari",ru:"Заказов"}, adm_u_created:{uz:"Ro'yxatdan o'tgan",ru:"Регистрация"},
   adm_u_approved:{uz:"Tasdiqlangan",ru:"Подтверждён"}, adm_u_addr:{uz:"Manzil",ru:"Адрес"}, adm_u_landmark:{uz:"Mo'ljal",ru:"Ориентир"},
   adm_u_hours:{uz:"Ish vaqti",ru:"Часы работы"}, adm_u_days:{uz:"Ish kunlari",ru:"Рабочие дни"}, adm_u_card:{uz:"Karta",ru:"Карта"},
+  adm_u_edit_contacts:{uz:"Aloqa blokini tahrirlash",ru:"Изменить контакты"},
+  sp_contact_hdr:{uz:"📇 Aloqa bloki (reklamaga chiqadi)",ru:"📇 Контакты (в рекламе)"},
+  sp_contact_hint:{uz:"Bir marta to'ldiring — har bir reklama postiga avtomatik qo'shiladi. Bo'sh maydon ko'rinmaydi.",ru:"Заполните один раз — добавится в каждый рекламный пост. Пустые поля не показываются."},
+  sp_c_phone:{uz:"Murojaat telefoni",ru:"Телефон для связи"},
+  sp_c_instagram:{uz:"Instagram",ru:"Instagram"},
+  sp_c_telegram:{uz:"Telegram kanal",ru:"Telegram канал"},
+  sp_c_website:{uz:"Havola (sayt/WhatsApp)",ru:"Ссылка (сайт/WhatsApp)"},
+  sp_bad_link:{uz:"Havola juda uzun (200 belgidan oshmasin)",ru:"Ссылка слишком длинная (макс. 200 символов)"},
   adm_u_sales:{uz:"Sotuvlari",ru:"Продаж"}, adm_u_channels:{uz:"Kanallar",ru:"Каналы"},
   adm_u_missing:{uz:"To'ldirilmagan maydonlar",ru:"Незаполненные поля"},
   adm_u_askfill:{uz:"🤖 Kamchilikni to'ldirishni so'rash",ru:"🤖 Запросить заполнение"},
@@ -4456,6 +4469,13 @@ async function loadProfile(){
         // Yetkazish eng kam summasi PROFILDAN → Sotuvchi (Do'kon) menyusidagi "🚚 Yetkazish eng kam summa" tugmasiga ko'chirildi
         (canEditShop && f.shop_lat==null ? `<div class="locwarn">${L('sp_loc_warn')}</div>` : '') +
         _pfRow('📍 '+L('sp_shop_location'), (f.shop_lat!=null?L('sp_loc_saved'):''), canEditShop?{key:'__location__',type:'location',kind:'shop'}:null) +
+        // "Aloqa bloki" — reklamaga avtomatik chiqadigan murojaat kanallari (faqat EGA tahrirlaydi)
+        `<div class="prow" style="border-top:1px solid var(--line);margin-top:6px;padding-top:12px"><b style="color:var(--accent);font-size:13px">${L('sp_contact_hdr')}</b></div>` +
+        (canEditShop?`<div class="prow" style="color:var(--hint);font-size:11.5px;line-height:1.45;padding-top:2px">${L('sp_contact_hint')}</div>`:'') +
+        _pfRow('📞 '+L('sp_c_phone'), f.shop_phone, canEditShop?{key:'shop_phone',type:'phone',kind:'shop'}:null) +
+        _pfRow('📸 '+L('sp_c_instagram'), f.shop_instagram, canEditShop?{key:'shop_instagram',type:'text',kind:'shop'}:null) +
+        _pfRow('📢 '+L('sp_c_telegram'), f.shop_telegram, canEditShop?{key:'shop_telegram',type:'text',kind:'shop'}:null) +
+        _pfRow('🌐 '+L('sp_c_website'), f.shop_website, canEditShop?{key:'shop_website',type:'text',kind:'shop'}:null) +
         `</div>`;
       const chans=(f.channels||[]);
       chanBody = `<div class="pinfo">`+
@@ -8261,9 +8281,15 @@ function renderAUser(d){
       ${_aurow(L('adm_u_card'), d.card_number)}
       ${ss.total_orders!=null?_aurow(L('adm_u_sales'), ss.total_orders):''}
       ${(d.channels&&d.channels.length)?_aurow(L('adm_u_channels'), d.channels.map(c=>c.channel_title||c.channel_id).join(', ')):''}
+      ${(d.shop_phone||d.shop_instagram||d.shop_telegram||d.shop_website)?`<div class="ometa" style="margin-top:6px;color:var(--accent)"><b>${L('sp_contact_hdr')}</b></div>
+      ${_aurow('📞 '+L('sp_c_phone'), d.shop_phone)}
+      ${_aurow('📸 '+L('sp_c_instagram'), d.shop_instagram)}
+      ${_aurow('📢 '+L('sp_c_telegram'), d.shop_telegram)}
+      ${_aurow('🌐 '+L('sp_c_website'), d.shop_website)}`:''}
     </div>`:''}
     ${missing.length?`<div class="ocard" style="background:#fff7e6"><div class="ometa" style="color:#a86b00"><b>⚠️ ${L('adm_u_missing')}</b></div><div class="ometa">${esc(missing.join(', '))}</div></div>`:''}
     ${d.can_askfill?`<button class="oact ok" id="auFill" style="width:100%;margin-top:8px">${L('adm_u_askfill')}</button>`:''}
+    ${seller?`<button class="oact soft" id="auContacts" style="width:100%;margin-top:8px">📇 ${L('adm_u_edit_contacts')}</button>`:''}
     ${seller?`<button class="oact ${d.is_approved?'no':'ok'}" id="auVerify" style="width:100%;margin-top:8px">${d.is_approved?L('adm_freeze'):L('adm_unfreeze')}</button>`:''}
     ${d.role==='admin'?'':`<button class="oact ${blocked?'ok':'no'}" id="auBlock" style="width:100%;margin-top:8px">${blocked?L('adm_unblock'):L('adm_block')}</button>`}
     <button class="oact no" id="auDelete" style="width:100%;margin-top:8px;background:var(--sale);color:#fff">${L('adm_u_delete')}</button>
@@ -8292,7 +8318,37 @@ function renderAUser(d){
   }catch(e){ tg.showAlert(L('err')+': '+e.message); } };
   const fb=document.getElementById('auFill');
   if(fb) fb.onclick=()=>askFill(d.id);
+  const cb2=document.getElementById('auContacts');
+  if(cb2) cb2.onclick=()=>openAdminContacts(d);
 }
+// Super admin sotuvchi "Aloqa bloki"ni panel'dan tahrirlaydi (alohida overlay — z-index yuqori)
+function openAdminContacts(d){
+  document.getElementById('ttl_admcontview').textContent='📇 '+L('sp_contact_hdr');
+  document.getElementById('admcontview').classList.add('open');
+  const b=document.getElementById('admcontBody');
+  b.innerHTML=`<div class="cobody">
+    <div class="cosec"><div style="font-size:11.5px;color:var(--hint);line-height:1.45">${L('sp_contact_hint')}</div></div>
+    ${_fld('📞 '+L('sp_c_phone'),'acPhone',d.shop_phone,'+998...')}
+    ${_fld('📸 '+L('sp_c_instagram'),'acInsta',d.shop_instagram,'@handle / instagram.com/...')}
+    ${_fld('📢 '+L('sp_c_telegram'),'acTg',d.shop_telegram,'@kanal / t.me/...')}
+    ${_fld('🌐 '+L('sp_c_website'),'acWeb',d.shop_website,'https://...')}
+  </div>
+  <div class="cobar"><button id="acSave">${L('s_save')}</button></div>`;
+  document.getElementById('acSave').onclick=async()=>{
+    const btn=document.getElementById('acSave'); btn.disabled=true; btn.textContent=L('sp_saving');
+    const v=id=>document.getElementById(id).value.trim();
+    try{
+      const r=await fetch('/api/admin/user/'+d.id+'/contacts',{method:'PATCH',headers:{Authorization:AUTH,'Content-Type':'application/json'},
+        body:JSON.stringify({shop_phone:v('acPhone'),shop_instagram:v('acInsta'),shop_telegram:v('acTg'),shop_website:v('acWeb')})});
+      if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||('HTTP '+r.status)); }
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      document.getElementById('admcontview').classList.remove('open');
+      openAUser({id:d.id});   // kartani yangilaydi — kiritilgan aloqa ko'rinadi
+    }catch(e){ btn.disabled=false; btn.textContent=L('s_save');
+      tg.showAlert(e.message==='bad_phone'?L('sp_bad_phone'):(e.message==='bad_link'?L('sp_bad_link'):(L('sp_error')+e.message))); }
+  };
+}
+document.getElementById('admcontClose').onclick=()=>document.getElementById('admcontview').classList.remove('open');
 async function askFill(uid){
   const body=document.getElementById('auserBody');
   body.innerHTML=`<div class="loading" style="padding:30px;text-align:center">🤖 ${L('adm_u_generating')}</div>`;
