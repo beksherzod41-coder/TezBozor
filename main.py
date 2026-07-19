@@ -84,6 +84,72 @@ def _open_app_button(lang, text_key, modal_url, start_param=""):
         return InlineKeyboardButton(t(lang, text_key), url=dl)
     return InlineKeyboardButton(t(lang, text_key), web_app=WebAppInfo(url=modal_url))
 
+
+# ============================================================
+# DO'KON "ALOQA BLOKI" — reklamaga avtomatik qo'shiladigan murojaat tugmalari
+# ============================================================
+def _norm_contact_url(val, kind):
+    """Do'kon aloqa maydonini to'g'ri https/tg havolaga aylantiradi (tugma uchun).
+    Telegram inline tugma FAQAT http(s)/tg:// havolani qabul qiladi — noto'g'ri
+    bo'lsa None qaytaramiz (tugma umuman qo'shilmaydi, post buzilmaydi)."""
+    v = (val or "").strip()
+    if not v:
+        return None
+    low = v.lower()
+    if low.startswith(("http://", "https://", "tg://")):
+        return v
+    v = v.lstrip("@").strip("/")
+    if not v:
+        return None
+    if kind == "instagram":
+        return f"https://instagram.com/{v}" if "instagram.com" not in low else "https://" + v
+    if kind == "telegram":
+        if "t.me/" in low:
+            return "https://" + v
+        return f"https://t.me/{v}"
+    # website / universal — domen ko'rinishida bo'lsa https qo'shamiz
+    if "." in v:
+        return "https://" + v
+    return None
+
+
+def _call_bridge_url(phone):
+    """📞 tugma uchun HTTPS ko'prik havolasi. Telegram inline tugma tel: ni qabul
+    qilmaydi — tugma webapp'ning /call/<raqam> sahifasiga boradi, sahifa ochilishi
+    bilan telefon tergichini avtomatik ochadi. MINIAPP_URL bo'lmasa None (tugma yo'q,
+    telefon caption matnida baribir bor)."""
+    if not MINIAPP_URL:
+        return None
+    digits = _re.sub(r"[^\d]", "", str(phone or ""))   # _re: modul darajasidagi re alias'i
+    if not (7 <= len(digits) <= 15):
+        return None
+    return f"{MINIAPP_URL.rstrip('/')}/call/{digits}"
+
+
+def _shop_contact_buttons(product):
+    """Mahsulot do'konining "Aloqa bloki"dan inline tugma qatorlari yasaydi.
+    Faqat to'ldirilgan maydonlar chiqadi. 📞 Qo'ng'iroq — HTTPS ko'prik sahifa orqali
+    haqiqiy tugma (sahifa tel: ni ochadi); telefon caption matnida ham qoladi."""
+    rows, pair = [], []
+    call_url = _call_bridge_url(product.get("shop_phone"))
+    if call_url:
+        pair.append(InlineKeyboardButton("📞 Qo'ng'iroq", url=call_url))
+    for kind, key, label in (
+        ("instagram", "shop_instagram", "📸 Instagram"),
+        ("telegram", "shop_telegram", "📢 Telegram"),
+        ("website", "shop_website", "🌐 Havola"),
+    ):
+        url = _norm_contact_url(product.get(key), kind)
+        if not url:
+            continue
+        pair.append(InlineKeyboardButton(label, url=url))
+        if len(pair) == 2:
+            rows.append(pair)
+            pair = []
+    if pair:
+        rows.append(pair)
+    return rows
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InputMediaPhoto, Chat, WebAppInfo, MenuButtonWebApp, MenuButtonCommands
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
@@ -8192,6 +8258,11 @@ async def _build_ad_caption(product, length="long"):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
+    # Do'kon murojaat telefoni — reklama matnida (mobil Telegram avtomatik
+    # bosiladigan qiladi). Ijtimoiy tarmoqlar esa post ostida tugma bo'lib chiqadi.
+    shop_phone = (product.get('shop_phone') or "").strip()
+    phone_line = f"\n📞 {html.escape(shop_phone)}" if shop_phone else ""
+
     # Optom (ulgurji/pachka) taklifi — yoqilgan bo'lsa reklamada zinalarni ko'rsatamiz.
     _is_optom = product.get('sale_mode') == 'optom'
     _w = wholesale_info(product)
@@ -8230,7 +8301,7 @@ async def _build_ad_caption(product, length="long"):
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
         f"\n💵 {price_with_unit(product)}{wholesale_line}{optom_lines}"
-        f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}"
+        f"{cat_line}{shop_line}{region_line}{loc_line}{phone_line}{rating_line}{desc_line}"
     )
     parse_mode = 'HTML'
 
@@ -8270,6 +8341,9 @@ async def _build_ad_caption(product, length="long"):
         if _w['enabled']:
             _tiers_plain = ", ".join(f"{t['min']}+ {_unit} — {fmt_price(t['price'])}" for t in _w['tiers'])
             caption = caption.rstrip() + f"\n\n📦 Optom narx: {_tiers_plain}"
+        # Murojaat telefonini AI matniga ham kafolatli qo'shamiz (oddiy matn).
+        if shop_phone:
+            caption = caption.rstrip() + f"\n📞 {shop_phone}"
     return caption, parse_mode
 
 
@@ -8377,9 +8451,11 @@ async def post_product_to_channel(context, product_id, *,
         except Exception as e:
             logging.warning(f"ad_caption saqlanmadi (pid {product_id}): {e}")
 
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🛒 Sotib olish", url=deep_link)
-        ]])
+        # 1-qator: "🛒 Sotib olish" (Mini App). Keyin do'kon "Aloqa bloki" tugmalari
+        # (Qo'ng'iroq/Instagram/Telegram/havola) — faqat sotuvchi to'ldirgan bo'lsa.
+        kb_rows = [[InlineKeyboardButton("🛒 Sotib olish", url=deep_link)]]
+        kb_rows.extend(_shop_contact_buttons(product))
+        keyboard = InlineKeyboardMarkup(kb_rows)
 
         # Maqsad kanallar: (chat_id, owner_seller_id, thread_id). Markaziy kanal — owner None.
         # thread_id faqat forum (mavzuli) guruhlar uchun — post o'sha topic ichiga boradi.

@@ -32,7 +32,7 @@ except Exception:
     pass
 
 from fastapi import FastAPI, Header, HTTPException, Query, File, UploadFile, Request, BackgroundTasks
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
@@ -3488,6 +3488,11 @@ async def _build_ad_caption_web(product, length, lang, use_ai=True):
         desc = desc[:300].rstrip() + "…"
     desc_line = f"\n\n📝 {html.escape(desc)}" if desc else ""
 
+    # Do'kon murojaat telefoni — reklama matnida (bot _build_ad_caption pariteti).
+    # Ijtimoiy tarmoqlar post ostida tugma bo'lib chiqadi (telefon esa matnda).
+    shop_phone = (product.get("shop_phone") or "").strip()
+    phone_line = f"\n📞 {html.escape(shop_phone)}" if shop_phone else ""
+
     # Optom (ulgurji/pachka) taklifi — yoqilgan bo'lsa zinalarni ko'rsatamiz (bot pariteti).
     _is_optom = product.get("sale_mode") == "optom"
     _w = wholesale_info(product)
@@ -3524,7 +3529,7 @@ async def _build_ad_caption_web(product, length, lang, use_ai=True):
     caption = (
         f"🆕 <b>{html.escape(product.get('name') or '')}</b>"
         f"\n💵 {_price_unit(product)}{wholesale_line}{optom_lines}"
-        f"{cat_line}{shop_line}{region_line}{loc_line}{rating_line}{desc_line}")
+        f"{cat_line}{shop_line}{region_line}{loc_line}{phone_line}{rating_line}{desc_line}")
     parse_mode = "HTML"
     if not use_ai:
         return caption, parse_mode  # darhol — AI ni kutmaymiz
@@ -3560,6 +3565,9 @@ async def _build_ad_caption_web(product, length, lang, use_ai=True):
         if _w["enabled"]:
             _tiers_plain = ", ".join(f"{t['min']}+ {_unit} — {fmt_price(t['price'])}" for t in _w["tiers"])
             ad_text = ad_text.rstrip() + f"\n\n📦 Optom narx: {_tiers_plain}"
+        # Murojaat telefonini AI matniga ham kafolatli qo'shamiz (bot pariteti — oddiy matn).
+        if shop_phone:
+            ad_text = ad_text.rstrip() + f"\n📞 {shop_phone}"
         return ad_text, None  # AI matni oddiy matn (HTML emas)
     return caption, parse_mode
 
@@ -4062,6 +4070,11 @@ class ShopEdit(BaseModel):
     lon: Optional[float] = None
     telegram_username: Optional[str] = None  # sotuvchi kontakt username (bot edit_telegram pariteti)
     delivery_min_total: Optional[float] = None  # yetkazish uchun minimal buyurtma summasi (0 = cheklov yo'q)
+    # "Aloqa bloki" — reklamaga avtomatik qo'shiladigan murojaat kanallari
+    shop_phone: Optional[str] = None       # murojaat telefoni (reklama matnida ko'rinadi)
+    shop_instagram: Optional[str] = None   # Instagram (post ostida tugma)
+    shop_telegram: Optional[str] = None    # Telegram kanal/username (post ostida tugma)
+    shop_website: Optional[str] = None     # universal havola (post ostida tugma)
 
 
 @app.patch("/api/seller/shop")
@@ -4135,6 +4148,23 @@ def api_edit_shop(p: ShopEdit, authorization: str = Header(None)):
         if mv > 1e12:
             raise HTTPException(status_code=400, detail="bad_delivery_min")
         fields["delivery_min_total"] = mv if mv > 0 else None
+    # "Aloqa bloki" — telefon + ijtimoiy tarmoqlar (reklamaga avtomatik chiqadi).
+    # Bo'sh qiymat → o'sha maydonni tozalaydi (NULL). Havolalar bot tomonida
+    # to'g'ri https/tg formatga keltiriladi — bu yerda faqat uzunlik cheklovi.
+    if p.shop_phone is not None:
+        ph = p.shop_phone.strip()
+        if ph:
+            digits = ph.lstrip("+").replace(" ", "").replace("-", "")
+            if not digits.isdigit() or not (7 <= len(digits) <= 15):
+                raise HTTPException(status_code=400, detail="bad_phone")
+        fields["shop_phone"] = ph or None
+    for attr in ("shop_instagram", "shop_telegram", "shop_website"):
+        v = getattr(p, attr)
+        if v is not None:
+            v = v.strip()
+            if len(v) > 200:
+                raise HTTPException(status_code=400, detail="bad_link")
+            fields[attr] = v or None
     if fields:
         db.update_user(user["id"], **fields)
     # payment_mode shops jadvalida (faqat ega)
@@ -5502,6 +5532,42 @@ async def api_config(authorization: str = Header(None)):
 @app.get("/api/health")
 def api_health():
     return {"ok": True, "backend": db.backend}
+
+
+@app.get("/call/{phone}")
+def call_page(phone: str):
+    """📞 Qo'ng'iroq ko'prigi — kanal reklama TUGMASI uchun. Telegram inline tugma
+    `tel:` havolani qabul qilmaydi, shuning uchun tugma shu HTTPS sahifaga keladi;
+    sahifa ochilishi bilan telefon tergichini (tel:) avtomatik ishga tushiradi.
+    Ochilmasa — katta zaxira tugma + raqam ko'rinadi. Auth talab qilinmaydi."""
+    digits = re.sub(r"[^\d]", "", phone or "")
+    if not (7 <= len(digits) <= 15):
+        raise HTTPException(status_code=404, detail="bad_phone")
+    tel = f"tel:+{digits}"
+    # +998 90 123 45 67 ko'rinishida chiroyli format (uz raqamlari uchun)
+    pretty = f"+{digits}"
+    if len(digits) == 12 and digits.startswith("998"):
+        pretty = f"+998 {digits[3:5]} {digits[5:8]} {digits[8:10]} {digits[10:12]}"
+    page = f"""<!doctype html><html lang="uz"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0;url={tel}">
+<title>Qo'ng'iroq — {BRAND_NAME}</title>
+<style>
+ body{{margin:0;font-family:system-ui,-apple-system,sans-serif;min-height:100vh;display:flex;
+      align-items:center;justify-content:center;background:#f4f6f9;color:#111}}
+ @media (prefers-color-scheme:dark){{body{{background:#17212b;color:#f5f5f5}}}}
+ .c{{text-align:center;padding:28px}}
+ .n{{font-size:22px;font-weight:800;margin:14px 0 22px;letter-spacing:.5px}}
+ a.b{{display:inline-block;background:#2ea6ff;color:#fff;text-decoration:none;font-size:19px;
+     font-weight:700;padding:16px 34px;border-radius:14px;box-shadow:0 4px 14px rgba(46,166,255,.35)}}
+ .h{{margin-top:16px;font-size:13px;opacity:.6}}
+</style></head><body><div class="c">
+ <div style="font-size:52px">📞</div>
+ <div class="n">{pretty}</div>
+ <a class="b" href="{tel}">📞 Qo'ng'iroq qilish</a>
+ <div class="h">{html.escape(BRAND_NAME)} · avtomatik ochilmasa tugmani bosing</div>
+</div><script>location.href={tel!r};</script></body></html>"""
+    return HTMLResponse(page)
 
 
 # ============================================================

@@ -186,6 +186,12 @@ class Database:
             ("shop_lon", "REAL"),
             ("last_active_at", "TIMESTAMP"),   # faollik kuzatuvi (DAU/WAU/MAU; faol vs bir martalik)
             ("spam_count", "INTEGER DEFAULT 0"),  # bloklangan spam/flood urinishlari soni
+            # Do'kon "Aloqa bloki" — reklamaga avtomatik qo'shiladigan murojaat kanallari.
+            # Bir marta kiritiladi, har bir kanal/guruh postiga tugma bo'lib chiqadi.
+            ("shop_phone", "TEXT"),        # murojaat telefoni (📞 Qo'ng'iroq)
+            ("shop_instagram", "TEXT"),    # Instagram profil havolasi (📸)
+            ("shop_telegram", "TEXT"),     # Telegram kanal/username havolasi (📢)
+            ("shop_website", "TEXT"),      # universal havola (🌐 sayt/WhatsApp/YouTube...)
         ]:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -1361,6 +1367,22 @@ class Database:
             values
         )
         conn.commit()
+
+    def update_shop_contacts(self, user_id, *, phone=None, instagram=None,
+                             telegram=None, website=None):
+        """Do'kon "Aloqa bloki"ni saqlaydi. None berilgan maydonlarga tegilmaydi;
+        bo'sh satr ('') berilsa — o'sha maydon TOZALANADI (NULL). Har bir maydon
+        alohida ixtiyoriy — sotuvchi faqat xohlaganini to'ldiradi."""
+        fields = {}
+        for col, val in (("shop_phone", phone), ("shop_instagram", instagram),
+                         ("shop_telegram", telegram), ("shop_website", website)):
+            if val is None:
+                continue
+            val = str(val).strip()
+            fields[col] = val or None
+        if fields:
+            self.update_user(user_id, **fields)
+        return fields
 
     def block_user(self, user_id):
         self.update_user(user_id, is_blocked=1)
@@ -3164,6 +3186,7 @@ class Database:
                    u.telegram_username, u.phone_number, u.telegram_id as seller_tg,
                    u.is_blocked as seller_blocked, u.region_id as seller_region_id,
                    u.delivery_min_total,
+                   u.shop_phone, u.shop_instagram, u.shop_telegram, u.shop_website,
                    (SELECT AVG(rating) FROM reviews WHERE seller_id=p.seller_id) as avg_rating,
                    (SELECT AVG(product_rating) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_avg_rating,
                    (SELECT COUNT(*) FROM reviews WHERE product_id=p.id AND product_rating IS NOT NULL) as prod_review_count

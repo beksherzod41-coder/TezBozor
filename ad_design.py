@@ -30,6 +30,8 @@ except Exception:  # Pillow o'rnatilmagan
 CANVAS = 1080                 # reklama kvadrati o'lchami (px)
 ACCENT = (255, 96, 64)        # urg'u rangi — iliq marjon (faqat kichik detallar uchun)
 OPTOM_DOT = (52, 211, 122)    # optom pill ichidagi yashil nuqta
+CTA_BG = (34, 197, 94)        # "SOTIB OLISH" tugma-badge foni — yorqin yashil (harakat rangi)
+CTA_INK = (255, 255, 255)     # CTA matni — toza oq (yashil ustida yuqori kontrast)
 PILL_BG = (12, 14, 18, 165)   # muzli (frosted) pill foni — yarim shaffof to'q
 INK = (255, 255, 255)         # asosiy matn — toza oq
 INK_SOFT = (255, 255, 255, 210)  # ikkilamchi matn — yumshoq oq
@@ -171,7 +173,33 @@ def _pill(canvas, draw, text, *, top, right=None, left=None, size=34, dot=None):
     return box
 
 
-def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="", optom_text=""):
+def _cta_button(canvas, draw, text, *, bottom, right, size=40):
+    """Yorqin rangli "SOTIB OLISH" tugma-badge (rasm ustida, pastki O'NGda).
+
+    Telegram inline tugma rangini o'zgartirishga ruxsat bermaydi, shuning uchun
+    "rangli tugma" ko'rinishini rasmning O'ZIDA yasaymiz — yorqin yashil pill,
+    yengil soya bilan, aynan bosiladigan tugmadek. Ostidagi haqiqiy inline
+    tugma esa Mini App'ni ochadi."""
+    font = _fit_font(draw, text, True, int(CANVAS * 0.7), size, min_size=26)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad_x, pad_y = 34, 22
+    w, h = tw + pad_x * 2, th + pad_y * 2
+    x0 = CANVAS - right - w
+    y0 = bottom - h
+    # yumshoq soya — tugma "ko'tarilib" turgandek ko'rinadi
+    shadow = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(shadow)
+    _rounded(sd, [x0, y0 + 8, x0 + w, y0 + h + 12], h // 2, (10, 60, 30, 150))
+    shadow = shadow.filter(ImageFilter.GaussianBlur(12))
+    canvas.alpha_composite(shadow)
+    _rounded(draw, [x0, y0, x0 + w, y0 + h], h // 2, CTA_BG)
+    draw.text((x0 + pad_x, y0 + pad_y - bbox[1]), text, font=font, fill=CTA_INK)
+    return [x0, y0, x0 + w, y0 + h]
+
+
+def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="",
+                   optom_text="", cta_text="SOTIB OLISH →"):
     """Reklama rasmini yasaydi va JPEG bytes qaytaradi. Xato bo'lsa — None.
 
     image_bytes — Telegram'dan yuklab olingan mahsulot rasmi (bytes).
@@ -180,6 +208,8 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="", o
     shop_text   — do'kon nomi (emojisiz).
     optom_text  — optom belgisi matni (masalan "OPTOM · 1 PACHKA = 6 DONA");
                   bo'sh bo'lsa chizilmaydi. Yuqori O'NG burchakda pill.
+    cta_text    — pastki O'NGdagi yorqin yashil "harakat" tugma-badge matni
+                  (standart "SOTIB OLISH →"); bo'sh bo'lsa chizilmaydi.
     """
     if not _PIL_OK or not image_bytes:
         return None
@@ -188,6 +218,7 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="", o
     badge_text = _norm_spaces(badge_text)
     shop_text = _norm_spaces(shop_text)
     optom_text = _norm_spaces(optom_text)
+    cta_text = _norm_spaces(cta_text)
     try:
         src = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
@@ -216,11 +247,22 @@ def build_ad_image(image_bytes, *, price_text="", badge_text="", shop_text="", o
         draw = ImageDraw.Draw(canvas, "RGBA")
         margin = 56
 
-        # 4) Matn bloki — pastki chap: urg'u chizig'i → do'kon nomi → NARX
+        # 4a) "SOTIB OLISH" tugma-badge — pastki O'NG (avval chizamiz, so'ng narx
+        #     kengligini shunga qarab cheklaymiz — ular hech qachon to'qnashmasin)
+        ct = (cta_text or "").strip().upper()[:20]
+        cta_box = None
+        if ct:
+            cta_box = _cta_button(canvas, draw, ct, bottom=CANVAS - margin,
+                                  right=margin, size=40)
+
+        # 4b) Matn bloki — pastki chap: urg'u chizig'i → do'kon nomi → NARX
         y_cursor = CANVAS - margin
+        _price_max_w = int(CANVAS * 0.72)
+        if cta_box is not None:
+            _price_max_w = min(_price_max_w, max(int(CANVAS * 0.34), cta_box[0] - margin - 24))
         pt = (price_text or "").strip()
         if pt:
-            pfont = _fit_font(draw, pt, True, int(CANVAS * 0.72), 104, min_size=44)
+            pfont = _fit_font(draw, pt, True, _price_max_w, 104, min_size=44)
             pbbox = draw.textbbox((0, 0), pt, font=pfont)
             ph = pbbox[3] - pbbox[1]
             y_cursor -= ph
