@@ -1161,10 +1161,25 @@ async def api_product_ad_caption(product_id: int, authorization: str = Header(No
 # ============================================================
 # BUYURTMA YARATISH (to'liq app ichida — sotuvchiga xabarni bot fon job'i yuboradi)
 # ============================================================
-ORDER_TTL_SECONDS = 600          # oddiy buyurtma: sotuvchi tasdig'i 10 daqiqa
+ORDER_TTL_SECONDS = 1200         # oddiy buyurtma: sotuvchi tasdig'i 20 daqiqa
 ORDER_TTL_OPTOM_SECONDS = 1800   # optom (pachka) buyurtma: 30 daqiqa (ko'proq o'ylab ko'rish)
 _VALID_DELIVERY = {"delivery", "pickup"}
 _VALID_PAYMENT = {"cash", "terminal", "p2p"}
+
+
+def _order_deadline_pair(working_hours=None, working_days=None, ttl=ORDER_TTL_SECONDS,
+                         work_schedule=None):
+    """(auto_cancel_deadline, countdown_start) UTC juftligi. Do'kon yopiq bo'lsa sanoq
+    keyingi ochilish vaqtidan boshlanadi — buyurtma ish boshlanguncha muzlaydi.
+    main.py:_compute_order_deadline bilan bir xil mantiq (webapp tomoni). work_schedule
+    berilsa kun-ma-kun jadval (qisqa/dam olish kunlari) hisobga olinadi."""
+    now = datetime.now(timezone.utc)
+    open_local = next_shop_open_datetime(working_hours, working_days, work_schedule=work_schedule)
+    if open_local is not None:
+        start = open_local.astimezone(timezone.utc)
+        if start > now:
+            return start + timedelta(seconds=ttl), start
+    return now + timedelta(seconds=ttl), now
 
 
 def _check_delivery_rules(products, total):
@@ -1246,9 +1261,12 @@ def api_create_order(order: OrderIn, authorization: str = Header(None)):
         delivery_address=address, buyer_lat=lat, buyer_lon=lon,
         payment_method=order.payment_method, delivery_type=order.delivery_type,
     )
-    # Avto-bekor muddati (bot order_confirm'i bilan bir xil) + bot fon job'i xabar yuboradi
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
-    db.set_order_deadline(order_id, deadline)
+    # Avto-bekor muddati (bot order_confirm'i bilan bir xil) + bot fon job'i xabar yuboradi.
+    # Do'kon yopiq bo'lsa sanoq ish boshlanguncha muzlaydi.
+    deadline, cd_start = _order_deadline_pair(
+        product.get("working_hours"), product.get("working_days"),
+        work_schedule=product.get("work_schedule"))
+    db.set_order_deadline(order_id, deadline, countdown_start=cd_start)
     db.mark_order_notify_pending(order_id)
     # App-banner: sotuvchiga yangi buyurtma (bot Telegram push'ini fon-job yuboradi)
     pname = product.get("name") or ""
@@ -1330,8 +1348,10 @@ def api_cart_checkout(co: CartCheckoutIn, authorization: str = Header(None)):
         created.append(oid)
     group_id = str(created[0])
     db.set_orders_group(created, group_id)
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=ORDER_TTL_SECONDS)
-    db.set_group_deadline(group_id, deadline)
+    _wh = pending[0][0] if pending else {}
+    deadline, cd_start = _order_deadline_pair(_wh.get("working_hours"), _wh.get("working_days"),
+                                              work_schedule=_wh.get("work_schedule"))
+    db.set_group_deadline(group_id, deadline, countdown_start=cd_start)
     for oid in created:
         db.mark_order_notify_pending(oid)
     return {"ok": True, "group_id": group_id, "count": len(created), "total": grand}
@@ -1490,8 +1510,10 @@ def api_variant_order(vo: VariantOrderIn, authorization: str = Header(None)):
     db.set_orders_group(created, group_id)
     _is_optom = (product.get("sale_mode") == "optom")
     _ttl = ORDER_TTL_OPTOM_SECONDS if _is_optom else ORDER_TTL_SECONDS  # optom = 30 daqiqa
-    deadline = datetime.now(timezone.utc) + timedelta(seconds=_ttl)
-    db.set_group_deadline(group_id, deadline)
+    deadline, cd_start = _order_deadline_pair(
+        product.get("working_hours"), product.get("working_days"), ttl=_ttl,
+        work_schedule=product.get("work_schedule"))
+    db.set_group_deadline(group_id, deadline, countdown_start=cd_start)
     for oid in created:
         db.mark_order_notify_pending(oid)
     # App-banner: sotuvchiga yangi buyurtma (bot Telegram push'ini fon-job yuboradi)

@@ -1837,6 +1837,74 @@ _TEXTS = {
         'uz': "❌ <b>Avtomatik bekor qilindi</b> (vaqt tugadi)",
         'ru': "❌ <b>Автоматически отменён</b> (время вышло)",
     },
+    'countdown_frozen': {
+        'uz': ("🌙 <b>Do'kon hozir yopiq.</b>\n⏰ Ish boshlanganda (<b>{until}</b>) sanoq boshlanadi — "
+               "buyurtma shu vaqtgacha SAQLANADI, bekor bo'lmaydi."),
+        'ru': ("🌙 <b>Магазин сейчас закрыт.</b>\n⏰ Отсчёт начнётся с открытия (<b>{until}</b>) — "
+               "заказ СОХРАНЯЕТСЯ до этого времени и не отменяется."),
+    },
+
+    # ===== OLIB KETISH VAQTI =====
+    'pickup_when_ask': {
+        'uz': ("🕐 <b>Buyurtma {oid} tasdiqlandi!</b>\n\nDo'kondan <b>qachon</b> olib ketasiz? "
+               "Sotuvchi tayyorlab qo'yadi va biz sizga eslatib turamiz."),
+        'ru': ("🕐 <b>Заказ {oid} подтверждён!</b>\n\n<b>Когда</b> заберёте из магазина? "
+               "Продавец подготовит, а мы напомним вам."),
+    },
+    'pickup_in_hours': {
+        'uz': "🕐 {h} soatdan keyin",
+        'ru': "🕐 Через {h} ч",
+    },
+    'pickup_tomorrow': {
+        'uz': "🌅 Ertaga (ochilishda)",
+        'ru': "🌅 Завтра (к открытию)",
+    },
+    'pickup_skip': {
+        'uz': "⏭ Keyinroq aytaman",
+        'ru': "⏭ Скажу позже",
+    },
+    'pickup_too_late': {
+        'uz': "Bu buyurtma uchun vaqt tanlab bo'lmaydi.",
+        'ru': "Для этого заказа время выбрать нельзя.",
+    },
+    'pickup_skipped': {
+        'uz': ("✅ Buyurtma {oid}. Olib ketish vaqti belgilanmadi — "
+               "istalgan payt do'konga borsangiz bo'ladi (ish vaqti ichida)."),
+        'ru': ("✅ Заказ {oid}. Время самовывоза не указано — "
+               "можете подойти в любое время (в рабочие часы)."),
+    },
+    'pickup_set_buyer': {
+        'uz': ("✅ <b>Olib ketish vaqti: {when}</b>\nBuyurtma {oid}. "
+               "1 soat qolganda eslatib turamiz. 🔔"),
+        'ru': ("✅ <b>Время самовывоза: {when}</b>\nЗаказ {oid}. "
+               "Напомним за час до времени. 🔔"),
+    },
+    'pickup_set_seller': {
+        'uz': ("🕐 <b>Olib ketish rejalashtirildi</b>\nBuyurtma {oid} · {pname}\n"
+               "Xaridor <b>{when}</b> da olib ketadi — tayyorlab qo'ying."),
+        'ru': ("🕐 <b>Запланирован самовывоз</b>\nЗаказ {oid} · {pname}\n"
+               "Покупатель заберёт в <b>{when}</b> — подготовьте."),
+    },
+    'pickup_soon_buyer': {
+        'uz': ("🔔 <b>Olib ketish yaqinlashdi</b>\nBuyurtma {oid} — <b>{when}</b> "
+               "(~{mins} daqiqa). Do'konga borishni unutmang!"),
+        'ru': ("🔔 <b>Скоро самовывоз</b>\nЗаказ {oid} — <b>{when}</b> "
+               "(~{mins} мин). Не забудьте зайти в магазин!"),
+    },
+    'pickup_soon_seller': {
+        'uz': ("🔔 <b>Olib ketish yaqinlashdi</b>\nBuyurtma {oid} · {pname} — "
+               "xaridor <b>{when}</b> da (~{mins} daqiqa) keladi."),
+        'ru': ("🔔 <b>Скоро самовывоз</b>\nЗаказ {oid} · {pname} — "
+               "покупатель придёт в <b>{when}</b> (~{mins} мин)."),
+    },
+    'pickup_now_buyer': {
+        'uz': "⏰ <b>Olib ketish vaqti keldi!</b>\nBuyurtma {oid} — do'konga borishingiz mumkin.",
+        'ru': "⏰ <b>Время самовывоза!</b>\nЗаказ {oid} — можете подойти в магазин.",
+    },
+    'pickup_now_seller': {
+        'uz': "⏰ <b>Olib ketish vaqti</b>\nBuyurtma {oid} · {pname} — xaridor hozir keladi.",
+        'ru': "⏰ <b>Время самовывоза</b>\nЗаказ {oid} · {pname} — покупатель уже идёт.",
+    },
     'btn_contact_tg': {
         'uz': "💬 Telegram'da yozish",
         'ru': "💬 Написать в Telegram",

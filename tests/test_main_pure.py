@@ -271,26 +271,33 @@ def test_product_is_new_none():
 
 # ==================== ⏰ Buyurtma push-eslatma bosqichlari ====================
 def test_order_reminders_three_thresholds_defined():
-    """3 ta eslatma bosqichi bo'lishi kerak (foydalanuvchi: 2 emas, 3 marta)."""
-    assert len(main.ORDER_REMINDER_MINUTES) == 3
+    """5 ta eslatma bosqichi bo'lishi kerak (20 daqiqalik oyna: 16,12,8,4,1)."""
+    assert len(main.ORDER_REMINDER_MINUTES) == 5
+    assert main.ORDER_REMINDER_MINUTES == [16, 12, 8, 4, 1]
 
 
 def test_order_reminders_none_at_start():
-    """Boshlanishda (10 daqiqa qoldi) hali eslatma yo'q — birinchi bosqich 5 daqiqa."""
-    assert main._due_order_reminders(600, []) == []
+    """Boshlanishda (20 daqiqa qoldi) hali eslatma yo'q — birinchi bosqich 16 daqiqa."""
+    assert main._due_order_reminders(1200, []) == []
 
 
 def test_order_reminders_fire_one_at_a_time():
     """Har bosqich navbati bilan, bittadan ishga tushadi (normal 60s tiklar)."""
     fired = []
-    # ~6 daqiqa qoldi
-    due = main._due_order_reminders(350, fired)
-    assert due == [6]
+    # ~16 daqiqa qoldi
+    due = main._due_order_reminders(960, fired)
+    assert due == [16]
     fired += due
-    assert main._due_order_reminders(350, fired) == []      # qayta yubormaydi
-    # ~3 daqiqa qoldi
-    assert main._due_order_reminders(170, fired) == [3]
-    fired.append(3)
+    assert main._due_order_reminders(960, fired) == []      # qayta yubormaydi
+    # ~12 daqiqa qoldi
+    assert main._due_order_reminders(720, fired) == [12]
+    fired.append(12)
+    # ~8 daqiqa qoldi
+    assert main._due_order_reminders(480, fired) == [8]
+    fired.append(8)
+    # ~4 daqiqa qoldi
+    assert main._due_order_reminders(240, fired) == [4]
+    fired.append(4)
     # ~1 daqiqa qoldi
     assert main._due_order_reminders(50, fired) == [1]
 
@@ -298,15 +305,15 @@ def test_order_reminders_fire_one_at_a_time():
 def test_order_reminders_restart_burst_then_no_dupes():
     """Restartda (fired bo'sh) qolgan oz vaqtda o'tib ketgan bosqichlar birato'la
     yuboriladi, lekin keyin takrorlanmaydi (idempotent)."""
-    assert main._due_order_reminders(50, []) == [6, 3, 1]
-    assert main._due_order_reminders(50, [6, 3, 1]) == []
+    assert main._due_order_reminders(50, []) == [16, 12, 8, 4, 1]
+    assert main._due_order_reminders(50, [16, 12, 8, 4, 1]) == []
 
 
 def test_order_reminders_tolerance_late_tick():
-    """Tik daqiqa chegarasidan bir oz kech tushsa ham (mas. 6 daq=360s, tik 362s'da)
+    """Tik daqiqa chegarasidan bir oz kech tushsa ham (mas. 16 daq=960s, tik 962s'da)
     bosqich o'sha tikda ishga tushadi — 60s kechikmaydi (+3s tolerance)."""
-    assert main._due_order_reminders(362, []) == [6]   # 362 <= 363 → ishlaydi
-    assert main._due_order_reminders(364, []) == []    # 364 > 363 → hali emas
+    assert main._due_order_reminders(962, []) == [16]   # 962 <= 963 → ishlaydi
+    assert main._due_order_reminders(964, []) == []     # 964 > 963 → hali emas
 
 
 def test_reminder_thresholds_optom_every_5_min():
@@ -315,9 +322,9 @@ def test_reminder_thresholds_optom_every_5_min():
 
 
 def test_reminder_thresholds_short_keeps_legacy():
-    """Qisqa (oddiy 10 daqiqa) buyurtma eski xulqni saqlaydi: [6, 3, 1]."""
-    assert main._reminder_thresholds(10 * 60) == [6, 3, 1]
-    assert main._reminder_thresholds(None) == [6, 3, 1]
+    """Oddiy (20 daqiqa) buyurtma — 5 bosqich: [16, 12, 8, 4, 1]."""
+    assert main._reminder_thresholds(20 * 60) == [16, 12, 8, 4, 1]
+    assert main._reminder_thresholds(None) == [16, 12, 8, 4, 1]
 
 
 def test_reminder_thresholds_no_burst_at_start():

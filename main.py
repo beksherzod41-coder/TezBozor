@@ -158,7 +158,7 @@ from languages import t, LANGS, DEFAULT_LANG, get_user_lang, region_name, catego
 from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt_rating,
                              fmt_datetime, is_shop_open_now, M, TZ_TASHKENT,
                              human_address, best_location_text, maps_link, looks_like_coords,
-                             effective_unit_price, wholesale_info)
+                             effective_unit_price, wholesale_info, next_shop_open_datetime)
 import ai_assistant
 import ai_vision
 import ad_design
@@ -4402,12 +4402,13 @@ async def _dispatch_order_notification(context, order_id):
 
         photo = order.get('product_image')
         deadline = _order_deadline(order)
+        cd_start = _countdown_start(order)
         kb = _order_notify_kb(slang, order_id=order_id,
                               buyer_tg=order.get('buyer_tg'),
                               buyer_username=order.get('buyer_username'))
         msg_id, is_cap = await _send_order_notification(
             context, seller_tg, slang, photo=photo, static_caption=text,
-            kb=kb, deadline=deadline)
+            kb=kb, deadline=deadline, cd_start=cd_start)
         if msg_id:
             db.set_order_notify_ref(order_id, seller_tg, msg_id, is_cap, text)
 
@@ -4521,10 +4522,12 @@ async def order_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     # Avto-bekor muddati (deadline) — DB'da saqlanadi. Jonli teskari sanoq shunga
-    # bog'lanadi va bot restart bo'lsa ham real (o'zgarmas) qoladi.
-    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    deadline = _dt.now(_tz.utc) + _td(seconds=ORDER_TTL_SECONDS)
-    db.set_order_deadline(order_id, deadline)
+    # bog'lanadi va bot restart bo'lsa ham real (o'zgarmas) qoladi. Do'kon yopiq bo'lsa
+    # sanoq ish boshlanguncha muzlaydi — buyurtma tunda bekor bo'lib ketmaydi.
+    deadline, cd_start = _compute_order_deadline(
+        product.get('working_hours'), product.get('working_days'),
+        work_schedule=product.get('work_schedule'))
+    db.set_order_deadline(order_id, deadline, countdown_start=cd_start)
 
     # Sotuvchiga bildirishnoma + jonli sanoq + xodim fan-out — endi DB'dan qayta quriladi
     # (umumiy funksiya, Mini App buyurtmalari bilan bir xil yo'l).
@@ -4565,23 +4568,23 @@ async def _fanout_order_to_staff(context, product, text, kb, dlv=None,
 # ============================================================
 # BUYURTMA BILDIRISHNOMASI — rasm + xaridor bilan bog'lanish + jonli teskari sanoq
 # ============================================================
-ORDER_TTL_SECONDS = 600  # buyurtma tasdiqlash muddati (10 daqiqa)
+ORDER_TTL_SECONDS = 1200  # buyurtma tasdiqlash muddati (20 daqiqa)
 # ⏰ Muddat tugashidan oldin sotuvchiga ALOHIDA push eslatma (yangi xabar — telefon
 # "biqillaydi") yuboriladigan bosqichlar: qolgan vaqt, daqiqada. Har biri BIR marta.
 # Jonli sanoq faqat mavjud xabarni tahrirlaydi (push bermaydi) — bu esa qo'shimcha push.
-ORDER_REMINDER_MINUTES = [6, 3, 1]
+ORDER_REMINDER_MINUTES = [16, 12, 8, 4, 1]
 
 
 def _reminder_thresholds(total_window_sec):
-    """Eslatma bosqichlari (daqiqa). UZUN muddatli buyurtmalar (optom — 30 daqiqa) uchun
-    HAR 5 DAQIQA eslatiladi: 25, 20, 15, 10, 5 va oxirgi 1 daqiqa. Qisqa (oddiy — 10 daqiqa)
-    buyurtmalar eski xulqni saqlaydi: [6, 3, 1]. Bosqichlar muddatdan KICHIK bo'ladi —
+    """Eslatma bosqichlari (daqiqa). JUDA uzun (optom — 30+ daqiqa) buyurtmalar uchun
+    HAR 5 DAQIQA eslatiladi: 25, 20, 15, 10, 5 va oxirgi 1 daqiqa. Oddiy (20 daqiqalik) oyna
+    esa standart 5 bosqichni saqlaydi: [16, 12, 8, 4, 1]. Bosqichlar muddatdan KICHIK bo'ladi —
     aks holda boshlanishidayoq hammasi birdan yuborilardi."""
     try:
         mins = int(round(float(total_window_sec) / 60))
     except (ValueError, TypeError):
         return list(ORDER_REMINDER_MINUTES)
-    if mins >= 20:
+    if mins >= 25:
         thr = [m for m in range(5, mins, 5)]   # 5,10,...,(muddatdan kichik): 30→[5..25]
         return sorted(set(thr + [1]), reverse=True)
     return list(ORDER_REMINDER_MINUTES)
@@ -4620,6 +4623,41 @@ def _order_deadline(order):
     if ca is not None:
         return ca + timedelta(seconds=ORDER_TTL_SECONDS)
     return None
+
+
+def _compute_order_deadline(working_hours=None, working_days=None, ttl=None, work_schedule=None):
+    """Buyurtma uchun (auto_cancel_deadline, countdown_start) juftligini UTC'da qaytaradi.
+    Do'kon HOZIR OCHIQ (yoki ish vaqti noma'lum) bo'lsa: sanoq darhol boshlanadi
+    (countdown_start = hozir, deadline = hozir + TTL). Do'kon YOPIQ bo'lsa: sanoq keyingi
+    ochilish vaqtidan boshlanadi (countdown_start = ochilish, deadline = ochilish + TTL) —
+    ya'ni buyurtma ish boshlanguncha "muzlaydi" va bekor bo'lmaydi. work_schedule berilsa
+    kun-ma-kun jadval (qisqa/dam olish kunlari) hisobga olinadi."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    ttl = ORDER_TTL_SECONDS if ttl is None else ttl
+    now = _dt.now(_tz.utc)
+    open_local = next_shop_open_datetime(working_hours, working_days, work_schedule=work_schedule)
+    if open_local is not None:
+        start = open_local.astimezone(_tz.utc)
+        if start > now:          # haqiqatan kelajakda — muzlatamiz
+            return start + _td(seconds=ttl), start
+    return now + _td(seconds=ttl), now
+
+
+def _countdown_start(order):
+    """Sanoq BOSHLANISH vaqti (UTC). countdown_start_at bo'lsa — o'sha (do'kon yopiq bo'lsa
+    ochilish vaqti); aks holda created_at (eski buyurtmalar — darhol boshlangan)."""
+    cs = _parse_utc(order.get('countdown_start_at'))
+    if cs is not None:
+        return cs
+    return _parse_utc(order.get('created_at'))
+
+
+def _frozen_line(slang, cd_start):
+    """Do'kon yopiq — sanoq hali boshlanmagan. 'do'kon ochilgach (HH:MM) sanoq boshlanadi'."""
+    if cd_start is None:
+        return ""
+    until = cd_start.astimezone(TZ_TASHKENT).strftime("%H:%M")
+    return t(slang, 'countdown_frozen', until=until)
 
 
 def _countdown_line(slang, deadline):
@@ -4665,11 +4703,19 @@ def _order_notify_kb(slang, *, order_id=None, group_id=None, relay_order_id=None
 
 
 async def _send_order_notification(context, recipient_tg, slang, *, photo, static_caption,
-                                   kb, deadline, with_countdown=True):
+                                   kb, deadline, with_countdown=True, cd_start=None):
     """Bildirishnomani yuboradi: mahsulot rasmi ALOHIDA xabar, so'ng tugmali MATN xabari.
     (message_id, is_caption=False) qaytaradi. Tugmali xabar doim matn bo'lgani uchun
-    tasdiqlash/relay handlerlari (edit_message_text) va jonli sanoq muammosiz ishlaydi."""
-    cd = _countdown_line(slang, deadline) if with_countdown else ""
+    tasdiqlash/relay handlerlari (edit_message_text) va jonli sanoq muammosiz ishlaydi.
+    cd_start berilib, u kelajakda bo'lsa — do'kon yopiq, sanoq o'rniga muzlatish matni."""
+    if not with_countdown:
+        cd = ""
+    else:
+        from datetime import datetime as _dtn, timezone as _tzn
+        if cd_start is not None and (cd_start - _dtn.now(_tzn.utc)).total_seconds() > 0:
+            cd = _frozen_line(slang, cd_start)
+        else:
+            cd = _countdown_line(slang, deadline)
     full = static_caption + (t(slang, 'countdown_sep') + cd if cd else "")
     try:
         if photo:
@@ -4832,24 +4878,31 @@ async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
         seller = db.get_user_by_id(order.get('seller_id')) if order.get('seller_id') else None
         slang = get_user_lang(seller) if seller else DEFAULT_LANG
         deadline = _order_deadline(order)
+        cd_start = _countdown_start(order)
         now = datetime.now(timezone.utc)
 
-        if deadline is None or (deadline - now).total_seconds() <= 0:
+        # ❄️ MUZLATILGAN holat: do'kon yopiq bo'lganda sanoq hali boshlanmagan
+        # (now < countdown_start). Bu davrda buyurtma BEKOR BO'LMAYDI va eslatma yubormaymiz —
+        # faqat "do'kon ochilgach sanoq boshlanadi" deb xabarni yangilaymiz. Ish boshlanganda
+        # tabiiy ravishda pastdagi oddiy sanoq/eslatma/avto-bekor oqimiga o'tadi.
+        frozen = cd_start is not None and (cd_start - now).total_seconds() > 0
+
+        if not frozen and (deadline is None or (deadline - now).total_seconds() <= 0):
             await _autocancel_order_or_group(context, order, gid, oid, slang)
             context.job.schedule_removal()
             return
 
-        # ⏰ Push eslatmalar — har bosqich BIR marta. job.data'da kuzatiladi; restartda
-        # 'fired' tozalanadi (kamdan-kam — bir martalik takror mumkin). Bosqichlar
-        # buyurtma MUDDATIGA bog'liq: optom (30 daq) — har 5 daqiqa; oddiy (10 daq) — 6/3/1.
-        remaining_sec = (deadline - now).total_seconds()
-        _created = _parse_utc(order.get('created_at'))
-        _window = (deadline - _created).total_seconds() if _created else None
-        _thresholds = _reminder_thresholds(_window) if _window else None
-        fired = d.setdefault('reminders_fired', [])
-        for thr in _due_order_reminders(remaining_sec, fired, _thresholds):
-            fired.append(thr)
-            await _push_order_reminder(context, order, gid, oid, slang, thr)
+        if not frozen:
+            # ⏰ Push eslatmalar — har bosqich BIR marta. job.data'da kuzatiladi; restartda
+            # 'fired' tozalanadi (kamdan-kam — bir martalik takror mumkin). Oyna = sanoq
+            # boshlanishidan muddatgacha (= TTL): oddiy (20 daq) 5 bosqich, optom (30 daq) har 5 daq.
+            remaining_sec = (deadline - now).total_seconds()
+            _window = (deadline - cd_start).total_seconds() if cd_start else None
+            _thresholds = _reminder_thresholds(_window) if _window else None
+            fired = d.setdefault('reminders_fired', [])
+            for thr in _due_order_reminders(remaining_sec, fired, _thresholds):
+                fired.append(thr)
+                await _push_order_reminder(context, order, gid, oid, slang, thr)
 
         chat_id = order.get('notify_chat_id')
         msg_id = order.get('notify_message_id')
@@ -4858,7 +4911,7 @@ async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
 
         static_caption = order.get('notify_caption') or ''
         is_caption = bool(order.get('notify_is_caption'))
-        cd = _countdown_line(slang, deadline)
+        cd = _frozen_line(slang, cd_start) if frozen else _countdown_line(slang, deadline)
         full = static_caption + (t(slang, 'countdown_sep') + cd if cd else "")
         kb = _order_notify_kb(slang, order_id=(None if gid else oid), group_id=gid,
                               relay_order_id=order.get('id'),
@@ -4877,6 +4930,175 @@ async def order_countdown_job(context: ContextTypes.DEFAULT_TYPE):
             logging.warning(f"Sanoq tahrir kutilmagan xato (order {oid or gid}): {e}")
     except Exception as e:
         logging.error(f"order_countdown_job xatosi: {e}")
+
+
+# ============================================================
+# 🕐 OLIB KETISH VAQTI — pickup buyurtma tasdiqlangach xaridor vaqt tanlaydi
+# ============================================================
+_PICKUP_OFFSETS = (60, 120, 180)   # tez tanlov: 1 / 2 / 3 soatdan keyin
+
+
+def _pickup_time_keyboard(blang, order_id, seller):
+    """Olib ketish vaqti tugmalari. Faqat ish vaqtiga tushadigan tez tanlovlar ko'rsatiladi;
+    tashqarida qolganlari yashiriladi. Doim "Ertaga" va "Keyinroq" ham bo'ladi."""
+    from datetime import datetime as _dtn, timedelta as _tdn
+    wh = (seller or {}).get('working_hours')
+    wd = (seller or {}).get('working_days')
+    ws = (seller or {}).get('work_schedule')
+    now_local = _dtn.now(TZ_TASHKENT)
+    rows, chip = [], []
+    for mins in _PICKUP_OFFSETS:
+        target = now_local + _tdn(minutes=mins)
+        # Ish vaqti tashqarisiga tushsa — bu chipni ko'rsatmaymiz (Ertaga qoladi)
+        if next_shop_open_datetime(wh, wd, now=target, work_schedule=ws) is not None:
+            continue
+        chip.append(InlineKeyboardButton(t(blang, 'pickup_in_hours', h=mins // 60),
+                                         callback_data=f"pickup_when_{order_id}_{mins}"))
+    for i in range(0, len(chip), 2):
+        rows.append(chip[i:i + 2])
+    rows.append([InlineKeyboardButton(t(blang, 'pickup_tomorrow'),
+                                      callback_data=f"pickup_when_{order_id}_tmrw")])
+    rows.append([InlineKeyboardButton(t(blang, 'pickup_skip'),
+                                      callback_data=f"pickup_when_{order_id}_skip")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _resolve_pickup_dt(code, seller):
+    """Tanlangan kod → aniq olib ketish vaqti (TZ_TASHKENT). Ish vaqti tashqarisiga tushsa
+    keyingi ochilishga suriladi. 'skip' → None. Noto'g'ri kod → None."""
+    from datetime import datetime as _dtn, timedelta as _tdn
+    wh = (seller or {}).get('working_hours')
+    wd = (seller or {}).get('working_days')
+    ws = (seller or {}).get('work_schedule')
+    now_local = _dtn.now(TZ_TASHKENT)
+    if code == 'skip':
+        return None
+    if code == 'tmrw':
+        # Ertangi kundan boshlab keyingi ochilish
+        base = (now_local + _tdn(days=1)).replace(hour=0, minute=1, second=0, microsecond=0)
+        op = next_shop_open_datetime(wh, wd, now=base, work_schedule=ws)
+        return op if op is not None else base.replace(hour=9)
+    try:
+        mins = int(code)
+    except (ValueError, TypeError):
+        return None
+    target = now_local + _tdn(minutes=mins)
+    op = next_shop_open_datetime(wh, wd, now=target, work_schedule=ws)   # yopiq bo'lsa keyingi ochilish
+    return op if op is not None else target
+
+
+async def buyer_pickup_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Xaridor olib ketish vaqtini tanladi → saqlaymiz va sotuvchini ogohlantiramiz."""
+    query = update.callback_query
+    data = query.data                       # pickup_when_<oid>_<code>
+    rest = data[len("pickup_when_"):]
+    oid_str, _, code = rest.partition("_")
+    try:
+        order_id = int(oid_str)
+    except ValueError:
+        await query.answer(); return
+    order = db.get_order_by_id(order_id)
+    if not order or str(order.get('buyer_tg')) != str(update.effective_user.id):
+        await query.answer(); return
+    buyer = db.get_user_by_id(order['buyer_id'])
+    blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+    if order.get('delivery_type') != 'pickup' or order.get('status') != 'confirmed':
+        await query.answer(t(blang, 'pickup_too_late'), show_alert=False)
+        try: await query.edit_message_reply_markup(reply_markup=None)
+        except Exception: pass
+        return
+
+    seller = db.get_user_by_id(order['seller_id'])
+    if code == 'skip':
+        await query.answer()
+        try:
+            await query.edit_message_text(t(blang, 'pickup_skipped', oid=fmt_order_id(order_id)),
+                                          parse_mode='HTML')
+        except Exception: pass
+        return
+
+    pickup_local = _resolve_pickup_dt(code, seller)
+    if pickup_local is None:
+        await query.answer(); return
+    from datetime import timezone as _tzn
+    pickup_utc = pickup_local.astimezone(_tzn.utc)
+    db.set_order_pickup_at(order_id, pickup_utc)
+
+    when_txt = pickup_local.strftime("%d.%m %H:%M")
+    await query.answer()
+    try:
+        await query.edit_message_text(
+            t(blang, 'pickup_set_buyer', oid=fmt_order_id(order_id), when=when_txt),
+            parse_mode='HTML')
+    except Exception: pass
+    # Sotuvchini ogohlantiramiz
+    try:
+        seller_tg = order.get('seller_tg')
+        slang = get_user_lang(seller) if seller else DEFAULT_LANG
+        pname = html.escape(order.get('product_name') or '')
+        if seller_tg:
+            await context.bot.send_message(
+                chat_id=seller_tg,
+                text=t(slang, 'pickup_set_seller', oid=fmt_order_id(order_id),
+                       pname=pname, when=when_txt), parse_mode='HTML')
+    except Exception as e:
+        logging.warning(f"Sotuvchiga olib ketish vaqti xabari ketmadi (order {order_id}): {e}")
+
+
+async def pickup_reminder_job(context: ContextTypes.DEFAULT_TYPE):
+    """Har ~60s: olib ketish vaqti yaqinlashgan (tasdiqlangan pickup) buyurtmalarga
+    ogohlantirish. Bosqichlar bitmask (pickup_reminded): 1 = ~1 soat oldin (yaqin bo'lsa
+    adaptiv — darhol), 2 = vaqt keldi. Har biri BIR marta."""
+    from datetime import datetime, timezone
+    try:
+        rows = db.get_due_pickup_reminders(within_seconds=3600)
+    except Exception as e:
+        logging.warning(f"pickup_reminder_job so'rov xatosi: {e}")
+        return
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        try:
+            oid = row['id']
+            pk = _parse_utc(row.get('pickup_at'))
+            if pk is None:
+                continue
+            remaining = (pk - now).total_seconds()
+            reminded = int(row.get('pickup_reminded') or 0)
+            full = db.get_order_by_id(oid)
+            if not full or full.get('status') != 'confirmed':
+                continue
+            buyer = db.get_user_by_id(full['buyer_id'])
+            seller = db.get_user_by_id(full['seller_id'])
+            blang = get_user_lang(buyer) if buyer else DEFAULT_LANG
+            slang = get_user_lang(seller) if seller else DEFAULT_LANG
+            pname = html.escape(full.get('product_name') or '')
+            disp = fmt_order_id(oid)
+            mins_left = max(0, int((remaining + 59) // 60))
+            when_local = pk.astimezone(TZ_TASHKENT).strftime("%H:%M")
+
+            # Bosqich 2: vaqt keldi (yoki o'tdi)
+            if remaining <= 0 and not (reminded & 2):
+                if full.get('buyer_tg'):
+                    await context.bot.send_message(chat_id=full['buyer_tg'],
+                        text=t(blang, 'pickup_now_buyer', oid=disp), parse_mode='HTML')
+                if full.get('seller_tg'):
+                    await context.bot.send_message(chat_id=full['seller_tg'],
+                        text=t(slang, 'pickup_now_seller', oid=disp, pname=pname), parse_mode='HTML')
+                db.mark_pickup_reminded(oid, 2 | 1)   # 1 ni ham yopamiz (o'tib ketgan bo'lsa)
+                continue
+            # Bosqich 1: ~1 soat oldin (adaptiv — 1 soatdan yaqin bo'lsa ham shu yerda)
+            if remaining > 0 and not (reminded & 1):
+                if full.get('buyer_tg'):
+                    await context.bot.send_message(chat_id=full['buyer_tg'],
+                        text=t(blang, 'pickup_soon_buyer', oid=disp, mins=mins_left, when=when_local),
+                        parse_mode='HTML')
+                if full.get('seller_tg'):
+                    await context.bot.send_message(chat_id=full['seller_tg'],
+                        text=t(slang, 'pickup_soon_seller', oid=disp, pname=pname,
+                               mins=mins_left, when=when_local), parse_mode='HTML')
+                db.mark_pickup_reminded(oid, 1)
+        except Exception as e:
+            logging.warning(f"pickup_reminder_job (order {row.get('id')}) xatosi: {e}")
 
 
 # ============================================================
@@ -5424,10 +5646,12 @@ async def cart_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='HTML'
     )
 
-    # Avto-bekor muddati (deadline) — DB'da saqlanadi (jonli sanoq va restart uchun)
-    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    deadline = _dt.now(_tz.utc) + _td(seconds=ORDER_TTL_SECONDS)
-    db.set_group_deadline(group_id, deadline)
+    # Avto-bekor muddati (deadline) — DB'da saqlanadi (jonli sanoq va restart uchun).
+    # Do'kon yopiq bo'lsa sanoq ish boshlanguncha muzlaydi.
+    deadline, cd_start = _compute_order_deadline(
+        (seller or {}).get('working_hours'), (seller or {}).get('working_days'),
+        work_schedule=(seller or {}).get('work_schedule'))
+    db.set_group_deadline(group_id, deadline, countdown_start=cd_start)
 
     # Sotuvchiga BITTA bildirishnoma (barcha mahsulotlar bilan) + jonli sanoq jobi
     try:
@@ -5509,7 +5733,8 @@ async def _notify_seller_group(context, group_id, seller_tg, dlv, payment, b_lat
     kb = _order_notify_kb(slang, group_id=group_id, relay_order_id=first.get('id'),
                           buyer_tg=first.get('buyer_tg'), buyer_username=first.get('buyer_username'))
     msg_id, is_cap = await _send_order_notification(
-        context, seller_tg, slang, photo=photo, static_caption=body, kb=kb, deadline=deadline)
+        context, seller_tg, slang, photo=photo, static_caption=body, kb=kb, deadline=deadline,
+        cd_start=_countdown_start(first))
     if msg_id:
         db.set_group_notify_ref(group_id, seller_tg, msg_id, is_cap, body)
     if dlv == 'delivery' and b_lat and b_lon:
@@ -11771,6 +11996,18 @@ async def update_order_status(update: Update, context: ContextTypes.DEFAULT_TYPE
                         chat_id=order['buyer_tg'], text=txt,
                         reply_markup=kb, parse_mode='HTML'
                     )
+                # 🕐 OLIB KETISH VAQTI: pickup buyurtma tasdiqlangach — xaridordan
+                # "qachon olib ketasiz?" deb so'raymiz (sotuvchi tayyorlab qo'yishi uchun).
+                if new_status == 'confirmed' and is_pickup:
+                    try:
+                        seller = db.get_user_by_id(order['seller_id'])
+                        pk_kb = _pickup_time_keyboard(blang, order_id, seller)
+                        await context.bot.send_message(
+                            chat_id=order['buyer_tg'],
+                            text=t(blang, 'pickup_when_ask', oid=oid),
+                            reply_markup=pk_kb, parse_mode='HTML')
+                    except Exception as e:
+                        logging.warning(f"Olib ketish vaqti so'rovi ketmadi (order {order_id}): {e}")
         except Exception as e:
             logging.error(f"Xaridorga bildirishnoma ketmadi: {e}")
 
@@ -14729,6 +14966,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await seller_reject_prompt(update, context)   # avval bekor sababini so'raymiz
     elif data.startswith(("confirm_order_", "deliver_order_")):
         await update_order_status(update, context)
+    elif data.startswith("pickup_when_"):
+        await buyer_pickup_choice(update, context)
     elif data.startswith(("setl_paid_", "setl_debt_", "setl_inst_")):
         await settle_choice(update, context)
     elif data.startswith("setlamt_"):
@@ -16221,6 +16460,10 @@ def main():
         # #3 — App'da kuryerga biriktirilgan buyurtmalar uchun kuryer PUSH (har 12s)
         app.job_queue.run_repeating(webapp_courier_notify_job, interval=12, first=18)
         logging.info("Mini App kuryer biriktirish PUSH job rejalashtirildi (har 12s)")
+
+        # Olib ketish vaqti eslatmalari — 1 soat oldin (adaptiv) + vaqt keldi (har 60s)
+        app.job_queue.run_repeating(pickup_reminder_job, interval=60, first=45)
+        logging.info("Olib ketish eslatma job rejalashtirildi (har 60s)")
 
         # Mini App yaratgan rejalashtirilgan postlarga publish jobini ulash (har 30s)
         app.job_queue.run_repeating(webapp_scheduled_scan_job, interval=30, first=20)

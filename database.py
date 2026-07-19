@@ -439,6 +439,12 @@ class Database:
             ("orders",   "cancel_reason",  "TEXT"),               # bekor qilish sababi (matn)
             ("orders",   "cancel_by",      "TEXT"),               # bekorni boshlagan tomon: 'buyer' | 'seller'
             ("orders",   "auto_cancel_at",    "TIMESTAMP"),       # UTC: avto-bekor muddati (real teskari sanoq shu vaqtga bog'langan)
+            # Sanoq BOSHLANISH vaqti (UTC). Do'kon yopiq bo'lsa = ochilish vaqti; ochiq = created_at.
+            # Bundan oldin buyurtma "muzlatilgan": bekor bo'lmaydi va eslatma yuborilmaydi.
+            ("orders",   "countdown_start_at", "TIMESTAMP"),
+            # Olib ketish rejalashtirilgan vaqt (UTC) — sotuvchi tasdiqlagach xaridor tanlaydi (faqat pickup)
+            ("orders",   "pickup_at",         "TIMESTAMP"),
+            ("orders",   "pickup_reminded",   "INTEGER DEFAULT 0"),  # 1 = olib ketish eslatmasi yuborilgan
             ("orders",   "notify_chat_id",    "INTEGER"),         # sotuvchi (ega) bildirishnoma xabari chat_id
             ("orders",   "notify_message_id", "INTEGER"),         # sotuvchi bildirishnoma message_id (jonli sanoq shuni tahrirlaydi)
             ("orders",   "notify_is_caption", "INTEGER"),         # 1 = rasm captionini tahrirlash, 0 = matn xabarini
@@ -2278,24 +2284,71 @@ class Database:
         """)
         return [dict(r) for r in cursor.fetchall()]
 
-    def set_order_deadline(self, order_id, auto_cancel_at):
-        """Yakka buyurtmaning avto-bekor muddatini (UTC) belgilaydi."""
+    def set_order_deadline(self, order_id, auto_cancel_at, countdown_start=None):
+        """Yakka buyurtmaning avto-bekor muddatini (UTC) belgilaydi. countdown_start berilsa
+        (do'kon yopiq bo'lganda = ochilish vaqti) sanoq boshlanishi ham yoziladi."""
         if hasattr(auto_cancel_at, 'strftime'):
             auto_cancel_at = auto_cancel_at.strftime("%Y-%m-%d %H:%M:%S")
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE orders SET auto_cancel_at=? WHERE id=?", (auto_cancel_at, order_id))
+        if countdown_start is not None:
+            if hasattr(countdown_start, 'strftime'):
+                countdown_start = countdown_start.strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("UPDATE orders SET auto_cancel_at=?, countdown_start_at=? WHERE id=?",
+                           (auto_cancel_at, countdown_start, order_id))
+        else:
+            cursor.execute("UPDATE orders SET auto_cancel_at=? WHERE id=?", (auto_cancel_at, order_id))
         conn.commit()
 
-    def set_group_deadline(self, group_id, auto_cancel_at):
+    def set_group_deadline(self, group_id, auto_cancel_at, countdown_start=None):
         """Guruh (savat) buyurtmasidagi barcha qatorlar uchun avto-bekor muddati (UTC)."""
         if hasattr(auto_cancel_at, 'strftime'):
             auto_cancel_at = auto_cancel_at.strftime("%Y-%m-%d %H:%M:%S")
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE orders SET auto_cancel_at=? WHERE order_group_id=?",
-                       (auto_cancel_at, str(group_id)))
+        if countdown_start is not None:
+            if hasattr(countdown_start, 'strftime'):
+                countdown_start = countdown_start.strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("UPDATE orders SET auto_cancel_at=?, countdown_start_at=? WHERE order_group_id=?",
+                           (auto_cancel_at, countdown_start, str(group_id)))
+        else:
+            cursor.execute("UPDATE orders SET auto_cancel_at=? WHERE order_group_id=?",
+                           (auto_cancel_at, str(group_id)))
         conn.commit()
+
+    def set_order_pickup_at(self, order_id, pickup_at):
+        """Olib ketish rejalashtirilgan vaqtini (UTC) belgilaydi va eslatma bosqichini nolga tushiradi."""
+        if hasattr(pickup_at, 'strftime'):
+            pickup_at = pickup_at.strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET pickup_at=?, pickup_reminded=0 WHERE id=?",
+                       (pickup_at, order_id))
+        conn.commit()
+
+    def mark_pickup_reminded(self, order_id, stage_bit):
+        """Olib ketish eslatmasining berilgan bosqichini (bitmask) yuborilgan deb belgilaydi."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE orders SET pickup_reminded=COALESCE(pickup_reminded,0)|? WHERE id=?",
+                       (int(stage_bit), order_id))
+        conn.commit()
+
+    def get_due_pickup_reminders(self, within_seconds=3600):
+        """Olib ketish vaqti yaqinlashgan (tasdiqlangan, pickup) buyurtmalar — eslatma uchun.
+        `within_seconds` ichida yoki o'tib ketgan, hali to'liq eslatilmagan qatorlar.
+        Kesim vaqti Python'da hisoblanadi (SQLite/PG portativligi uchun)."""
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) + timedelta(seconds=int(within_seconds))
+                  ).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM orders WHERE pickup_at IS NOT NULL AND status='confirmed' "
+            "AND delivery_type='pickup' AND COALESCE(pickup_reminded,0) < 3 "
+            "AND pickup_at <= ? ",
+            (cutoff,))
+        return [dict(r) for r in cursor.fetchall()]
 
     def set_order_notify_ref(self, order_id, chat_id, message_id, is_caption, caption):
         """Yakka buyurtma bildirishnoma xabari ma'lumotlari (jonli sanoq tahrirlashi uchun)."""
