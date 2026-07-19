@@ -88,7 +88,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, Keyboar
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, PicklePersistence, ChatMemberHandler, TypeHandler, ApplicationHandlerStop
 from telegram.error import Forbidden, BadRequest
 from database import Database
-from languages import t, LANGS, DEFAULT_LANG, get_user_lang, region_name, category_name, all_labels as _lang_labels
+from languages import t, LANGS, DEFAULT_LANG, get_user_lang, region_name, category_name, all_labels as _lang_labels, BRAND_NAME
 from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt_rating,
                              fmt_datetime, is_shop_open_now, M, TZ_TASHKENT,
                              human_address, best_location_text, maps_link, looks_like_coords,
@@ -6445,7 +6445,7 @@ async def on_my_chat_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bot_me = await context.bot.get_me()
     except Exception:
         bot_me = None
-    bot_username = bot_me.username if bot_me else "TezBozor"
+    bot_username = bot_me.username if bot_me else BRAND_NAME
     title = chat.title or str(chat.id)
 
     # Qo'shgan odam tasdiqlangan sotuvchi emas — guruhga hech narsa yozmaymiz, jim chiqamiz.
@@ -15294,7 +15294,7 @@ async def testpost(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await context.bot.send_message(
             chat_id=CHANNEL_ID,
-            text="✅ TezBozor kanal ulanishi ishlayapti!"
+            text=f"✅ {BRAND_NAME} kanal ulanishi ishlayapti!"
         )
         await update.message.reply_text(f"✅ Yuborildi → {CHANNEL_ID}")
     except Exception as e:
@@ -16179,7 +16179,7 @@ def main():
         # RESTART: avto qayta-reklamalarni qayta tiklaymiz
         _reschedule_auto_reposts(app.job_queue)
 
-    print("🚀 TezBozor Bot ishlamoqda...")
+    print(f"🚀 {BRAND_NAME} Bot ishlamoqda...")
     # MUHIM: allowed_updates'ni ANIQ ko'rsatamiz — aks holda Telegram a'zolik
     # yangilanishlarini (my_chat_member) yubormaydi va bot guruhga qo'shilganini sezmaydi.
     # Update.ALL_TYPES barcha turdagi yangilanishlarni (jumladan my_chat_member) yoqadi.

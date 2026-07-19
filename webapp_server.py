@@ -59,7 +59,12 @@ IMG_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "img_ca
 os.makedirs(IMG_CACHE_DIR, exist_ok=True)
 
 db = Database()  # DB_BACKEND / DATABASE_URL .env'dan o'qiladi
-app = FastAPI(title="TezBozor Mini App API")
+
+# Brend nomi — .env dagi BRAND_NAME. Bu yerda (fayl boshida) e'lon qilinadi,
+# chunki quyidagi app = FastAPI(...) import paytida bajariladi.
+BRAND_NAME = (os.getenv("BRAND_NAME", "").strip() or "TezBozor")
+
+app = FastAPI(title=f"{BRAND_NAME} Mini App API")
 # Tezlik #3 — javoblarni gzip qiladi. index.html (~150KB) va mahsulot JSON ro'yxati
 # ~5-7 barobar kichrayadi → sekin tarmoqda sezilarli tezlik. Rasm (image/jpeg)
 # allaqachon siqilgan, lekin min_size dan kichik bo'lsa ham zarar yo'q.
@@ -2686,7 +2691,7 @@ def _xl_fill_sheet(ws, report_title, headers, data_rows, money_cols=(), ru=False
 
     # 1-qator — brend sarlavha (birlashtirilgan)
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncol)
-    tc = ws.cell(row=1, column=1, value=f"TezBozor  ·  {report_title}")
+    tc = ws.cell(row=1, column=1, value=f"{BRAND_NAME}  ·  {report_title}")
     tc.font = Font(bold=True, size=15, color="FFFFFF")
     tc.fill = PatternFill("solid", fgColor=BRAND)
     tc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
@@ -2958,7 +2963,7 @@ async def api_seller_export(kind: str, authorization: str = Header(None)):
     if not user.get("telegram_id"):
         raise HTTPException(status_code=400, detail="no_telegram")
     res = await _tg_send_document(user["telegram_id"], fname, content,
-                                  caption=f"📊 {kind} — {n} ta · TezBozor")
+                                  caption=f"📊 {kind} — {n} ta · {BRAND_NAME}")
     if not (res and res.get("ok")):
         raise HTTPException(status_code=502, detail="send_failed")
     return {"ok": True, "rows": n}
@@ -6721,7 +6726,7 @@ async def api_admin_export(kind: str, authorization: str = Header(None)):
     if not admin.get("telegram_id"):
         raise HTTPException(status_code=400, detail="no_telegram")
     res = await _tg_send_document(admin["telegram_id"], fname, content,
-                                  caption=f"📊 {kind} — {n} ta · TezBozor")
+                                  caption=f"📊 {kind} — {n} ta · {BRAND_NAME}")
     if not (res and res.get("ok")):
         raise HTTPException(status_code=502, detail="send_failed")
     return {"ok": True, "rows": n}
@@ -7136,7 +7141,7 @@ async def api_admin_backup(authorization: str = Header(None)):
 # AI VISION (Gemini multimodal) — rasm/ovoz qidiruv, rasmdan mahsulot, banner
 # ============================================================
 MAX_VOICE_BYTES = 4 * 1024 * 1024   # ovozli xabar (30-60s opus ~ 100-500KB)
-BRAND_NAME = (os.getenv("BRAND_NAME", "").strip() or "TezBozor")
+# BRAND_NAME fayl boshida (app = FastAPI(...) dan oldin) e'lon qilingan.
 
 
 async def _tg_file_bytes(file_id):

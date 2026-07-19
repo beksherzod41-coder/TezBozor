@@ -8,12 +8,19 @@ Foydalanish:
     t(lang, 'greet', name=x)  → format parametrlari bilan
 """
 
+import os
+
 LANGS = {
     'uz': "🇺🇿 O'zbek",
     'ru': "🇷🇺 Русский",
 }
 
 DEFAULT_LANG = 'uz'
+
+# Brend nomi — .env dagi BRAND_NAME orqali sozlanadi. Tarjima matnlarida
+# {brand} yozuvi ishlatiladi va t() uni shu qiymatga almashtiradi, shuning
+# uchun brendni o'zgartirish uchun kodga tegish shart emas.
+BRAND_NAME = (os.getenv("BRAND_NAME", "").strip() or "TezBozor")
 
 # ============================================================
 # TARJIMALAR  {kalit: {'uz': ..., 'ru': ...}}
@@ -22,12 +29,12 @@ DEFAULT_LANG = 'uz'
 _TEXTS = {
     # --- UMUMIY ---
     'welcome': {
-        'uz': "👋 TezBozorga xush kelibsiz!",
-        'ru': "👋 Добро пожаловать в TezBozor!",
+        'uz': "👋 {brand}ga xush kelibsiz!",
+        'ru': "👋 Добро пожаловать в {brand}!",
     },
     'registration_success': {
-        'uz': "✅ Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\nTezBozorga xush kelibsiz!",
-        'ru': "✅ Регистрация прошла успешно!\n\nДобро пожаловать в TezBozor!",
+        'uz': "✅ Ro'yxatdan muvaffaqiyatli o'tdingiz!\n\n{brand}ga xush kelibsiz!",
+        'ru': "✅ Регистрация прошла успешно!\n\nДобро пожаловать в {brand}!",
     },
     'blocked': {
         'uz': "⛔ Siz bloklangansiz. Admin bilan bog'laning.",
@@ -90,8 +97,8 @@ _TEXTS = {
         'ru': "Для регистрации отправьте ваш номер телефона:",
     },
     'welcome_ask_phone': {
-        'uz': "👋 TezBozorga xush kelibsiz!\n\nRo'yxatdan o'tish uchun telefon raqamingizni yuboring:",
-        'ru': "👋 Добро пожаловать в TezBozor!\n\nДля регистрации отправьте ваш номер телефона:",
+        'uz': "👋 {brand}ga xush kelibsiz!\n\nRo'yxatdan o'tish uchun telefon raqamingizni yuboring:",
+        'ru': "👋 Добро пожаловать в {brand}!\n\nДля регистрации отправьте ваш номер телефона:",
     },
     'phone_button': {
         'uz': "📞 Telefon raqamni yuborish",
@@ -253,21 +260,21 @@ _TEXTS = {
     },
     'open_app_hint': {
         'uz': (
-            "✨ <b>TezBozor — bozor endi to'liq ilovada!</b>\n\n"
+            "✨ <b>{brand} — bozor endi to'liq ilovada!</b>\n\n"
             "🛍 Xarid qilish, sotish, buyurtmalarni boshqarish va barcha "
             "imkoniyatlar bir joyda — qulay va tez.\n\n"
             "👇 Boshlash uchun quyidagi tugmani bosing:"
         ),
         'ru': (
-            "✨ <b>TezBozor — маркетплейс теперь полностью в приложении!</b>\n\n"
+            "✨ <b>{brand} — маркетплейс теперь полностью в приложении!</b>\n\n"
             "🛍 Покупки, продажи, управление заказами и все возможности "
             "в одном месте — удобно и быстро.\n\n"
             "👇 Нажмите кнопку ниже, чтобы начать:"
         ),
     },
     'reg_app_welcome': {
-        'uz': "🚀 <b>TezBozor'ga xush kelibsiz!</b>\n\nRo'yxatdan o'tish, xarid qilish va sotish — hammasi ilovada. Boshlash uchun pastdagi tugmani bosing 👇",
-        'ru': "🚀 <b>Добро пожаловать в TezBozor!</b>\n\nРегистрация, покупки и продажи — всё в приложении. Нажмите кнопку ниже, чтобы начать 👇",
+        'uz': "🚀 <b>{brand}'ga xush kelibsiz!</b>\n\nRo'yxatdan o'tish, xarid qilish va sotish — hammasi ilovada. Boshlash uchun pastdagi tugmani bosing 👇",
+        'ru': "🚀 <b>Добро пожаловать в {brand}!</b>\n\nРегистрация, покупки и продажи — всё в приложении. Нажмите кнопку ниже, чтобы начать 👇",
     },
     'reg_app_btn': {
         'uz': "🚀 Ilovada ro'yxatdan o'tish",
@@ -459,9 +466,9 @@ _TEXTS = {
                "ℹ️ Важно: добавить группу должны <b>именно вы</b> — так я пойму, что группа ваша."),
     },
     'group_linked_in_group': {
-        'uz': ("✅ <b>TezBozor ulandi!</b>\n\n"
+        'uz': ("✅ <b>{brand} ulandi!</b>\n\n"
                "Endi yangi mahsulotlar shu guruhga avtomatik joylanadi."),
-        'ru': ("✅ <b>TezBozor подключён!</b>\n\n"
+        'ru': ("✅ <b>{brand} подключён!</b>\n\n"
                "Теперь новые товары будут автоматически публиковаться в этой группе."),
     },
     'group_linked_notify': {
@@ -509,11 +516,11 @@ _TEXTS = {
                "<b>«Публикация сообщений»</b>. После этого товары будут публиковаться автоматически."),
     },
     'group_added_not_seller': {
-        'uz': ("👋 Salom! Men <b>TezBozor</b> botiman.\n\n"
+        'uz': ("👋 Salom! Men <b>{brand}</b> botiman.\n\n"
                "Mahsulotlarni shu guruhga avtomatik joylash uchun avval botda "
                "<b>sotuvchi</b> bo'ling: @{bot} ni oching va /start bosing.\n\n"
                "So'ng meni guruhga sotuvchi profilingiz egasi sifatida qayta qo'shing."),
-        'ru': ("👋 Привет! Я бот <b>TezBozor</b>.\n\n"
+        'ru': ("👋 Привет! Я бот <b>{brand}</b>.\n\n"
                "Чтобы товары автоматически публиковались в этой группе, сначала станьте "
                "<b>продавцом</b> в боте: откройте @{bot} и нажмите /start.\n\n"
                "Затем добавьте меня в группу под своим аккаунтом продавца."),
@@ -1344,8 +1351,8 @@ _TEXTS = {
                "Отправьте ссылку друзьям — когда они зарегистрируются, они добавятся к вашему счёту."),
     },
     'referral_share_text': {
-        'uz': "TezBozor marketplace botiga qo`shiling!",
-        'ru': "Присоединяйтесь к маркетплейс-боту TezBozor!",
+        'uz': "{brand} marketplace botiga qo`shiling!",
+        'ru': "Присоединяйтесь к маркетплейс-боту {brand}!",
     },
     'btn_share_friends': {'uz': "📤 Do'stlarga ulashish", 'ru': "📤 Поделиться с друзьями"},
     'user_not_found_start': {
@@ -3253,7 +3260,7 @@ _TEXTS = {
     'clean_done': {'uz': "✅ {n} ta eski bekor buyurtma o'chirildi.", 'ru': "✅ Удалено {n} старых отменённых заказов."},
     'backup_preparing': {'uz': "⏳ Backup tayyorlanmoqda...", 'ru': "⏳ Готовится бэкап..."},
     'backup_failed': {'uz': "❌ Backup xatosi. Log'ni tekshiring.", 'ru': "❌ Ошибка бэкапа. Проверьте лог."},
-    'backup_caption': {'uz': "💾 TezBozor DB Backup\n{ts}", 'ru': "💾 Бэкап БД TezBozor\n{ts}"},
+    'backup_caption': {'uz': "💾 {brand} DB Backup\n{ts}", 'ru': "💾 Бэкап БД {brand}\n{ts}"},
     'backup_send_failed': {'uz': "❌ Fayl yuborilmadi: {e}", 'ru': "❌ Файл не отправлен: {e}"},
     'unknown_export': {'uz': "❌ Noma'lum eksport turi.", 'ru': "❌ Неизвестный тип экспорта."},
 
@@ -3562,12 +3569,12 @@ _TEXTS = {
     },
     'ai_welcome': {
         'uz': ("🤖 <b>AI yordamchi</b>\n\n"
-               "Salom! Men TezBozor sun'iy intellekt yordamchisiman. "
+               "Salom! Men {brand} sun'iy intellekt yordamchisiman. "
                "Menga istalgan savolingizni yozing — mahsulot topish, buyurtma berish, "
                "do'kon ochish, tavsif yozish yoki narx bo'yicha maslahat beraman.\n\n"
                "💬 Savolingizni yozing yoki ⬅️ Chiqish tugmasini bosing."),
         'ru': ("🤖 <b>ИИ-помощник</b>\n\n"
-               "Здравствуйте! Я ИИ-помощник TezBozor. "
+               "Здравствуйте! Я ИИ-помощник {brand}. "
                "Задайте мне любой вопрос — помогу найти товар, оформить заказ, "
                "открыть магазин, написать описание или дать совет по цене.\n\n"
                "💬 Напишите вопрос или нажмите ⬅️ Выход."),
@@ -4225,6 +4232,12 @@ def t(user_or_lang, key: str, **kwargs) -> str:
         return key  # Tarjima topilmasa — kalitni qaytaramiz
 
     text = entry.get(lang) or entry.get(DEFAULT_LANG) or key
+
+    # Brendni format()dan OLDIN qo'yamiz: aks holda {brand} kwargs'da
+    # bo'lmagani uchun format() KeyError beradi va o'sha matndagi boshqa
+    # o'rinbosarlar ({ts} kabi) ham almashtirilmay qolardi.
+    if "{brand}" in text:
+        text = text.replace("{brand}", BRAND_NAME)
 
     if kwargs:
         try:
