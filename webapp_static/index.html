@@ -803,6 +803,15 @@ const I18N = {
   imgs_thinking:{uz:"AI rasmdagi mahsulotni aniqlamoqda...",ru:"ИИ определяет товар на фото..."},
   imgs_found:{uz:"📷 Rasm bo'yicha topildi: «{q}»",ru:"📷 Найдено по фото: «{q}»"},
   imgs_failed:{uz:"Rasm orqali qidiruv xatosi: ",ru:"Ошибка поиска по фото: "},
+  aivn_fill_btn:{uz:"✨ Rasmdan to'ldirish (AI)",ru:"✨ Заполнить по фото (ИИ)"},
+  aivn_filling:{uz:"🤖 AI to'ldirmoqda...",ru:"🤖 ИИ заполняет..."},
+  aivn_fill_done:{uz:"✨ AI bo'sh maydonlarni to'ldirdi. Tekshirib, kerak bo'lsa tahrirlang.",ru:"✨ ИИ заполнил пустые поля. Проверьте и при необходимости отредактируйте."},
+  aivn_fill_failed:{uz:"AI to'ldirish xatosi: ",ru:"Ошибка ИИ-заполнения: "},
+  aivn_need_photo:{uz:"Avval mahsulot rasmini yuklang — AI o'shandan to'ldiradi.",ru:"Сначала загрузите фото товара — ИИ заполнит по нему."},
+  banner_btn:{uz:"🎨 AI banner yaratish (Gemini)",ru:"🎨 Создать ИИ-баннер (Gemini)"},
+  banner_making:{uz:"🎨 AI banner chizmoqda (30-60 soniya)...",ru:"🎨 ИИ рисует баннер (30-60 секунд)..."},
+  banner_done:{uz:"🎨 AI banner tayyor! E'lon shu rasm bilan chiqadi.",ru:"🎨 ИИ-баннер готов! Объявление выйдет с этим изображением."},
+  banner_fail:{uz:"AI banner yaratilmadi: ",ru:"ИИ-баннер не создан: "},
   ai_search_trying:{uz:"🤖 AI tushunishga harakat qilmoqda...",ru:"🤖 ИИ пытается понять запрос..."},
   ai_search_found:{uz:"🤖 AI \"{q}\" deb tushundi — natijalar:",ru:"🤖 ИИ понял как «{q}» — результаты:"},
   reels_btn:{uz:"🎬 Reels/TikTok ssenariy",ru:"🎬 Сценарий Reels/TikTok"},
@@ -6653,6 +6662,39 @@ function pfScrollTop(){
   const el=document.getElementById('prodform');
   if(el){ el.scrollTop=0; requestAnimationFrame(()=>{ el.scrollTop=0; }); }
 }
+
+// ✨ AI TO'LDIRISH (Gemini vision) — yuklangan 1-rasmdan nom/tavsif/birlik/narx taklifi.
+// Faqat BO'SH maydonlar to'ldiriladi (sotuvchi yozganini o'chirmaydi).
+async function aiFillFromPhoto(){
+  if(pf.aiBusy) return;
+  if(!pf.images || !pf.images.length){ tg.showAlert(L('aivn_need_photo')); return; }
+  let f;
+  try{
+    const b = await (await fetch(imgUrl(pf.images[0]))).blob();
+    f = new File([b], 'photo.jpg', {type: b.type || 'image/jpeg'});
+  }catch(e){}
+  if(!f){ tg.showAlert(L('sp_img_failed')); return; }
+  pf.aiBusy = true; renderProductForm();
+  try{
+    const fd = new FormData(); fd.append('file', f, 'photo.jpg');
+    const r = await fetch('/api/seller/product/photo-analyze', {method:'POST', headers:{Authorization:AUTH}, body:fd});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){
+      const det = d.detail || {};
+      throw new Error((det && det.message) || det || ('HTTP ' + r.status));
+    }
+    const s = d.suggestion || {};
+    if(s.name && !(pf.name||'').trim()) pf.name = s.name;
+    if(s.description && !(pf.description||'').trim()) pf.description = s.description;
+    if(s.unit && !pf.unit) pf.unit = s.unit;
+    if((s.price_min || s.price_max) && !pf.price){
+      pf.price = s.price_min || s.price_max;   // boshlang'ich taklif — sotuvchi o'zgartiradi
+    }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    tg.showAlert(L('aivn_fill_done'));
+  }catch(e){ tg.showAlert(L('aivn_fill_failed')+(e.message||e)); }
+  pf.aiBusy = false; renderProductForm();
+}
 function renderProductForm(){
   const body = document.getElementById('prodformBody');
   const isEdit = !!pf.id;
@@ -6686,6 +6728,9 @@ function renderProductForm(){
     `<div class="pfthumb"><img src="${imgUrl(fid)}"><span class="pfx" data-rm="${i}">✕</span>${i===0?'<span class="pfmain">Asosiy</span>':''}</div>`).join('');
   const imagesSec = `<div class="cosec"><div class="lbl">${L('sp_images').replace('{n}', pf.images.length).replace('{m}', MAX_IMAGES)}</div>
     <div class="pfimgs">${thumbs}${addTile}</div></div>`;
+  // ✨ AI to'ldirish — 1-rasm yuklangach, Gemini nom/tavsif/birlik/narxni taklif qiladi
+  const aiFillSec = pf.images.length ? `<div class="cosec">
+    <button class="oact soft full" id="pfAiFill" type="button" style="display:block;width:100%;text-align:center;cursor:pointer;margin:0"${pf.aiBusy?' disabled':''}>${pf.aiBusy?L('aivn_filling'):L('aivn_fill_btn')}</button></div>` : '';
   // ── Video (ixtiyoriy, 1 ta) — ishonch/konversiya uchun qisqa klip ──
   const videoSec = `<div class="cosec"><div class="lbl">${L('sp_video')}</div>
     <div style="font-size:11.5px;color:var(--hint);margin-bottom:6px">${L('sp_video_hint')}</div>
@@ -6755,6 +6800,7 @@ function renderProductForm(){
   body.innerHTML = `<div class="cobody">
     ${catHeadSec}
     ${imagesSec}
+    ${aiFillSec}
     ${videoSec}
     <div class="cosec"><div class="lbl">${L('sp_name')}</div>
       <input class="coaddr" id="pfName" style="min-height:auto" placeholder="${L('sp_name_ph')}" value="${esc(pf.name)}"></div>
@@ -6783,6 +6829,7 @@ function renderProductForm(){
 
   const addImg = document.getElementById('pfAddImg'); if(addImg) addImg.onclick = ()=>addMedia('image');
   const addVid = document.getElementById('pfAddVideo'); if(addVid) addVid.onclick = ()=>addMedia('video');
+  const aiFill = document.getElementById('pfAiFill'); if(aiFill) aiFill.onclick = aiFillFromPhoto;
   const vidRm = document.getElementById('pfVidRm');
   if(vidRm) vidRm.onclick = ()=>{ pf.video_file_id=''; renderProductForm(); };
   body.querySelectorAll('[data-rm]').forEach(x=>x.onclick=()=>{ const i=Number(x.dataset.rm); pf.images.splice(i,1); pf.imageLabels.splice(i,1); renderProductForm(); });
@@ -7301,6 +7348,7 @@ function renderAdView(){
     <div class="cosec"><div class="lbl">${L('sp_ad_caption')}</div>
       <textarea class="coaddr" id="adCap" style="min-height:150px">${esc(adState.caption)}</textarea></div>
     <button class="oact no" id="adRegen" style="width:100%">${L('sp_ad_regen')}</button>
+    ${adState.video_file_id?'':`<button class="oact no" id="adAiBanner" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('banner_btn')}</button>`}
     <div class="cosec" style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">
       <div class="lbl">${L('sp_ad_more')}</div>
       <input class="coaddr" id="adSchWhen" type="datetime-local" style="min-height:auto">
@@ -7316,6 +7364,7 @@ function renderAdView(){
   document.getElementById('adCap').oninput = e=>adState.caption = e.target.value;
   body.querySelectorAll('[data-adlen]').forEach(o=>o.onclick=()=>{ adState.length=o.dataset.adlen; loadAdPreview(); });
   document.getElementById('adRegen').onclick = loadAdPreview;
+  const aiBanBtn = document.getElementById('adAiBanner'); if(aiBanBtn) aiBanBtn.onclick = aiBannerMake;
   document.getElementById('adPublish').onclick = publishAd;
   document.getElementById('adSchedule').onclick = adSchedule;
   document.getElementById('adAutorep').onclick = adAutorep;
@@ -7344,7 +7393,8 @@ async function publishAd(){
     if(btn){ btn.disabled = true; btn.textContent = L('sp_ad_publishing'); }
     try{
       await apiSend('/api/seller/product/'+adState.pid+'/ad-publish','POST',
-                    {caption: adState.caption, length: adState.length});
+                    {caption: adState.caption, length: adState.length,
+                     image_id: adState.ai_image_fid || null});
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
       closeAdView();
       tg.showAlert(L('sp_ad_published'));
@@ -7355,6 +7405,29 @@ async function publishAd(){
   };
   if(tg.showConfirm) tg.showConfirm(L('sp_ad_publish_q'), ok=>{ if(ok) doPub(); });
   else doPub();
+}
+
+// 🎨 GEMINI AI BANNER — mahsulot rasmidan professional reklama dizayni.
+// Muvaffaqiyatda preview yangilanadi va post SHU rasm bilan chiqadi (image_id).
+// Model ishlamasa (billing/kvota) — mavjud PIL dizayn qoladi, faqat ogohlantiramiz.
+async function aiBannerMake(){
+  const btn = document.getElementById('adAiBanner');
+  if(!btn || btn.disabled) return;
+  btn.disabled = true; const old = btn.textContent; btn.textContent = L('banner_making');
+  try{
+    const d = await apiSend('/api/seller/product/'+adState.pid+'/ai-banner','POST',{});
+    if(d && d.ok && d.file_id){
+      adState.ai_image_fid = d.file_id;
+      adState.image = imgUrl(d.file_id);
+      adState.has_design = true;
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      renderAdView();
+      tg.showAlert(L('banner_done'));
+      return;
+    }
+    tg.showAlert(L('banner_fail')+((d && d.message) || ''));
+  }catch(e){ tg.showAlert(L('banner_fail')+(e.message||e)); }
+  btn.disabled = false; btn.textContent = old;
 }
 
 function closeAdView(){ document.getElementById('adview').classList.remove('open'); }

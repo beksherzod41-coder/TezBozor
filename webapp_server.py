@@ -3610,6 +3610,7 @@ async def api_ad_preview(product_id: int, length: str = Query("long"),
 class AdPublishIn(BaseModel):
     caption: Optional[str] = None
     length: Optional[str] = "long"
+    image_id: Optional[str] = None   # 🎨 AI banner file_id (ai-banner endpointi bergan)
 
 
 @app.post("/api/seller/product/{product_id}/ad-publish")
@@ -3626,10 +3627,11 @@ def api_ad_publish(product_id: int, body: AdPublishIn, authorization: str = Head
     caption = (body.caption or "").strip() or None
     # Sotuvchi tahrir qilgan matn — oddiy matn sifatida yuboriladi (parse_mode yo'q,
     # buzilgan HTML xavfi yo'q). Bo'sh bo'lsa caption=None -> bot AI matnini quradi.
+    image_id = (body.image_id or "").strip()[:200] or None   # AI banner bo'lsa — o'sha rasm
     sa = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     db.create_scheduled_post(product_id, prod["seller_id"], sa,
                              created_by=user["id"], caption=caption,
-                             parse_mode=None, image_id=None)
+                             parse_mode=None, image_id=image_id)
     return {"ok": True}
 
 
