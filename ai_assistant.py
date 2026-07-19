@@ -16,10 +16,19 @@ bazasiga real ulangan va rolga qarab ish bajaradi:
     {"text": str, "products": [...], "draft": {...}|None}
 main.py shu natijani Telegram'da kartalar/tugmalar bilan ko'rsatadi.
 
-.env:
-    DEEPSEEK_API_KEY=sk-...        (majburiy)
+.env (provayder — ikkalasidan biri; GEMINI_API_KEY bo'lsa Gemini ustun):
+    AI_PROVIDER=gemini | deepseek   (ixtiyoriy; bo'lmasa kalit boriga qarab tanlanadi)
+
+    GEMINI_API_KEY=...              (Google Gemini kaliti)
+    GEMINI_MODEL=gemini-flash-latest             (ixtiyoriy)
+    GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai  (ixtiyoriy)
+
+    DEEPSEEK_API_KEY=sk-...
     DEEPSEEK_MODEL=deepseek-chat    (ixtiyoriy)
     DEEPSEEK_BASE_URL=https://api.deepseek.com  (ixtiyoriy)
+
+Ikkala provayder ham OpenAI-mos /chat/completions API (function calling bilan)
+orqali ishlaydi — kod bitta, faqat BASE_URL/KEY/MODEL almashadi.
 """
 
 import os
@@ -38,11 +47,65 @@ except Exception:  # languages import bo'lmasa — xom nomni qaytaramiz
 log = logging.getLogger(__name__)
 
 # ============================================================
-# SOZLAMALAR
+# SOZLAMALAR — AI PROVAYDER (Gemini yoki DeepSeek, OpenAI-mos API)
 # ============================================================
-API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
-MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
-BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+# Gemini'ning OpenAI-mos endpointi /chat/completions va function calling'ni
+# to'liq qo'llaydi, shuning uchun pastdagi barcha kod ikkala provayder bilan
+# bir xil ishlaydi — faqat kalit/model/URL almashadi.
+_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip() or "gemini-flash-latest"
+_GEMINI_URL = os.getenv(
+    "GEMINI_BASE_URL",
+    "https://generativelanguage.googleapis.com/v1beta/openai").strip().rstrip("/")
+_DS_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+_DS_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
+_DS_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip().rstrip("/")
+
+# AI_PROVIDER aniq berilsa — o'sha; berilmasa Gemini kaliti borida Gemini,
+# aks holda DeepSeek (eski xulq buzilmaydi).
+AI_PROVIDER = os.getenv("AI_PROVIDER", "").strip().lower()
+if not AI_PROVIDER:
+    AI_PROVIDER = "gemini" if _GEMINI_KEY else "deepseek"
+if AI_PROVIDER == "gemini":
+    API_KEY, MODEL, BASE_URL = _GEMINI_KEY, _GEMINI_MODEL, _GEMINI_URL
+else:
+    AI_PROVIDER = "deepseek"
+    API_KEY, MODEL, BASE_URL = _DS_KEY, _DS_MODEL, _DS_URL
+
+# Gemini "thinking" byudjeti: 0 = o'chirilgan (default — javob tokenlari fikrlashga
+# sarflanmasin, DeepSeek bilan paritet); -1 = modelning o'z defaulti (yuborilmaydi).
+try:
+    GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
+except ValueError:
+    GEMINI_THINKING_BUDGET = 0
+
+
+async def _chat_post(client, payload):
+    """Barcha AI chaqiruvlari uchun MARKAZIY so'rov.
+
+    • Payload OpenAI-mos /chat/completions formatida (model'ni shu yer qo'yadi).
+    • Gemini'da thinking o'chiriladi (GEMINI_THINKING_BUDGET, default 0) — aks
+      holda fikrlash tokenlari max_tokens'ni yeb, javob kesilib qolardi.
+    • Gemini 429/5xx bersa va DeepSeek kaliti bo'lsa — bir marta DeepSeek bilan
+      avtomatik qayta uriniladi (bepul tarif tiqilib qolganda bot o'lmasin)."""
+    payload = dict(payload)
+    payload["model"] = MODEL
+    if AI_PROVIDER == "gemini" and GEMINI_THINKING_BUDGET >= 0:
+        payload["extra_body"] = {"google": {"thinking_config": {
+            "thinking_budget": GEMINI_THINKING_BUDGET}}}
+    resp = await client.post(
+        f"{BASE_URL}/chat/completions", json=payload,
+        headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"})
+    if (AI_PROVIDER == "gemini" and _DS_KEY
+            and resp.status_code in (429, 500, 502, 503)):
+        log.warning(f"Gemini {resp.status_code} — DeepSeek fallback bilan qayta urinilmoqda")
+        payload.pop("extra_body", None)
+        payload["model"] = _DS_MODEL
+        resp = await client.post(
+            f"{_DS_URL}/chat/completions", json=payload,
+            headers={"Authorization": f"Bearer {_DS_KEY}", "Content-Type": "application/json"})
+    return resp
+
 
 MAX_HISTORY = 10        # saqlanadigan oxirgi user/assistant xabarlar soni
 MAX_TOKENS = 900
@@ -981,8 +1044,7 @@ async def generate_ad_caption(*, name, price_text, category="", description="",
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Reklama matni API xatosi {resp.status_code}")
                 return None
@@ -1140,8 +1202,7 @@ async def generate_product_questions(*, name, category="", description="",
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Mahsulot savollari API xatosi {resp.status_code}")
                 return None
@@ -1205,8 +1266,7 @@ async def moderate_product(*, name, description="", lang="uz") -> dict:
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Moderatsiya API xatosi {resp.status_code}")
                 return None
@@ -1263,8 +1323,7 @@ async def answer_shop_question(*, question, facts, lang="uz") -> str:
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Shop QA API xatosi {resp.status_code}")
                 return None
@@ -1324,7 +1383,7 @@ async def haggle(*, listed_price, floor_price, history, buyer_message, lang="uz"
     for attempt in range(2):
         try:
             async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-                resp = await client.post(f"{BASE_URL}/chat/completions", json=payload, headers=headers)
+                resp = await _chat_post(client, payload)
                 if resp.status_code >= 400:
                     log.warning(f"Haggle API xatosi {resp.status_code}: {resp.text[:300]}")
                     return None
@@ -1415,8 +1474,7 @@ async def generate_review_reply(*, product, comment, shop_rating=None,
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Sharh javobi API xatosi {resp.status_code}")
                 return None
@@ -1497,8 +1555,7 @@ async def generate_support_reply(*, reason_label="", messages=None, lang="uz") -
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Support javobi API xatosi {resp.status_code}")
                 return None
@@ -1578,8 +1635,7 @@ async def generate_profile_completion_message(*, name="", missing_fields=None,
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Profil to'ldirish xabari API xatosi {resp.status_code}")
                 return None
@@ -1647,8 +1703,7 @@ async def interpret_search_query(query, categories=None, lang="uz") -> dict:
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Slang qidiruv API xatosi {resp.status_code}")
                 return None
@@ -1728,8 +1783,7 @@ async def generate_video_script(*, name, price_text="", category="",
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Reels ssenariy API xatosi {resp.status_code}")
                 return None
@@ -1805,8 +1859,7 @@ async def analyze_sentiment(reviews, lang="uz") -> dict:
     }
     try:
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Sentiment API xatosi {resp.status_code}")
                 return None
@@ -1924,8 +1977,7 @@ async def dynamic_price_advice(*, name, price, signals, competitor=None,
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Dinamik narx API xatosi {resp.status_code}")
                 return None
@@ -2022,8 +2074,7 @@ async def gift_advisor(*, recipient="", occasion="", budget=None, notes="",
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Sovg'a yordamchisi API xatosi {resp.status_code}")
                 return None
@@ -2109,8 +2160,7 @@ async def suggest_cancel_reasons(*, party, product_name="", status="", lang="uz"
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"Bekor sabab API xatosi {resp.status_code}")
                 return []
@@ -2151,8 +2201,7 @@ async def _json_call(system, user_msg, *, max_tokens=600, temperature=0.4, tag="
     }
     try:
         async with httpx.AsyncClient(timeout=AD_TIMEOUT) as client:
-            resp = await client.post(f"{BASE_URL}/chat/completions",
-                                     json=payload, headers=headers)
+            resp = await _chat_post(client, payload)
             if resp.status_code >= 400:
                 log.warning(f"{tag} API xatosi {resp.status_code}")
                 return None
@@ -2433,8 +2482,7 @@ async def ask(db, lang: str, role: str, user_text: str, user_data: dict,
                     payload["tools"] = tools
                     payload["tool_choice"] = "auto"
 
-                resp = await client.post(f"{BASE_URL}/chat/completions",
-                                         json=payload, headers=headers)
+                resp = await _chat_post(client, payload)
                 err = _http_error_text(resp, lang)
                 if err is not None:
                     return {"text": err, "products": ui_products, "draft": ui_draft,
