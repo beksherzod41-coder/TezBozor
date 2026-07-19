@@ -263,8 +263,10 @@ def build_ad_clip(images, *, hook_text="", price_text="", shop_text="",
 
     images — mahsulot rasmlari (bytes ro'yxati, 1..3 ishlatiladi).
     Qolgan matnlar rasm USTIGA chiziladi (emojisiz), shuning uchun qisqa bo'lsin.
-    music_path — ixtiyoriy mp3; berilmasa assets/ad_music.mp3 bo'lsa o'sha,
-    bo'lmasa ovozsiz klip.
+    music_path — fon musiqa boshqaruvi:
+      None (standart) — assets/ad_music.mp3 bo'lsa avtomatik qo'shiladi;
+      ""              — musiqa ATAYLAB o'chirilgan (sotuvchi tanlovi);
+      yo'l            — aynan shu mp3 ishlatiladi.
     """
     if not is_enabled() or not images:
         return None

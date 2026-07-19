@@ -164,6 +164,30 @@ def test_adclip_happy_path(client, monkeypatch):
     os.remove(cache)
 
 
+def test_adclip_music_flag_plumbing(client, monkeypatch):
+    """🎵 sotuvchi tanlovi: music=False -> music_path="" (o'chiq),
+    standart/True -> music_path=None (avto assets/ad_music.mp3)."""
+    _fake_clip_env(monkeypatch)
+    captured = {}
+
+    def fake_build(images, **kw):
+        captured.clear()
+        captured.update(kw)
+        return b"x" * 2000
+
+    monkeypatch.setattr(webapp_server.ad_video, "build_ad_clip", fake_build)
+    client.db.add_product_image(client.pid, "IMG_FID_1")
+    r = client.post(f"/api/seller/product/{client.pid}/adclip",
+                    headers=hdr(5002), json={"music": False})
+    assert r.status_code == 200 and captured["music_path"] == ""
+    r = client.post(f"/api/seller/product/{client.pid}/adclip",
+                    headers=hdr(5002), json={})
+    assert r.status_code == 200 and captured["music_path"] is None
+    r = client.post(f"/api/seller/product/{client.pid}/adclip",
+                    headers=hdr(5002), json={"music": True})
+    assert r.status_code == 200 and captured["music_path"] is None
+
+
 def test_adclip_render_failure_502(client, monkeypatch):
     _fake_clip_env(monkeypatch, clip=None)
     client.db.add_product_image(client.pid, "IMG_FID_1")

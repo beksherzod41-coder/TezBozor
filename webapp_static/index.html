@@ -831,6 +831,8 @@ const I18N = {
   clip_done:{uz:"✅ Video-reklama tayyor! Post shu video bilan chiqadi.",ru:"✅ Видеореклама готова! Пост выйдет с этим видео."},
   clip_fail:{uz:"Video yaratilmadi: ",ru:"Видео не создано: "},
   clip_note:{uz:"🎬 AI video-reklama — post shu video bilan chiqadi",ru:"🎬 AI видеореклама — пост выйдет с этим видео"},
+  clip_music:{uz:"🎵 Musiqali",ru:"🎵 С музыкой"},
+  clip_no_music:{uz:"🔇 Musiqasiz",ru:"🔇 Без музыки"},
   dynp_btn:{uz:"📊 Dinamik narx (AI)",ru:"📊 Динамическая цена (ИИ)"},
   dynp_title:{uz:"📊 Dinamik narx",ru:"📊 Динамическая цена"},
   dynp_loading:{uz:"AI talab va raqobatni tahlil qilmoqda...",ru:"ИИ анализирует спрос и конкурентов..."},
@@ -7580,6 +7582,10 @@ function renderAdView(){
       <textarea class="coaddr" id="adCap" style="min-height:150px">${esc(adState.caption)}</textarea></div>
     <button class="oact no" id="adRegen" style="width:100%">${L('sp_ad_regen')}</button>
     ${adState.video_file_id||adState.clip_fid?'':`<button class="oact no" id="adAiBanner" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('banner_btn')}</button>`}
+    <div class="seg" style="margin-top:8px">
+      <div class="opt ${adState.clip_music!==false?'on':''}" data-clipmus="1">${L('clip_music')}</div>
+      <div class="opt ${adState.clip_music===false?'on':''}" data-clipmus="0">${L('clip_no_music')}</div>
+    </div>
     <button class="oact no" id="adClipBtn" style="width:100%;margin-top:8px;background:var(--accent-soft);color:var(--accent)">${L('clip_btn')}</button>
     <div class="cosec" style="border-top:1px solid var(--line);padding-top:12px;margin-top:4px">
       <div class="lbl">${L('sp_ad_more')}</div>
@@ -7598,6 +7604,8 @@ function renderAdView(){
   document.getElementById('adRegen').onclick = loadAdPreview;
   const aiBanBtn = document.getElementById('adAiBanner'); if(aiBanBtn) aiBanBtn.onclick = aiBannerMake;
   const clipBtn = document.getElementById('adClipBtn'); if(clipBtn) clipBtn.onclick = aiClipMake;
+  body.querySelectorAll('[data-clipmus]').forEach(o=>o.onclick=()=>{
+    adState.clip_music = o.dataset.clipmus === '1'; renderAdView(); });
   document.getElementById('adPublish').onclick = publishAd;
   document.getElementById('adSchedule').onclick = adSchedule;
   document.getElementById('adAutorep').onclick = adAutorep;
@@ -7671,7 +7679,8 @@ async function aiClipMake(){
   if(!btn || btn.disabled) return;
   btn.disabled = true; const old = btn.textContent; btn.textContent = L('clip_making');
   try{
-    const d = await apiSend('/api/seller/product/'+adState.pid+'/adclip','POST',{});
+    const d = await apiSend('/api/seller/product/'+adState.pid+'/adclip','POST',
+                            {music: adState.clip_music !== false});
     if(d && d.ok && d.file_id){
       adState.clip_fid = d.file_id;
       try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}

@@ -7583,6 +7583,7 @@ _ADCLIP_LOCK = asyncio.Lock()
 
 class AdClipIn(BaseModel):
     hook: Optional[str] = None   # sotuvchi o'z hook matnini bersa (bo'sh = AI yozadi)
+    music: Optional[bool] = True  # 🎵 fon musiqa (sotuvchi tanlovi; standart — yoqilgan)
 
 
 @app.post("/api/seller/product/{product_id}/adclip")
@@ -7622,13 +7623,16 @@ async def api_ad_clip(product_id: int, body: AdClipIn = None,
         optom_txt = f"OPTOM · 1 PACHKA = {int(_ps)} DONA" if _ps else "OPTOM"
     cta = "SOTIB OLISH" if lang != "ru" else "КУПИТЬ"
 
+    # 🎵 musiqa: None = avto (assets/ad_music.mp3), "" = sotuvchi o'chirgan
+    music_path = None if (body is None or body.music is not False) else ""
     async with _ADCLIP_LOCK:
         clip = await asyncio.to_thread(
             ad_video.build_ad_clip, images,
             hook_text=hook,
             price_text=fmt_price(prod.get("price")),
             shop_text=str(shop_name or ""),
-            cta_text=cta, optom_text=optom_txt, brand_text=BRAND_NAME)
+            cta_text=cta, optom_text=optom_txt, brand_text=BRAND_NAME,
+            music_path=music_path)
     if not clip:
         raise HTTPException(status_code=502, detail="clip_failed")
     file_id = await _tg_upload_video(user.get("telegram_id"), clip,
