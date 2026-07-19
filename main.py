@@ -1950,8 +1950,10 @@ async def buyer_product_details(update: Update, context: ContextTypes.DEFAULT_TY
                                      prefix=t(lang, 'dist_from_you'))
     dist_line = (dist_raw.lstrip("\n") + "\n") if dist_raw else ""
 
-    # Hozir ochiq/yopiqmi (faqat working_hours parse qilinsa)
-    open_status = is_shop_open_now(product.get('working_hours'))
+    # Hozir ochiq/yopiqmi — haftalik jadval (bo'lsa) ustun, aks holda yagona working_hours
+    open_status = is_shop_open_now(product.get('working_hours'),
+                                   product.get('working_days'),
+                                   product.get('work_schedule'))
     if open_status is True:
         open_line = "  " + t(lang, 'open_now')
     elif open_status is False:
@@ -2500,7 +2502,9 @@ async def buyer_shop_detail(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _url = f"https://www.google.com/maps/search/?api=1&query={shop['shop_lat']},{shop['shop_lon']}"
         map_link = t(lang, 'frag_map', url=_url)
 
-    open_status = is_shop_open_now(shop.get('working_hours'))
+    open_status = is_shop_open_now(shop.get('working_hours'),
+                                   shop.get('working_days'),
+                                   shop.get('work_schedule'))
     if open_status is True:
         open_line = "  " + t(lang, 'open_now')
     elif open_status is False:
@@ -4120,7 +4124,9 @@ async def order_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Ish vaqti tashqarisidami?
     closed_note = ""
-    if is_shop_open_now(product.get('working_hours')) is False:
+    if is_shop_open_now(product.get('working_hours'),
+                        product.get('working_days'),
+                        product.get('work_schedule')) is False:
         closed_note = t(lang, 'frag_shop_closed_note',
                         wh=html.escape(product.get('working_hours') or ''))
 

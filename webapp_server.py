@@ -22,7 +22,7 @@ import logging
 import asyncio
 import base64
 import math
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime, timezone, timedelta
 
 try:
@@ -40,7 +40,8 @@ import httpx
 from database import Database
 from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
-from tezbozor_design import fmt_order_id, fmt_price, best_location_text, effective_unit_price, wholesale_info
+from tezbozor_design import (fmt_order_id, fmt_price, best_location_text, effective_unit_price,
+                             wholesale_info, normalize_schedule, next_shop_open_datetime)
 import ai_assistant
 import ai_vision
 import ad_design
@@ -3861,7 +3862,7 @@ def api_seller_analytics(authorization: str = Header(None)):
 
 
 _SHOP_FIELDS = ("shop_name", "shop_address", "shop_landmark", "working_days",
-                "working_hours", "phone_number", "card_number", "card_owner",
+                "working_hours", "work_schedule", "phone_number", "card_number", "card_owner",
                 "card_type", "shop_lat", "shop_lon", "telegram_username",
                 "delivery_min_total")
 _VALID_CARD = {"uzcard", "humo", "visa", "mastercard"}
@@ -4060,6 +4061,8 @@ class ShopEdit(BaseModel):
     shop_landmark: Optional[str] = None
     working_days: Optional[str] = None
     working_hours: Optional[str] = None
+    # Haftalik jadval (per-kun soat). dict {"0":"09:00-21:00",...} yoki JSON-matn; "" / {} = o'chirish
+    work_schedule: Optional[Any] = None
     phone: Optional[str] = None
     card_number: Optional[str] = None
     card_owner: Optional[str] = None
@@ -4098,6 +4101,16 @@ def api_edit_shop(p: ShopEdit, authorization: str = Header(None)):
         v = getattr(p, attr)
         if v is not None:
             fields[col] = v.strip() or None
+    # Haftalik jadval (per-kun soat). Client dict/JSON yuboradi; serverda tekshirib kanonik
+    # JSON'ga aylantiramiz. Bo'sh/yaroqsiz/{} → NULL (eski yagona working_hours ishlatiladi).
+    if p.work_schedule is not None:
+        raw = p.work_schedule
+        if isinstance(raw, str) and not raw.strip():
+            fields["work_schedule"] = None
+        elif isinstance(raw, dict) and not raw:
+            fields["work_schedule"] = None
+        else:
+            fields["work_schedule"] = normalize_schedule(raw)
     if p.phone is not None and p.phone.strip():
         ph = p.phone.strip()
         digits = ph.lstrip("+")

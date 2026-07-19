@@ -192,6 +192,11 @@ class Database:
             ("shop_instagram", "TEXT"),    # Instagram profil havolasi (📸)
             ("shop_telegram", "TEXT"),     # Telegram kanal/username havolasi (📢)
             ("shop_website", "TEXT"),      # universal havola (🌐 sayt/WhatsApp/YouTube...)
+            # HAFTALIK ish jadvali (per-kun soat) JSON: {"0":"09:00-21:00",...,"6":"09:00-12:30"}.
+            # Kaliti yo'q kun = o'sha kun yopiq. Bo'sh/NULL = eski yagona working_hours ishlatiladi.
+            # Masalan "yakshanba faqat 12:30 gacha" — buyurtma sanog'i tushdan keyin dushanbagacha
+            # muzlaydi, avtomatik bekor bo'lmaydi (tezbozor_design.resolve_schedule).
+            ("work_schedule", "TEXT"),
         ]:
             try:
                 cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {defn}")
@@ -3182,7 +3187,7 @@ class Database:
         cursor.execute("""
             SELECT p.*, c.name as category_name, c.emoji as category_emoji,
                    u.shop_name, u.shop_address, u.shop_landmark,
-                   u.shop_lat, u.shop_lon, u.working_days, u.working_hours,
+                   u.shop_lat, u.shop_lon, u.working_days, u.working_hours, u.work_schedule,
                    u.telegram_username, u.phone_number, u.telegram_id as seller_tg,
                    u.is_blocked as seller_blocked, u.region_id as seller_region_id,
                    u.delivery_min_total,

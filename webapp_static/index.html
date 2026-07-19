@@ -1197,6 +1197,11 @@ const I18N = {
   sp_landmark:{uz:"Mo'ljal",ru:"Ориентир"}, sp_landmark_ph:{uz:"Yaqin mo'ljal",ru:"Ближайший ориентир"},
   sp_work_days:{uz:"Ish kunlari",ru:"Рабочие дни"}, sp_work_days_ph:{uz:"Du-Sha",ru:"Пн-Вс"},
   sp_work_hours:{uz:"Ish soatlari",ru:"Рабочие часы"}, sp_phone:{uz:"Telefon",ru:"Телефон"},
+  sp_work_sched:{uz:"Haftalik jadval",ru:"Расписание на неделю"},
+  sched_uniform:{uz:"Umumiy soat (har kun bir xil)",ru:"Общие часы (одинаково)"},
+  sched_closed:{uz:"Yopiq",ru:"Закрыто"}, sched_closed_short:{uz:"Yopiq",ru:"Закр"},
+  sched_hint:{uz:"Har kun uchun alohida soat belgilang. Kunni «yopiq» qilsangiz yoki qisqa soat qo'ysangiz — o'sha vaqtdan keyingi buyurtmalar avtomatik bekor bo'lmaydi, do'kon ochilguncha muzlab turadi.",ru:"Задайте часы для каждого дня. Если день «закрыт» или короткий — заказы после закрытия не отменяются автоматически, а «замораживаются» до открытия."},
+  sched_reset:{uz:"Jadvalni o'chirish (umumiy soatga qaytish)",ru:"Сбросить (вернуть общие часы)"},
   sp_shop_location:{uz:"Do'kon joylashuvi",ru:"Геолокация магазина"},
   sp_loc_warn:{uz:"⚠️ Do'kon lokatsiyasi belgilanmagan. Belgilasangiz, xaridorlar sizgacha masofani (km/m) ko'radi va do'koningiz yaqinlardagilarga tavsiya etiladi.",ru:"⚠️ Геолокация магазина не указана. Укажите её — и покупатели увидят расстояние до вас (км/м), а магазин будет рекомендоваться тем, кто рядом."},
   bp_on_map:{uz:"🗺 Xaritada ko'rish",ru:"🗺 Показать на карте"}, bp_shop_info:{uz:"🏪 Do'kon ma'lumoti",ru:"🏪 О магазине"},
@@ -4032,10 +4037,109 @@ function buyerCancelRespond(oid, agree){
 
 // Bitta maydonni tahrirlash (faqat o'sha maydon). kind: 'me' → /api/me, 'shop' → /api/seller/shop
 let _fe = {};
+// ============================================================
+// 🗓 HAFTALIK ISH JADVALI — har kun uchun alohida soat (qisqa/yopiq kunlar)
+// ============================================================
+const WDAYS=[
+  {uz:'Dushanba',ru:'Понедельник'}, {uz:'Seshanba',ru:'Вторник'}, {uz:'Chorshanba',ru:'Среда'},
+  {uz:'Payshanba',ru:'Четверг'}, {uz:'Juma',ru:'Пятница'}, {uz:'Shanba',ru:'Суббота'},
+  {uz:'Yakshanba',ru:'Воскресенье'}
+];
+function _wdName(i){ const d=WDAYS[i]; return (LANG==='ru'?d.ru:d.uz); }
+// work_schedule (JSON-matn yoki dict) → {0:'09:00-21:00',...} obyektiga aylantiradi
+function _parseSchedule(ws){
+  if(!ws) return null;
+  let o=ws;
+  if(typeof o==='string'){ try{ o=JSON.parse(o); }catch(e){ return null; } }
+  if(!o || typeof o!=='object') return null;
+  const out={}; let any=false;
+  for(let i=0;i<7;i++){ const v=o[String(i)]!=null?o[String(i)]:o[i]; if(v&&String(v).trim()){ out[i]=String(v).trim(); any=true; } }
+  return any?out:null;
+}
+// Profil kartasi uchun qisqa xulosa. Jadval bo'lsa — kun bo'yicha; bo'lmasa umumiy soat.
+function scheduleSummary(f){
+  const sch=_parseSchedule(f.work_schedule);
+  if(!sch){ return f.working_hours ? (L('sched_uniform')) : ''; }
+  const open=[], closed=[];
+  for(let i=0;i<7;i++){ if(sch[i]) open.push(_wdName(i).slice(0,2)+' '+sch[i].replace('-','–')); else closed.push(_wdName(i).slice(0,2)); }
+  let s=open.join(' · ');
+  if(closed.length) s+= '  ·  '+L('sched_closed_short')+': '+closed.join(', ');
+  return s;
+}
+// Editor: 7 kun, har biri ochiq/yopiq + boshlanish/tugash vaqti
+async function openScheduleEdit(){
+  document.getElementById('ttl_fieldeditview').textContent='🗓 '+L('sp_work_sched');
+  document.getElementById('fieldeditview').classList.add('open');
+  const b=document.getElementById('fieldeditBody');
+  b.innerHTML=`<div class="cobody"><div class="loading">${L('sp_loading')}</div></div>`;
+  let s={};
+  try{ s=await api('/api/seller/shop'); }catch(e){ b.innerHTML=`<div class="cobody"><div class="empty"><span class="big">⚠️</span>${esc(e.message)}</div></div>`; return; }
+  const sch=_parseSchedule(s.work_schedule);
+  // Standart soat: jadval bo'lmasa umumiy working_hours'dan (yo'q bo'lsa 09:00-18:00)
+  const dfltHrs=(function(){ const m=String(s.working_hours||'').match(/(\d{1,2}):?(\d{2})?\s*[-–—to]+\s*(\d{1,2}):?(\d{2})?/);
+    if(m){ const p=x=>String(x).padStart(2,'0'); return [p(m[1])+':'+(m[2]||'00'), p(m[3])+':'+(m[4]||'00')]; } return ['09:00','18:00']; })();
+  // Boshlang'ich holat: jadval bo'lsa undan; bo'lmasa hamma kun ochiq + standart soat
+  const st={};
+  for(let i=0;i<7;i++){
+    if(sch){ if(sch[i]){ const pr=sch[i].split('-'); st[i]={on:true,s:pr[0],e:pr[1]}; } else st[i]={on:false,s:dfltHrs[0],e:dfltHrs[1]}; }
+    else { st[i]={on:true,s:dfltHrs[0],e:dfltHrs[1]}; }
+  }
+  const rowHtml=(i)=>`<div class="cosec schedrow" data-d="${i}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+    <div class="opt schedtog ${st[i].on?'on':''}" data-d="${i}" style="min-width:104px;flex:0 0 auto;text-align:center;padding:8px 10px">${_wdName(i)}</div>
+    <div class="schedtimes" data-d="${i}" style="display:${st[i].on?'flex':'none'};align-items:center;gap:6px;flex:1">
+      <input type="time" class="coaddr schedin scheds" data-d="${i}" value="${st[i].s}" style="min-height:auto;padding:7px 8px;flex:1">
+      <span style="color:var(--hint)">–</span>
+      <input type="time" class="coaddr schedin schede" data-d="${i}" value="${st[i].e}" style="min-height:auto;padding:7px 8px;flex:1">
+    </div>
+    <div class="schedclosed" data-d="${i}" style="display:${st[i].on?'none':'block'};color:var(--sale);font-size:12.5px;font-weight:600;flex:1">${L('sched_closed')}</div>
+  </div>`;
+  let rows=''; for(let i=0;i<7;i++) rows+=rowHtml(i);
+  b.innerHTML=`<div class="cobody">
+    <div class="cosec" style="color:var(--hint);font-size:12px;line-height:1.5;padding-bottom:4px">${L('sched_hint')}</div>
+    ${rows}
+    <div class="cosec"><button class="oact soft full" id="schedClear" style="box-shadow:none">${L('sched_reset')}</button></div>
+  </div>
+  <div class="cobar"><button id="schedSave">${L('s_save')}</button></div>`;
+  // Ochiq/yopiq almashtirish
+  b.querySelectorAll('.schedtog').forEach(el=>el.onclick=()=>{
+    const i=el.dataset.d; st[i].on=!st[i].on; el.classList.toggle('on', st[i].on);
+    b.querySelector(`.schedtimes[data-d="${i}"]`).style.display=st[i].on?'flex':'none';
+    b.querySelector(`.schedclosed[data-d="${i}"]`).style.display=st[i].on?'none':'block';
+    try{ tg.HapticFeedback.selectionChanged(); }catch(e){}
+  });
+  b.querySelectorAll('.scheds').forEach(el=>el.onchange=()=>{ st[el.dataset.d].s=el.value; });
+  b.querySelectorAll('.schede').forEach(el=>el.onchange=()=>{ st[el.dataset.d].e=el.value; });
+  // Jadvalni o'chirish → umumiy soatga qaytish (work_schedule=NULL)
+  document.getElementById('schedClear').onclick=async()=>{
+    await _saveSchedule({});   // {} → server NULL qiladi
+  };
+  document.getElementById('schedSave').onclick=async()=>{
+    const payload={};
+    for(let i=0;i<7;i++){ if(st[i].on && st[i].s && st[i].e && st[i].s!==st[i].e) payload[String(i)]=st[i].s+'-'+st[i].e; }
+    await _saveSchedule(payload);
+  };
+}
+async function _saveSchedule(payload){
+  const btn=document.getElementById('schedSave'); if(btn){ btn.disabled=true; btn.textContent=L('sp_saving'); }
+  try{
+    const r=await fetch('/api/seller/shop',{method:'PATCH',headers:{Authorization:AUTH,'Content-Type':'application/json'},
+      body:JSON.stringify({work_schedule:payload})});
+    if(!r.ok){ const d=await r.json().catch(()=>({})); throw new Error(d.detail||('HTTP '+r.status)); }
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    document.getElementById('fieldeditview').classList.remove('open');
+    ME=null; await loadMe(); loadProfile();
+  }catch(e){ if(btn){ btn.disabled=false; btn.textContent=L('s_save'); }
+    tg.showAlert(L('sp_save_failed')+(e.message||e)); }
+}
+
 function openFieldEdit(o){
   _fe = o;
   if(o.type==='region'){   // hudud — mavjud region-picker
     openRegionPicker((id)=>{ saveField('region_id', (id||0), 'me'); });
+    return;
+  }
+  if(o.type==='schedule'){   // 🗓 haftalik ish jadvali (per-kun soat)
+    openScheduleEdit();
     return;
   }
   if(o.type==='location'){   // A — do'kon joylashuvi (GPS)
@@ -4279,6 +4383,7 @@ async function loadProfile(){
         _pfRow('📍 '+L('sp_address'), f.shop_address, canEditShop?{key:'shop_address',type:'text',kind:'shop'}:null) +
         _pfRow('🎯 '+L('sp_landmark'), f.shop_landmark, canEditShop?{key:'shop_landmark',type:'text',kind:'shop'}:null) +
         _pfRow('🕐 '+L('sp_work_hours'), f.working_hours, canEditShop?{key:'working_hours',type:'text',kind:'shop'}:null) +
+        _pfRow('🗓 '+L('sp_work_sched'), scheduleSummary(f), canEditShop?{key:'work_schedule',type:'schedule',kind:'shop'}:null) +
         _pfRow('📆 '+L('sp_work_days'), f.working_days, canEditShop?{key:'working_days',type:'text',kind:'shop'}:null) +
         // Yetkazish eng kam summasi PROFILDAN → Sotuvchi (Do'kon) menyusidagi "🚚 Yetkazish eng kam summa" tugmasiga ko'chirildi
         (canEditShop && f.shop_lat==null ? `<div class="locwarn">${L('sp_loc_warn')}</div>` : '') +
