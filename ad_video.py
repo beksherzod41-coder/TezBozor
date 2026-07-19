@@ -156,8 +156,14 @@ def _frame_hook(src, W, H, *, hook_text, brand_text=""):
     size = int(W * 0.115)
     font = _load_font(True, size)
     lines = _wrap_lines(draw, hook, font, max_w)
-    while len(lines) > 3 and size > int(W * 0.06):
-        size = int(size * 0.88)
+
+    def _widest(lns, f):
+        return max((draw.textbbox((0, 0), ln, font=f)[2] for ln in lns), default=0)
+
+    # 3 qatordan oshsa YOKI bitta uzun so'z max_w dan chiqsa — shriftni kichraytiramiz
+    # (word-wrap yagona uzun so'zni bo'lolmaydi, kadr chetiga tegib qolardi)
+    while (len(lines) > 3 or _widest(lines, font) > max_w) and size > int(W * 0.055):
+        size = int(size * 0.9)
         font = _load_font(True, size)
         lines = _wrap_lines(draw, hook, font, max_w)
     line_h = int(size * 1.22)
