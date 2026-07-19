@@ -50,11 +50,19 @@
   /* ---------- TOPBAR ---------- */
   .topbar{position:sticky; top:0; z-index:20; background:var(--bg);
           padding:calc(10px + var(--safe-top)) 12px 6px; box-shadow:0 1px 0 var(--line);}
-  .searchwrap{position:relative;}
+  .searchwrap{position:relative; display:flex; align-items:center; gap:8px;}
   .searchwrap svg{position:absolute; left:13px; top:50%; transform:translateY(-50%); opacity:.5;}
-  .search{width:100%; padding:12px 14px 12px 40px; border:1px solid var(--line); border-radius:13px;
+  .search{flex:1 1 auto; min-width:0; width:100%; padding:12px 14px 12px 40px; border:1px solid var(--line); border-radius:13px;
           font-size:15px; background:var(--card); color:var(--text); outline:none;
           box-shadow:var(--shadow);}
+  /* AI qidiruv tugmalari — 🎤 ovozli va 📷 rasm orqali (qidiruv qatori yonida) */
+  .aibtn{width:44px; height:44px; border-radius:13px; border:none; cursor:pointer; flex:0 0 auto;
+         display:flex; align-items:center; justify-content:center; font-size:19px; line-height:1; padding:0;
+         background:linear-gradient(135deg,var(--accent),var(--accent-2)); color:#fff;
+         box-shadow:0 3px 10px rgba(21,146,226,.3); transition:transform .12s;}
+  .aibtn:active{transform:scale(.9);}
+  .aibtn.rec{background:linear-gradient(135deg,#e53935,#ff6f60); animation:recPulse 1.1s ease infinite;}
+  @keyframes recPulse{0%,100%{box-shadow:0 0 0 0 rgba(229,57,53,.5);} 50%{box-shadow:0 0 0 9px rgba(229,57,53,0);}}
   .search:focus{border-color:var(--accent); box-shadow:0 0 0 3px rgba(21,146,226,.14);}
   .search::placeholder{color:var(--hint);}
 
@@ -415,6 +423,9 @@
       <div class="searchwrap">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input class="search" id="search" placeholder="Mahsulot qidirish...">
+        <button id="micBtn" class="aibtn" type="button" title="Ovozli qidiruv">🎤</button>
+        <button id="camBtn" class="aibtn" type="button" title="Rasm orqali qidirish">📷</button>
+        <input type="file" id="imgSearchFile" accept="image/*" style="display:none">
       </div>
       <div class="filterwrap" id="filterwrap">
         <div class="filterbar" id="filterbar">
@@ -785,6 +796,13 @@ const I18N = {
   all:{uz:"Hammasi",ru:"Все"}, loading:{uz:"Yuklanmoqda...",ru:"Загрузка..."},
   nothing_found:{uz:"Hech narsa topilmadi",ru:"Ничего не найдено"},
   try_other:{uz:"Boshqa so'rov yoki kategoriyani sinab ko'ring",ru:"Попробуйте другой запрос или категорию"},
+  vsr_denied:{uz:"Mikrofonga ruxsat berilmadi. Qurilma sozlamalaridan ruxsat bering.",ru:"Нет доступа к микрофону. Разрешите в настройках устройства."},
+  vsr_unsupported:{uz:"Bu qurilmada ovozli qidiruv qo'llanmaydi",ru:"Голосовой поиск не поддерживается на этом устройстве"},
+  vsr_thinking:{uz:"🤖 AI eshitganini qidirmoqda...",ru:"🤖 ИИ ищет по услышанному..."},
+  vsr_failed:{uz:"Ovozli qidiruv xatosi: ",ru:"Ошибка голосового поиска: "},
+  imgs_thinking:{uz:"AI rasmdagi mahsulotni aniqlamoqda...",ru:"ИИ определяет товар на фото..."},
+  imgs_found:{uz:"📷 Rasm bo'yicha topildi: «{q}»",ru:"📷 Найдено по фото: «{q}»"},
+  imgs_failed:{uz:"Rasm orqali qidiruv xatosi: ",ru:"Ошибка поиска по фото: "},
   ai_search_trying:{uz:"🤖 AI tushunishga harakat qilmoqda...",ru:"🤖 ИИ пытается понять запрос..."},
   ai_search_found:{uz:"🤖 AI \"{q}\" deb tushundi — natijalar:",ru:"🤖 ИИ понял как «{q}» — результаты:"},
   reels_btn:{uz:"🎬 Reels/TikTok ssenariy",ru:"🎬 Сценарий Reels/TikTok"},
@@ -3512,6 +3530,109 @@ function updateFilterFades(){
 })();
 
 document.getElementById('search').oninput = ()=>{ clearTimeout(searchTimer); searchTimer=setTimeout(()=>{ catMode==='shops'?loadShops():loadProducts(); saveUiState(); },350); };
+
+// ---------- 🎤 OVOZLI QIDIRUV (Gemini audio transkripsiya) ----------
+// Bosish — yozish boshlanadi (tugma ⏹), yana bosish/15s — to'xtab AI'ga yuboriladi.
+let _vsRec=null, _vsChunks=[], _vsStream=null, _vsTimer=null;
+function _vsCleanup(){ try{ if(_vsStream) _vsStream.getTracks().forEach(t=>t.stop()); }catch(e){} _vsStream=null; }
+async function voiceSearchToggle(){
+  const btn=document.getElementById('micBtn');
+  if(_vsRec){ try{ _vsRec.stop(); }catch(e){} return; }
+  if(!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder)){
+    tg.showAlert(L('vsr_unsupported')); return;
+  }
+  try{ _vsStream=await navigator.mediaDevices.getUserMedia({audio:true}); }
+  catch(e){ tg.showAlert(L('vsr_denied')); return; }
+  let mime='';
+  for(const m of ['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'])
+    if(MediaRecorder.isTypeSupported(m)){ mime=m; break; }
+  try{ _vsRec=new MediaRecorder(_vsStream, mime?{mimeType:mime}:undefined); }
+  catch(e){ _vsCleanup(); tg.showAlert(L('vsr_unsupported')); return; }
+  _vsChunks=[];
+  _vsRec.ondataavailable=e=>{ if(e.data && e.data.size) _vsChunks.push(e.data); };
+  _vsRec.onstop=async()=>{
+    const type=(_vsRec && _vsRec.mimeType) || mime || 'audio/webm';
+    _vsRec=null; clearTimeout(_vsTimer); _vsCleanup();
+    btn.textContent='🎤'; btn.classList.remove('rec');
+    const chunks=_vsChunks; _vsChunks=[];
+    if(!chunks.length) return;
+    await voiceSearchSend(new Blob(chunks,{type}));
+  };
+  _vsRec.start(250);
+  btn.textContent='⏹'; btn.classList.add('rec');
+  try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+  _vsTimer=setTimeout(()=>{ try{ if(_vsRec) _vsRec.stop(); }catch(e){} }, 15000);
+}
+async function voiceSearchSend(blob){
+  const inp=document.getElementById('search');
+  const oldPh=inp.placeholder; inp.placeholder=L('vsr_thinking');
+  try{
+    const ext=blob.type.indexOf('mp4')>=0?'m4a':(blob.type.indexOf('ogg')>=0?'ogg':'webm');
+    const fd=new FormData();
+    fd.append('file', new File([blob],'voice.'+ext,{type:blob.type||'audio/webm'}));
+    const r=await fetch('/api/ai/voice-search',{method:'POST',headers:{Authorization:AUTH},body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ const det=d.detail||{}; throw new Error((det&&det.message)||det||('HTTP '+r.status)); }
+    if(d.transcript){
+      inp.value=d.transcript;                    // transkript qidiruv qatoriga tushadi
+      try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+      catMode==='shops'?loadShops():loadProducts();   // mavjud qidiruv oqimi (AI zaxira bilan)
+      saveUiState();
+    }
+  }catch(e){ tg.showAlert(L('vsr_failed')+(e.message||e)); }
+  inp.placeholder=oldPh;
+}
+document.getElementById('micBtn').onclick=voiceSearchToggle;
+
+// ---------- 📷 RASM ORQALI QIDIRUV (Gemini vision) ----------
+// Kamera tugmasi — rasm tanlanadi (galereya/kamera), AI mahsulotni aniqlab katalogdan qidiradi.
+const _imgSearchFile=document.getElementById('imgSearchFile');
+document.getElementById('camBtn').onclick=()=>{ _imgSearchFile.click(); };
+_imgSearchFile.onchange=()=>{
+  const f=_imgSearchFile.files && _imgSearchFile.files[0];
+  _imgSearchFile.value='';
+  if(f) imageSearchSend(f);
+};
+async function imageSearchSend(f){
+  const content=document.getElementById('content');
+  const inp=document.getElementById('search');
+  switchTab('catalog');
+  content.innerHTML=`<div class="empty"><span class="big">📷</span>${L('imgs_thinking')}</div>`;
+  try{ tg.HapticFeedback.impactOccurred('light'); }catch(e){}
+  try{
+    const fd=new FormData();
+    fd.append('file', f, f.name||'photo.jpg');
+    let url='/api/ai/image-search'; const qs=[];
+    if(activeCat) qs.push('category_id='+activeCat);
+    if(REGION_ID) qs.push('region_id='+REGION_ID);
+    if(qs.length) url+='?'+qs.join('&');
+    const r=await fetch(url,{method:'POST',headers:{Authorization:AUTH},body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ const det=d.detail||{}; throw new Error((det&&det.message)||det||('HTTP '+r.status)); }
+    if(d.label) inp.value=d.label;               // aniqlangan nom qidiruv qatoriga tushadi
+    const items=byDistance(d.items||[]);
+    if(!items.length){
+      // Server topmadi — matnli qidiruv oqimiga o'tamiz (u AI sheva-fallback bilan)
+      if(d.label){ catMode==='shops'?loadShops():loadProducts(); saveUiState(); return; }
+      content.innerHTML=`<div class="empty"><span class="big">🔍</span>${L('nothing_found')}<br><small>${L('try_other')}</small></div>`;
+      return;
+    }
+    CATALOG_ITEMS=items;
+    const note=`<div style="background:var(--accent-soft);border-radius:11px;padding:9px 12px;margin:2px 12px 8px;font-size:12.5px;color:var(--accent);font-weight:600">${L('imgs_found').replace('{q}', esc(d.label||d.interpreted||''))}</div>`;
+    content.innerHTML=note+`<div class="grid">${items.map(cardHtml).join('')}</div>`;
+    content.querySelectorAll('.card').forEach(c=>c.onclick=()=>openDetail(c.dataset.id));
+    content.querySelectorAll('[data-cart]').forEach(b=>b.onclick=(e)=>{
+      e.stopPropagation();
+      const p=CATALOG_ITEMS.find(x=>String(x.id)===b.dataset.cart);
+      if(p) cartAdd(p);
+    });
+    try{ tg.HapticFeedback.notificationOccurred('success'); }catch(e){}
+    saveUiState();
+  }catch(e){
+    tg.showAlert(L('imgs_failed')+(e.message||e));
+    catMode==='shops'?loadShops():loadProducts();
+  }
+}
 
 // ---------- TAB NAVIGATSIYA ----------
 function switchTab(tab){

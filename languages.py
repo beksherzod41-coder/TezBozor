@@ -3692,6 +3692,24 @@ _TEXTS = {
         'uz': "❌ Bekor qilish",
         'ru': "❌ Отменить",
     },
+    'voice_too_long': {
+        'uz': "🎤 Ovozli xabar juda uzun (90 soniyagacha yuboring).",
+        'ru': "🎤 Голосовое сообщение слишком длинное (до 90 секунд).",
+    },
+    'voice_no_results': {
+        'uz': ("🎤 Eshitdim: «<i>{text}</i>»\n\n"
+               "Afsuski, mos mahsulot topilmadi. Ilovada barcha mahsulotlarni ko'ring:"),
+        'ru': ("🎤 Услышал: «<i>{text}</i>»\n\n"
+               "К сожалению, подходящих товаров не нашлось. Смотрите все товары в приложении:"),
+    },
+    'voice_results': {
+        'uz': ("🎤 Eshitdim: «<i>{text}</i>»\n\n"
+               "Mana topilganlar:\n{list}\n\n"
+               "Buyurtma berish uchun mahsulot tugmasini bosing 👇"),
+        'ru': ("🎤 Услышал: «<i>{text}</i>»\n\n"
+               "Вот что нашлось:\n{list}\n\n"
+               "Нажмите на товар, чтобы заказать 👇"),
+    },
     'ai_draft_expired': {
         'uz': "⚠️ E'lon qoralamasi topilmadi yoki narx yo'q. Qaytadan urinib ko'ring.",
         'ru': "⚠️ Черновик не найден или нет цены. Попробуйте снова.",

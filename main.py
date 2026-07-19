@@ -94,6 +94,7 @@ from tezbozor_design import (fmt_price, fmt_phone, fmt_order_id, fmt_status, fmt
                              human_address, best_location_text, maps_link, looks_like_coords,
                              effective_unit_price, wholesale_info)
 import ai_assistant
+import ai_vision
 import ad_design
 from telegram.constants import ChatAction
 
@@ -14235,6 +14236,81 @@ async def ai_photos_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_ad_preview(update, context, product_id)
 
 
+async def voice_search_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """🎤 OVOZLI QIDIRUV (Gemini audio): foydalanuvchi ovozli xabar yuboradi —
+    AI transkripsiya qiladi, kalit so'zlar chiqarib REAL mahsulotlarni topadi va
+    har biriga Mini App'ni ochuvchi tugma qo'yadi. AI o'chiq bo'lsa — launcher."""
+    msg = update.message
+    if not msg:
+        return
+    v = msg.voice or msg.audio
+    if not v:
+        return
+    lang = get_lang(update, context)
+    user = db.get_user_by_telegram_id(update.effective_user.id)
+    if not user or not ai_vision.is_enabled():
+        await _go_to_app(update, context)
+        return
+    if (getattr(v, 'duration', 0) or 0) > 90 or (getattr(v, 'file_size', 0) or 0) > 4 * 1024 * 1024:
+        await msg.reply_text(t(lang, 'voice_too_long'))
+        return
+    try:
+        await msg.chat.send_action(ChatAction.TYPING)
+    except Exception:
+        pass
+    try:
+        f = await v.get_file()
+        data = bytes(await f.download_as_bytearray())
+    except Exception as e:
+        logging.warning(f"Ovozli xabarni yuklab olishda xato: {e}")
+        await msg.reply_text(ai_vision.error_message("http", lang))
+        return
+
+    tr = await ai_vision.transcribe_voice(
+        data, mime=(getattr(v, 'mime_type', None) or "audio/ogg"), lang=lang)
+    if tr.get("error"):
+        await msg.reply_text(ai_vision.error_message(tr["error"], lang))
+        return
+    text = tr["text"][:300]
+
+    # AI kalit so'zlari bilan qidiruv — Mini App ai-search bilan BIR mantiq
+    try:
+        cat_names = [c['name'] for c in (db.get_categories() or [])]
+    except Exception:
+        cat_names = []
+    interp = await ai_assistant.interpret_search_query(text, categories=cat_names, lang=lang)
+    keywords = (interp or {}).get("keywords") or [text]
+    seen, items = set(), []
+    for kw in keywords:
+        try:
+            rows = db.search_products(query=kw, sort_by="rating") or []
+        except Exception:
+            rows = []
+        for r in rows:
+            d = dict(r)
+            if d.get('id') not in seen:
+                seen.add(d['id'])
+                items.append(d)
+        if len(items) >= 6:
+            break
+
+    heard = html.escape(text)
+    if not items:
+        await msg.reply_text(t(lang, 'voice_no_results', text=heard),
+                             parse_mode='HTML', reply_markup=app_inline_kb(lang))
+        return
+    username = BOT_USERNAME or context.bot.username
+    lines, buttons = [], []
+    for i, p in enumerate(items[:6], 1):
+        lines.append(f"{i}. <b>{html.escape(p.get('name') or '')}</b> — {price_with_unit(p)}")
+        label = (p.get('name') or '')[:28]
+        buttons.append([InlineKeyboardButton(
+            f"🛒 {i}. {label}", url=_product_buy_link(username, p['id']))])
+    await msg.reply_text(
+        t(lang, 'voice_results', text=heard, list="\n".join(lines)),
+        parse_mode='HTML', reply_markup=InlineKeyboardMarkup(buttons))
+
+
 async def ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ai_assistant_start(update, context)
 
@@ -16043,6 +16119,8 @@ def main():
     app.add_handler(MessageHandler(filters.LOCATION, location_handler))
     # AI rejimida mahsulot rasmlarini yig'ish (faqat 'ai_awaiting_photos' yoqilganda ishlaydi)
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, ai_photo_collect))
+    # 🎤 Ovozli qidiruv (Gemini audio) — ovozli xabar mahsulot qidiruviga aylanadi
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, voice_search_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
     # Global xato ushlovchi — kutilmagan exception bo'lsa, foydalanuvchini xabardor qiladi

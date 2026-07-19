@@ -42,6 +42,7 @@ from webapp_auth import validate_init_data
 from languages import t, get_user_lang, DEFAULT_LANG
 from tezbozor_design import fmt_order_id, fmt_price, best_location_text, effective_unit_price, wholesale_info
 import ai_assistant
+import ai_vision
 import ad_design
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -7082,6 +7083,261 @@ async def api_admin_backup(authorization: str = Header(None)):
     if not (res and res.get("ok")):
         raise HTTPException(status_code=502, detail="send_failed")
     return {"ok": True}
+
+
+# ============================================================
+# AI VISION (Gemini multimodal) — rasm/ovoz qidiruv, rasmdan mahsulot, banner
+# ============================================================
+MAX_VOICE_BYTES = 4 * 1024 * 1024   # ovozli xabar (30-60s opus ~ 100-500KB)
+BRAND_NAME = (os.getenv("BRAND_NAME", "").strip() or "TezBozor")
+
+
+async def _tg_file_bytes(file_id):
+    """Telegram file_id → bytes (rasm disk-keshidan bo'lsa o'shandan). Xatoda None."""
+    safe = hashlib.sha256(file_id.encode()).hexdigest()
+    cache_path = os.path.join(IMG_CACHE_DIR, safe + ".jpg")
+    if os.path.exists(cache_path):
+        try:
+            with open(cache_path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+    if not BOT_TOKEN:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            meta = await client.get(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/getFile",
+                params={"file_id": file_id})
+            data = meta.json()
+            if not data.get("ok"):
+                return None
+            path = data["result"]["file_path"]
+            r = await client.get(f"https://api.telegram.org/file/bot{BOT_TOKEN}/{path}")
+            r.raise_for_status()
+            return r.content
+    except Exception as e:
+        logging.warning(f"tg fayl yuklab olish xato ({file_id[:12]}...): {e}")
+        return None
+
+
+async def _tg_upload_photo(chat_id, data, filename="photo.jpg",
+                           content_type="image/jpeg"):
+    """Baytlarni Telegram'ga yuborib file_id oladi (xabar darhol o'chiriladi).
+    Xatoda None."""
+    if not BOT_TOKEN or not chat_id:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            r = await client.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+                data={"chat_id": str(chat_id)},
+                files={"photo": (filename, data, content_type)})
+            res = r.json()
+    except Exception as e:
+        logging.warning(f"AI photo upload xato: {e}")
+        return None
+    if not res.get("ok") or not (res.get("result") or {}).get("photo"):
+        return None
+    msg = res["result"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(f"https://api.telegram.org/bot{BOT_TOKEN}/deleteMessage",
+                              json={"chat_id": chat_id, "message_id": msg["message_id"]})
+    except Exception:
+        pass
+    return msg["photo"][-1]["file_id"]
+
+
+def _ai_http_error(code, lang):
+    """ai_vision xato kodini HTTPException'ga aylantiradi (401 emas — AI xatosi
+    klientni logoutga olib bormasin: hammasi 503, faqat parse 422)."""
+    status = 422 if code == "parse" else 503
+    return HTTPException(status_code=status, detail={
+        "code": f"ai_{code}", "message": ai_vision.error_message(code, lang)})
+
+
+def _seller_or_403(user):
+    if user.get("role") not in ("seller", "admin") and not user.get("is_approved"):
+        raise HTTPException(status_code=403, detail="not_seller")
+
+
+@app.post("/api/seller/product/photo-analyze")
+async def api_product_photo_analyze(file: UploadFile = File(...),
+                                    authorization: str = Header(None)):
+    """✨ Rasmdan mahsulot: sotuvchi rasm yuklaydi — AI nom, tavsif, kategoriya va
+    narx taklifini qaytaradi (forma avto-to'ldiriladi)."""
+    user = dict(_buyer_from_auth(authorization))
+    _seller_or_403(user)
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ai_vision.is_enabled():
+        raise _ai_http_error("disabled", lang)
+    _rate_limit("ai_photo_analyze", user["id"], 20, 3600)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    mime = (file.content_type or "").strip()
+    if not mime.startswith("image/"):
+        mime = "image/jpeg"
+    cats = [dict(c) for c in (db.get_categories() or [])]
+    res = await ai_vision.analyze_product_photo(
+        data, mime=mime, categories=[c.get("name") for c in cats], lang=lang)
+    if res.get("error"):
+        raise _ai_http_error(res["error"], lang)
+    # AI tanlagan kategoriya nomini id'ga bog'laymiz (aniq mos kelsagina)
+    cat_id = None
+    if res.get("category"):
+        want = res["category"].strip().lower()
+        for c in cats:
+            if (c.get("name") or "").strip().lower() == want:
+                cat_id = c.get("id")
+                break
+    res["category_id"] = cat_id
+    return {"ok": True, "suggestion": res}
+
+
+class AiBannerIn(BaseModel):
+    style: Optional[str] = None   # ixtiyoriy uslub tilagi ("bayramona", "minimal"...)
+
+
+@app.post("/api/seller/product/{product_id}/ai-banner")
+async def api_ai_banner(product_id: int, body: AiBannerIn = None,
+                        authorization: str = Header(None)):
+    """🎨 Gemini reklama banneri: mahsulot rasmi + narx/nomdan tayyor dizayn rasm.
+    Model ishlamasa (billing/kvota) — ok=False, frontend PIL ad-preview'ga qaytadi."""
+    user = dict(_buyer_from_auth(authorization))
+    prod = dict(_own_product_or_403(user, product_id))
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ai_vision.is_enabled():
+        raise _ai_http_error("disabled", lang)
+    _rate_limit("ai_banner", user["id"], 6, 3600)
+    img_fid = prod.get("image_url")
+    if not img_fid:
+        raise HTTPException(status_code=400, detail="no_photo")
+    img = await _tg_file_bytes(img_fid)
+    if not img:
+        raise HTTPException(status_code=502, detail="image_fetch_failed")
+    shop = db.get_shop_by_owner(_owner_id(user))
+    shop_name = (dict(shop).get("name") if shop else None) or user.get("shop_name") or BRAND_NAME
+    res = await ai_vision.generate_banner_image(
+        img, product_name=prod.get("name") or "",
+        price_text=fmt_price(prod.get("price")).replace(" ", " "),
+        shop_name=shop_name, style_hint=(body.style if body else "") or "", lang=lang)
+    if res.get("error"):
+        # Fallback signali — frontend mavjud PIL reklama dizaynini ishlatadi
+        return {"ok": False, "fallback": True, "code": res["error"],
+                "message": ai_vision.error_message(res["error"], lang)}
+    ext = "png" if "png" in (res.get("image_mime") or "") else "jpg"
+    file_id = await _tg_upload_photo(user.get("telegram_id"), res["image"],
+                                     filename=f"banner.{ext}",
+                                     content_type=res.get("image_mime") or "image/png")
+    if not file_id:
+        raise HTTPException(status_code=502, detail="upload_failed")
+    return {"ok": True, "file_id": file_id}
+
+
+@app.post("/api/ai/voice-search")
+async def api_voice_search(file: UploadFile = File(...),
+                           authorization: str = Header(None),
+                           category_id: int = Query(None),
+                           region_id: int = Query(None)):
+    """🎤 Ovozli qidiruv: audio → Gemini transkripsiya → AI kalit so'zlar → mahsulotlar."""
+    user = dict(_buyer_from_auth(authorization))
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ai_vision.is_enabled():
+        raise _ai_http_error("disabled", lang)
+    _rate_limit("ai_voice", user["id"], 15, 3600)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_VOICE_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    mime = (file.content_type or "audio/ogg").split(";")[0].strip().lower()
+    if not mime.startswith("audio/"):
+        mime = "audio/ogg"
+    tr = await ai_vision.transcribe_voice(data, mime=mime, lang=lang)
+    if tr.get("error") and mime not in ("audio/ogg", "audio/mp3", "audio/wav"):
+        # MediaRecorder webm/mp4 bersa va model qabul qilmasa — ogg deb qayta uramiz
+        tr = await ai_vision.transcribe_voice(data, mime="audio/ogg", lang=lang)
+    if tr.get("error"):
+        raise _ai_http_error(tr["error"], lang)
+    text = tr["text"][:300]
+
+    cat_names = []
+    try:
+        cat_names = [dict(c).get("name") for c in (db.get_categories() or [])]
+    except Exception:
+        pass
+    interp = await ai_assistant.interpret_search_query(text, categories=cat_names, lang=lang)
+    keywords = (interp or {}).get("keywords") or [text]
+    seen, items = set(), []
+    for kw in keywords:
+        try:
+            rows = db.search_products(query=kw, category_id=category_id,
+                                      sort_by="rating", region_id=region_id)
+        except Exception:
+            rows = []
+        for r in rows:
+            rid = dict(r).get("id")
+            if rid not in seen:
+                seen.add(rid)
+                items.append(r)
+        if len(items) >= 30:
+            break
+    return {"transcript": text, "interpreted": ", ".join(keywords),
+            "items": _hide_own(_rows(items[:30]), _own_shop_seller_id(authorization))}
+
+
+@app.post("/api/ai/image-search")
+async def api_image_search(file: UploadFile = File(...),
+                           authorization: str = Header(None),
+                           category_id: int = Query(None),
+                           region_id: int = Query(None)):
+    """📷 Rasm orqali qidiruv: xaridor rasm yuklaydi → Gemini mahsulotni aniqlaydi →
+    kalit so'zlar bilan katalogdan qidiriladi (ovozli qidiruv bilan bir oqim)."""
+    user = dict(_buyer_from_auth(authorization))
+    lang = get_user_lang(user) or DEFAULT_LANG
+    if not ai_vision.is_enabled():
+        raise _ai_http_error("disabled", lang)
+    _rate_limit("ai_imgsearch", user["id"], 15, 3600)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    mime = (file.content_type or "").split(";")[0].strip().lower()
+    if not mime.startswith("image/"):
+        mime = "image/jpeg"
+
+    cat_names = []
+    try:
+        cat_names = [dict(c).get("name") for c in (db.get_categories() or [])]
+    except Exception:
+        pass
+    res = await ai_vision.identify_image_for_search(
+        data, mime=mime, categories=cat_names, lang=lang)
+    if res.get("error"):
+        raise _ai_http_error(res["error"], lang)
+
+    seen, items = set(), []
+    for kw in (res.get("keywords") or []):
+        try:
+            rows = db.search_products(query=kw, category_id=category_id,
+                                      sort_by="rating", region_id=region_id)
+        except Exception:
+            rows = []
+        for r in rows:
+            rid = dict(r).get("id")
+            if rid not in seen:
+                seen.add(rid)
+                items.append(r)
+        if len(items) >= 30:
+            break
+    return {"label": res.get("label") or "",
+            "interpreted": ", ".join(res.get("keywords") or []),
+            "items": _hide_own(_rows(items[:30]), _own_shop_seller_id(authorization))}
 
 
 # ============================================================
