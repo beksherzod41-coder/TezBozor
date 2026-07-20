@@ -164,10 +164,7 @@ def test_adclip_happy_path(client, monkeypatch):
     os.remove(cache)
 
 
-def test_adclip_music_flag_plumbing(client, monkeypatch):
-    """🎵 sotuvchi tanlovi: music=False -> music_path="" (o'chiq),
-    standart/True -> music_path=None (avto assets/ad_music.mp3)."""
-    _fake_clip_env(monkeypatch)
+def _capture_build(monkeypatch):
     captured = {}
 
     def fake_build(images, **kw):
@@ -176,16 +173,96 @@ def test_adclip_music_flag_plumbing(client, monkeypatch):
         return b"x" * 2000
 
     monkeypatch.setattr(webapp_server.ad_video, "build_ad_clip", fake_build)
+    return captured
+
+
+def test_adclip_music_track_plumbing(client, monkeypatch):
+    """🎵 trek tanlovi: off -> "", auto -> kutubxonadan deterministik trek
+    (yoki kutubxona bo'sh bo'lsa None), aniq fayl -> o'sha yo'l, eski
+    music=False bayrog'i -> "" (moslik)."""
+    _fake_clip_env(monkeypatch)
+    captured = _capture_build(monkeypatch)
+    client.db.add_product_image(client.pid, "IMG_FID_1")
+    url = f"/api/seller/product/{client.pid}/adclip"
+
+    r = client.post(url, headers=hdr(5002), json={"music_track": "off"})
+    assert r.status_code == 200 and captured["music_path"] == ""
+    r = client.post(url, headers=hdr(5002), json={"music": False})
+    assert r.status_code == 200 and captured["music_path"] == ""
+
+    files = webapp_server._music_tracks()
+    r = client.post(url, headers=hdr(5002), json={})   # standart = auto
+    assert r.status_code == 200
+    if files:
+        expect = os.path.join(webapp_server._MUSIC_DIR,
+                              files[client.pid % len(files)])
+        assert captured["music_path"] == expect
+        # aniq trek tanlovi
+        r = client.post(url, headers=hdr(5002), json={"music_track": files[0]})
+        assert r.status_code == 200
+        assert captured["music_path"] == os.path.join(webapp_server._MUSIC_DIR, files[0])
+    else:
+        assert captured["music_path"] is None
+
+
+def test_adclip_bad_track_400(client, monkeypatch):
+    _fake_clip_env(monkeypatch)
     client.db.add_product_image(client.pid, "IMG_FID_1")
     r = client.post(f"/api/seller/product/{client.pid}/adclip",
-                    headers=hdr(5002), json={"music": False})
-    assert r.status_code == 200 and captured["music_path"] == ""
+                    headers=hdr(5002), json={"music_track": "yoq-fayl.mp3"})
+    assert r.status_code == 400 and r.json()["detail"] == "bad_track"
     r = client.post(f"/api/seller/product/{client.pid}/adclip",
-                    headers=hdr(5002), json={})
-    assert r.status_code == 200 and captured["music_path"] is None
-    r = client.post(f"/api/seller/product/{client.pid}/adclip",
-                    headers=hdr(5002), json={"music": True})
-    assert r.status_code == 200 and captured["music_path"] is None
+                    headers=hdr(5002), json={"music_track": "own"})
+    assert r.status_code == 400 and r.json()["detail"] == "no_own_music"
+
+
+def test_adclip_music_list(client):
+    r = client.get("/api/adclip/music", headers=hdr(5002))
+    assert r.status_code == 200
+    d = r.json()
+    assert isinstance(d["tracks"], list) and isinstance(d["own"], bool)
+    for tr in d["tracks"]:
+        assert tr["id"] and tr["name"]
+
+
+def _tiny_wav_bytes():
+    import struct, wave as wv
+    b = io.BytesIO()
+    with wv.open(b, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(struct.pack("<" + "h" * 800, *([0] * 800)))
+    return b.getvalue()
+
+
+@pytest.mark.skipif(not ad_video.is_enabled(), reason="ffprobe yo'q")
+def test_adclip_own_music_upload_and_use(client, monkeypatch):
+    """📁 o'z musiqa: yuklash (haqiqiy audio tekshiruvi) -> own tanlovi ishlaydi."""
+    _fake_clip_env(monkeypatch)
+    captured = _capture_build(monkeypatch)
+    # yaroqsiz fayl -> 400 bad_audio
+    r = client.post("/api/seller/adclip-music", headers=hdr(5002),
+                    files={"file": ("m.mp3", b"bu audio emas", "audio/mpeg")})
+    assert r.status_code == 400 and r.json()["detail"] == "bad_audio"
+    # haqiqiy (bo'sh bo'lsa ham) wav -> ok
+    r = client.post("/api/seller/adclip-music", headers=hdr(5002),
+                    files={"file": ("m.wav", _tiny_wav_bytes(), "audio/wav")})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    own_path = webapp_server._own_music_path(2)   # seller fixture user id = 2
+    try:
+        assert os.path.exists(own_path)
+        r = client.get("/api/adclip/music", headers=hdr(5002))
+        assert r.json()["own"] is True
+        client.db.add_product_image(client.pid, "IMG_FID_1")
+        r = client.post(f"/api/seller/product/{client.pid}/adclip",
+                        headers=hdr(5002), json={"music_track": "own"})
+        assert r.status_code == 200 and captured["music_path"] == own_path
+    finally:
+        try:
+            os.remove(own_path)
+        except OSError:
+            pass
 
 
 def test_adclip_render_failure_502(client, monkeypatch):

@@ -62,6 +62,19 @@ def is_enabled() -> bool:
     return _PIL_OK and _DESIGN_OK and shutil.which("ffmpeg") is not None
 
 
+def probe_has_audio(path) -> bool:
+    """Faylda haqiqiy audio oqim bormi (ffprobe). Sotuvchi yuklagan musiqani
+    tekshirish uchun — buzuq/yolg'on fayl klip renderini yiqitmasin."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", path],
+            capture_output=True, timeout=20)
+        return r.returncode == 0 and bool(r.stdout.strip())
+    except Exception:
+        return False
+
+
 def strip_emoji(s: str) -> str:
     """Rasm ustiga chiqadigan matndan emoji/symbol belgilarini olib tashlaydi
     (PIL ularni chiza olmaydi — □ bo'lib qolardi)."""

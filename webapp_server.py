@@ -7580,10 +7580,102 @@ async def api_ai_banner(product_id: int, body: AiBannerIn = None,
 # 🎬 AI VIDEO-REKLAMA — ffmpeg render CPU-og'ir, bir vaqtda BITTAdan (navbat)
 _ADCLIP_LOCK = asyncio.Lock()
 
+# 🎵 Musiqa kutubxonasi: assets/music/*.mp3 — papkaga tashlangan HAR QANDAY trek
+# avtomatik ro'yxatga tushadi (kod o'zgarmaydi). music_own/ — sotuvchilarning
+# o'zi yuklagan treklari (owner_id bo'yicha; trend musiqa tanlovi o'zida).
+_MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")
+_MUSIC_OWN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music_own")
+os.makedirs(_MUSIC_OWN_DIR, exist_ok=True)
+MAX_MUSIC_BYTES = 8 * 1024 * 1024
+
+
+def _music_tracks():
+    """Kutubxonadagi trek fayllari (saralangan). Papka yo'q bo'lsa — bo'sh."""
+    try:
+        return sorted(f for f in os.listdir(_MUSIC_DIR)
+                      if f.lower().endswith((".mp3", ".m4a", ".ogg", ".wav")))
+    except Exception:
+        return []
+
+
+def _music_track_name(fname):
+    """Fayl nomidan chiroyli yorliq: '02-chill.mp3' -> 'Chill'."""
+    stem = os.path.splitext(fname)[0]
+    if "-" in stem:
+        stem = stem.split("-", 1)[1]
+    return stem.replace("_", " ").strip().capitalize() or fname
+
+
+def _own_music_path(owner_id):
+    return os.path.join(_MUSIC_OWN_DIR, f"{int(owner_id)}.mp3")
+
 
 class AdClipIn(BaseModel):
     hook: Optional[str] = None   # sotuvchi o'z hook matnini bersa (bo'sh = AI yozadi)
-    music: Optional[bool] = True  # 🎵 fon musiqa (sotuvchi tanlovi; standart — yoqilgan)
+    music: Optional[bool] = True  # eski bayroq: False = musiqasiz (moslik uchun)
+    # 🎵 trek tanlovi: "auto" (har mahsulotga rotatsiya) | "off" | "own" |
+    # kutubxona fayl nomi (masalan "02-chill.mp3")
+    music_track: Optional[str] = None
+
+
+@app.get("/api/adclip/music")
+def api_adclip_music_list(authorization: str = Header(None)):
+    """🎵 Klip uchun mavjud musiqa ro'yxati + sotuvchining o'z treki bor-yo'qligi."""
+    user = dict(_buyer_from_auth(authorization))
+    tracks = [{"id": f, "name": _music_track_name(f)} for f in _music_tracks()]
+    return {"tracks": tracks,
+            "own": os.path.exists(_own_music_path(_owner_id(user)))}
+
+
+@app.post("/api/seller/adclip-music")
+async def api_adclip_music_upload(file: UploadFile = File(...),
+                                  authorization: str = Header(None)):
+    """📁 Sotuvchi o'z musiqasini yuklaydi (trend trek tanlovi — o'zida).
+    ffprobe bilan haqiqiy audio ekani tekshiriladi; eski trek ustidan yoziladi."""
+    user = dict(_buyer_from_auth(authorization))
+    _rate_limit("adclip_music", user["id"], 10, 3600)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty")
+    if len(data) > MAX_MUSIC_BYTES:
+        raise HTTPException(status_code=413, detail="too_large")
+    path = _own_music_path(_owner_id(user))
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    ok = await asyncio.to_thread(ad_video.probe_has_audio, tmp)
+    if not ok:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="bad_audio")
+    os.replace(tmp, path)
+    return {"ok": True}
+
+
+def _pick_music_path(track, *, product_id, owner_id):
+    """Trek tanlovini faktik faylga aylantiradi.
+    Qaytadi: None (avto — ad_video eski standarti), "" (o'chiq) yoki yo'l.
+    Xato tanlov -> HTTPException 400."""
+    track = (track or "auto").strip()
+    if track == "off":
+        return ""
+    if track == "own":
+        p = _own_music_path(owner_id)
+        if not os.path.exists(p):
+            raise HTTPException(status_code=400, detail="no_own_music")
+        return p
+    files = _music_tracks()
+    if track != "auto":
+        if track not in files:
+            raise HTTPException(status_code=400, detail="bad_track")
+        return os.path.join(_MUSIC_DIR, track)
+    # auto: kutubxona bo'ylab DETERMINISTIK rotatsiya — har mahsulotga har xil
+    # trek (11 sotuvchining klipi bir xil bo'lib qolmasin)
+    if files:
+        return os.path.join(_MUSIC_DIR, files[int(product_id) % len(files)])
+    return None
 
 
 @app.post("/api/seller/product/{product_id}/adclip")
@@ -7623,8 +7715,12 @@ async def api_ad_clip(product_id: int, body: AdClipIn = None,
         optom_txt = f"OPTOM · 1 PACHKA = {int(_ps)} DONA" if _ps else "OPTOM"
     cta = "SOTIB OLISH" if lang != "ru" else "КУПИТЬ"
 
-    # 🎵 musiqa: None = avto (assets/ad_music.mp3), "" = sotuvchi o'chirgan
-    music_path = None if (body is None or body.music is not False) else ""
+    # 🎵 trek tanlovi: music_track ustun; eski music=False bayrog'i = "off" (moslik)
+    track = (body.music_track if body else None) or None
+    if track is None and body is not None and body.music is False:
+        track = "off"
+    music_path = _pick_music_path(track, product_id=product_id,
+                                  owner_id=_owner_id(user))
     async with _ADCLIP_LOCK:
         clip = await asyncio.to_thread(
             ad_video.build_ad_clip, images,
